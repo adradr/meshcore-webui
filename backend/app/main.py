@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.push import router as push_router
+from app.api.ws import router as ws_router
 from app.db.session import engine
 
 
@@ -21,6 +22,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(push_router)
+    app.include_router(ws_router)
 
     return app
 

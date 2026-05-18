@@ -1,6 +1,7 @@
 from __future__ import annotations
 from collections.abc import AsyncIterator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
@@ -11,6 +12,18 @@ from sqlalchemy.pool import StaticPool
 from app.db.models import Base
 from app.db.session import get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def _disable_meshcore_for_tests(monkeypatch):
+    """Don't actually connect to a real device during tests."""
+    async def _fake_create_tcp(*a, **kw):
+        raise ConnectionError("disabled in tests")
+    monkeypatch.setattr(
+        "meshcore.MeshCore.create_tcp",
+        _fake_create_tcp,
+        raising=False,
+    )
 
 
 @pytest_asyncio.fixture
