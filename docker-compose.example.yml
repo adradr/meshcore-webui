@@ -1,0 +1,14 @@
+services:
+  meshcore-webui:
+    image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MESHCORE_HOST: 192.168.88.223
+      MESHCORE_PORT: "5000"
+      VAPID_SUBJECT: mailto:you@example.com
+      # MESHCORE_WEBUI_API_KEY: "your-long-random-string"
+    volumes:
+      - ./data:/data
+      - ./secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
