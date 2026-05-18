@@ -37,3 +37,33 @@ async def test_incoming_dm_triggers_push(db, engine, monkeypatch):
     await asyncio.gather(*pool._tasks)
     assert sent.await_count == 1
     assert "hello" in sent.await_args.kwargs["data"]
+
+
+@pytest.mark.asyncio
+async def test_incoming_dm_persisted_to_messages_table(db, engine, monkeypatch):
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "hi mom", "pubkey_prefix": "deadbeef"},
+        attributes={"pubkey_prefix": "deadbeef"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1
+    assert msgs[0].text == "hi mom"
+    assert msgs[0].contact_pub_key == "deadbeef"
+    assert msgs[0].direction == "in"
