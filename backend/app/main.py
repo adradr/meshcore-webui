@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.push import router as push_router
 from app.db.session import engine
 
 
@@ -18,6 +19,8 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    app.include_router(push_router)
 
     return app
 
