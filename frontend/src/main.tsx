@@ -6,6 +6,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AppRouter } from "@/router"
+import {
+  WebSocketProvider,
+  resolveWsUrl,
+} from "@/realtime/WebSocketProvider"
 import { ReloadPrompt } from "@/pwa/ReloadPrompt"
 import './index.css'
 
@@ -30,10 +34,12 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
-        <AppRouter />
-        <ReloadPrompt />
-      </ThemeProvider>
+      <WebSocketProvider url={resolveWsUrl()}>
+        <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
+          <AppRouter />
+          <ReloadPrompt />
+        </ThemeProvider>
+      </WebSocketProvider>
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   </StrictMode>,
