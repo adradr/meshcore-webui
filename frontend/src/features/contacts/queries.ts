@@ -2,17 +2,15 @@ import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { z } from "zod"
 
-const ContactSchema = z
-  .object({
-    public_key: z.string().optional(),
-    adv_name: z.string().optional(),
-    type: z.number().optional(),
-    adv_lat: z.number().nullable().optional(),
-    adv_lon: z.number().nullable().optional(),
-    out_path_len: z.number().nullable().optional(),
-    last_advert: z.number().nullable().optional(),
-  })
-  .passthrough()
+const ContactSchema = z.looseObject({
+  public_key: z.string().optional(),
+  adv_name: z.string().optional(),
+  type: z.number().optional(),
+  adv_lat: z.number().nullable().optional(),
+  adv_lon: z.number().nullable().optional(),
+  out_path_len: z.number().nullable().optional(),
+  last_advert: z.number().nullable().optional(),
+})
 
 const ContactsMap = z.record(z.string(), ContactSchema)
 

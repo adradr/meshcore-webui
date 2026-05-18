@@ -96,7 +96,7 @@ function AddChannelDialog() {
   const [psk, setPsk] = useState("")
   const add = useAddChannel()
 
-  const submit = (e: React.FormEvent) => {
+  const submit = (e: React.SyntheticEvent) => {
     e.preventDefault()
     const idxNum = parseInt(idx, 10)
     if (Number.isNaN(idxNum) || idxNum < 0) {
