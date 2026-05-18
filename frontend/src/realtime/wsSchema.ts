@@ -55,7 +55,7 @@ export type WSMessage = z.infer<typeof WSMessageSchema>
 export function parseWSMessage(raw: unknown): WSMessage | null {
   const r = WSMessageSchema.safeParse(raw)
   if (!r.success) {
-    console.warn("[ws] invalid", r.error.flatten())
+    console.warn("[ws] invalid", r.error.issues)
     return null
   }
   return r.data
