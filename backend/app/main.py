@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
 from app.api.device import router as device_router
 from app.api.push import router as push_router
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
     app.include_router(device_router)
     app.include_router(contacts_router)
+    app.include_router(channels_router)
 
     return app
 
