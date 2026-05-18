@@ -130,3 +130,29 @@
     @apply font-sans;
     }
 }
+
+/* Leaflet divIcon wrapper for MeshCore node markers */
+.mc-marker-wrapper {
+    background: transparent !important;
+    border: none !important;
+}
+
+.mc-marker {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 32px;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35));
+}
+
+.mc-marker svg {
+    display: block;
+}
+
+/* Make Leaflet popups blend with the theme */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+    background: var(--popover);
+    color: var(--popover-foreground);
+}
