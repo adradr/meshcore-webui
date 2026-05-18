@@ -15,6 +15,7 @@ from app.api.push import router as push_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.vapid import load_vapid
+from app.db.models import Base
 from app.db.session import engine
 from app.middleware.api_key import APIKeyMiddleware
 from app.services.meshcore_bridge import MeshCoreBridge
@@ -25,8 +26,22 @@ from app.services.task_pool import TaskPool
 log = logging.getLogger(__name__)
 
 
+async def _ensure_schema() -> None:
+    """Create all tables if missing. Idempotent; safe to call on every startup.
+
+    For production, replace with `alembic upgrade head` via subprocess.
+    For the v1 single-container deployment this is sufficient and avoids
+    bundling the alembic CLI in the runtime image.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log.info("Ensuring database schema")
+    await _ensure_schema()
+
     log.info("Loading VAPID")
     vapid = load_vapid(settings.vapid_private_key_path)
     sender = PushSender(vapid=vapid, subject=settings.vapid_subject)
