@@ -3,9 +3,12 @@
 # ---------- Stage 1: build frontend ----------
 FROM node:22-alpine AS frontend-builder
 WORKDIR /app
+ENV CI=true
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+# --ignore-scripts: skips msw postinstall (dev-only) and avoids pnpm 10
+# strict-builds gate; we never run install-time scripts in production.
+RUN pnpm install --frozen-lockfile --ignore-scripts
 COPY frontend/ .
 ARG VITE_VAPID_PUBLIC_KEY=
 ENV VITE_VAPID_PUBLIC_KEY=$VITE_VAPID_PUBLIC_KEY

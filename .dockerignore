@@ -1,0 +1,45 @@
+# Build artifacts and caches
+**/node_modules
+**/dist
+**/.venv
+**/.uv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/*.egg-info
+
+# Local data and secrets — never bake into image
+data/
+backend/data/
+secrets/
+backend/secrets/
+*.db
+*.db-wal
+*.db-shm
+
+# Env files
+.env
+.env.*
+**/.env
+**/.env.*
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Git / CI / docs not needed in runtime image
+.git
+.gitignore
+.github
+docs/
+tasks/
+*.md
+!backend/README.md
+
+# Docker stuff
+Dockerfile
+docker-compose*.yml
+.dockerignore
+.docker-cache/
