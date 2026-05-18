@@ -1,8 +1,11 @@
 from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
@@ -74,6 +77,22 @@ def create_app() -> FastAPI:
     app.include_router(contacts_router)
     app.include_router(channels_router)
     app.include_router(messages_router)
+
+    static_dir = Path(settings.static_dir)
+    if static_dir.exists():
+        assets_dir = static_dir / "assets"
+        if assets_dir.exists():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            # Direct file in static dir (sw.js, manifest.webmanifest, icons/, favicon, etc.)
+            if full_path:
+                target = static_dir / full_path
+                if target.is_file():
+                    return FileResponse(target)
+            # All other GET → index.html (SPA route)
+            return FileResponse(static_dir / "index.html")
 
     return app
 
