@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.app.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "types": ["vite-plugin-pwa/client"],
+    "noEmit": true,
+    "tsBuildInfoFile": "../../node_modules/.tmp/tsconfig.sw.tsbuildinfo"
+  },
+  "include": ["./**/*.ts"]
+}
