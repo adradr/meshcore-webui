@@ -2,16 +2,40 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import "@fontsource-variable/geist"
 import "@fontsource-variable/geist-mono"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { ThemeProvider } from "@/components/theme-provider"
 import { ReloadPrompt } from "@/pwa/ReloadPrompt"
 import './index.css'
 import App from './App.tsx'
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 30_000,
+      gcTime: 5 * 60_000,
+      retry: (failureCount, error: unknown) => {
+        // Don't retry 4xx
+        const status =
+          typeof error === "object" && error && "status" in error
+            ? (error as { status?: number }).status
+            : undefined
+        if (status && status >= 400 && status < 500) return false
+        return failureCount < 3
+      },
+      refetchOnWindowFocus: false,
+    },
+  },
+})
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
-      <App />
-      <ReloadPrompt />
-    </ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
+        <App />
+        <ReloadPrompt />
+      </ThemeProvider>
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
   </StrictMode>,
 )
