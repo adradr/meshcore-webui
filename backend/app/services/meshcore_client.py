@@ -123,3 +123,59 @@ class MeshCoreClient:
 
     def unsubscribe(self, q: asyncio.Queue[WireEvent]) -> None:
         self._subscribers.discard(q)
+
+    async def _require_mc(self):
+        if self._mc is None or not self._mc.is_connected:
+            raise ConnectionError("MeshCore not connected")
+        return self._mc
+
+    async def send_dm(self, dst, text: str) -> dict:
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.send_msg(dst, text)
+            if res.is_error():
+                raise RuntimeError(res.payload)
+            return {
+                "expected_ack": res.payload["expected_ack"].hex(),
+                "suggested_timeout_ms": res.payload["suggested_timeout"],
+            }
+
+    async def send_chan_msg(self, idx: int, text: str) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.send_chan_msg(idx, text)
+            if res.is_error():
+                raise RuntimeError(res.payload)
+
+    async def get_contacts(self) -> dict:
+        mc = await self._require_mc()
+        await mc.ensure_contacts(follow=True)
+        return mc.contacts
+
+    async def get_channels(self) -> list[dict]:
+        mc = await self._require_mc()
+        max_ch = mc.self_info.get("max_channels", 0) if mc.self_info else 0
+        if not max_ch:
+            info = await mc.commands.send_device_query()
+            max_ch = info.payload.get("max_channels", 0)
+        out = []
+        for i in range(max_ch):
+            r = await mc.commands.get_channel(i)
+            if r.type == EventType.CHANNEL_INFO:
+                out.append({
+                    k: v.hex() if isinstance(v, bytes) else v
+                    for k, v in r.payload.items()
+                })
+        return out
+
+    async def get_device_info(self) -> dict:
+        mc = await self._require_mc()
+        r = await mc.commands.send_device_query()
+        if r.is_error():
+            raise RuntimeError(r.payload)
+        return r.payload
+
+    async def send_advert(self, flood: bool = False) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            await mc.commands.send_advert(flood=flood)
