@@ -33,3 +33,17 @@ async def test_unsubscribe_removes_row(client, db):
     assert r.status_code == 204
     rows = (await db.execute(select(PushSubscription))).scalars().all()
     assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_get_vapid_public_key_returns_base64url(client, tmp_path, monkeypatch):
+    # Generate a temp keypair for the test
+    import sys; sys.path.insert(0, "scripts")
+    from scripts.gen_vapid import generate
+    _, pub_b64 = generate(tmp_path)
+    monkeypatch.setattr("app.core.config.settings.vapid_private_key_path", str(tmp_path / "vapid_private.pem"))
+    from app.core.vapid import load_vapid
+    load_vapid.cache_clear()
+    r = await client.get("/api/push/vapid-public-key")
+    assert r.status_code == 200
+    assert r.json() == {"key": pub_b64}

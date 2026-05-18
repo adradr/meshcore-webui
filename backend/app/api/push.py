@@ -1,12 +1,16 @@
 from __future__ import annotations
+import base64
 from datetime import datetime, timezone
 from typing import Annotated
 
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, Depends, Header, Response, status
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
+from app.core.vapid import load_vapid
 from app.db.models import PushSubscription
 from app.db.session import get_db
 from app.schemas.push import (
@@ -64,3 +68,12 @@ async def unsubscribe(
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/vapid-public-key")
+async def get_vapid_public_key() -> dict[str, str]:
+    vapid = load_vapid(settings.vapid_private_key_path)
+    raw = vapid.public_key.public_bytes(
+        encoding=Encoding.X962, format=PublicFormat.UncompressedPoint,
+    )
+    return {"key": base64.urlsafe_b64encode(raw).rstrip(b"=").decode()}
