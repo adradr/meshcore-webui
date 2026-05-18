@@ -5,9 +5,9 @@ import "@fontsource-variable/geist-mono"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools"
 import { ThemeProvider } from "@/components/theme-provider"
+import { AppRouter } from "@/router"
 import { ReloadPrompt } from "@/pwa/ReloadPrompt"
 import './index.css'
-import App from './App.tsx'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,7 +15,6 @@ const queryClient = new QueryClient({
       staleTime: 30_000,
       gcTime: 5 * 60_000,
       retry: (failureCount, error: unknown) => {
-        // Don't retry 4xx
         const status =
           typeof error === "object" && error && "status" in error
             ? (error as { status?: number }).status
@@ -32,7 +31,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
-        <App />
+        <AppRouter />
         <ReloadPrompt />
       </ThemeProvider>
       <ReactQueryDevtools initialIsOpen={false} />
