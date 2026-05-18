@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Node / Vite
+node_modules/
+dist/
+.pnpm-store/
+*.log
+.eslintcache
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Local data
+data/
+secrets/
+*.db
+*.db-wal
+*.db-shm
+
+# Env
+.env
+.env.*.local
+
+# Docker
+.docker-cache/
