@@ -30,6 +30,9 @@ secrets/
 # Env
 .env
 .env.*.local
+.env.development
+.env.local
+.env.production.local
 
 # Docker
 .docker-cache/
