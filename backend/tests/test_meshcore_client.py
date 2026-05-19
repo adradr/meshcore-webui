@@ -121,6 +121,113 @@ class TestSendTrace:
             await client.send_trace()
 
 
+class TestRequestTimeouts:
+    """Confirm req_* methods use the new 15s default and produce actionable errors.
+
+    Bugfix 2: opaque "X failed or timed out" RuntimeErrors translated to 502
+    after 30s waits made every RF-unreachable contact look like a backend bug.
+    New defaults: 15s timeout, error messages include pubkey prefix + hint.
+    """
+
+    @pytest.mark.asyncio
+    async def test_req_telemetry_timeout_default_is_15s(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_telemetry_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 15s"):
+            await client.req_telemetry("ab" * 32)
+        fake_mc.commands.req_telemetry_sync.assert_called_once()
+        call = fake_mc.commands.req_telemetry_sync.call_args
+        # Accept either kwarg or positional timeout.
+        timeout = call.kwargs.get("timeout")
+        if timeout is None and call.args:
+            timeout = call.args[-1]
+        assert timeout == 15.0
+
+    @pytest.mark.asyncio
+    async def test_req_telemetry_error_mentions_pubkey_prefix(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_telemetry_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        pk = "deadbeef" + "0" * 56
+        with pytest.raises(RuntimeError, match="deadbeef"):
+            await client.req_telemetry(pk)
+
+    @pytest.mark.asyncio
+    async def test_req_status_timeout_default_is_15s(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_status_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 15s"):
+            await client.req_status("ab" * 32)
+        call = fake_mc.commands.req_status_sync.call_args
+        timeout = call.kwargs.get("timeout")
+        if timeout is None and call.args:
+            timeout = call.args[-1]
+        assert timeout == 15.0
+
+    @pytest.mark.asyncio
+    async def test_req_acl_timeout_default_is_15s(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_acl_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 15s"):
+            await client.req_acl("ab" * 32)
+        call = fake_mc.commands.req_acl_sync.call_args
+        timeout = call.kwargs.get("timeout")
+        if timeout is None and call.args:
+            timeout = call.args[-1]
+        assert timeout == 15.0
+
+    @pytest.mark.asyncio
+    async def test_disc_path_uses_15s_timeout(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 15s"):
+            await client.disc_path("aa" * 32)
+        call = fake_mc.commands.send_path_discovery_sync.call_args
+        timeout = call.kwargs.get("timeout")
+        if timeout is None and call.args:
+            # disc_path may pass timeout positionally.
+            for a in call.args[1:]:
+                if isinstance(a, float):
+                    timeout = a
+                    break
+        assert timeout == 15.0
+
+    @pytest.mark.asyncio
+    async def test_send_trace_default_is_15s(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(TimeoutError, match="within 15s"):
+            await client.send_trace()
+
+    @pytest.mark.asyncio
+    async def test_send_trace_error_mentions_unreachable_hint(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(TimeoutError, match="repeaters"):
+            await client.send_trace(timeout=0.1)
+
+
 class TestTraceDataForwarding:
     """TRACE_DATA must be forwarded to WS subscribers on topic='trace' so
     the live-trace UI can display path hops as they arrive."""

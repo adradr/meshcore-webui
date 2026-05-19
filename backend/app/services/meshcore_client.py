@@ -449,39 +449,61 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def req_telemetry(self, pubkey: str, timeout: float = 30.0) -> dict:
-        """Request telemetry from a contact; returns LPP dict or raises on timeout."""
+    async def req_telemetry(self, pubkey: str, timeout: float = 15.0) -> dict:
+        """Request telemetry from a contact; returns LPP dict or raises on timeout.
+
+        Default timeout is 15s — long enough for a 2–3 hop reply round-trip
+        but short enough that an unreachable peer fails fast instead of leaving
+        the UI hanging on a 30s spinner. See bugfix 2.
+        """
         mc = await self._require_mc()
         async with self._lock:
             res = await mc.commands.req_telemetry_sync(pubkey, timeout=timeout)
             if res is None:
-                raise RuntimeError("telemetry request failed or timed out")
+                raise RuntimeError(
+                    f"Telemetry: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    " — peer may be unreachable or asleep"
+                )
             return dict(res) if hasattr(res, "items") else {"data": res}
 
-    async def req_status(self, pubkey: str, timeout: float = 30.0) -> dict:
+    async def req_status(self, pubkey: str, timeout: float = 15.0) -> dict:
         mc = await self._require_mc()
         async with self._lock:
             res = await mc.commands.req_status_sync(pubkey, timeout=timeout)
             if res is None:
-                raise RuntimeError("status request failed or timed out")
+                raise RuntimeError(
+                    f"Status: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    " — peer may be unreachable or asleep"
+                )
             return self._serialize(dict(res))
 
-    async def req_acl(self, pubkey: str, timeout: float = 30.0) -> dict:
+    async def req_acl(self, pubkey: str, timeout: float = 15.0) -> dict:
         mc = await self._require_mc()
         async with self._lock:
             res = await mc.commands.req_acl_sync(pubkey, timeout=timeout)
             if res is None:
-                raise RuntimeError("acl request failed or timed out")
+                raise RuntimeError(
+                    f"ACL: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    " — peer may be unreachable or asleep"
+                )
             # req_acl_sync returns acl_data (list / payload), wrap for JSON.
             return {"acl": res}
 
-    async def disc_path(self, pubkey: str) -> dict:
-        """Discover the network path to a contact."""
+    async def disc_path(self, pubkey: str, timeout: float = 15.0) -> dict:
+        """Discover the network path to a contact.
+
+        The meshcore lib's `send_path_discovery_sync` derives its own timeout
+        from the firmware's `suggested_timeout` when `timeout=0`. We pass an
+        explicit 15s ceiling so the UI fails fast for unreachable peers.
+        """
         mc = await self._require_mc()
         async with self._lock:
-            r = await mc.commands.send_path_discovery_sync(pubkey)
+            r = await mc.commands.send_path_discovery_sync(pubkey, timeout=timeout)
             if r is None:
-                raise RuntimeError("path discovery failed or timed out")
+                raise RuntimeError(
+                    f"Path discovery: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    " — peer may be unreachable or not running advertised firmware"
+                )
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
             payload = r.payload if hasattr(r, "payload") else r
@@ -494,7 +516,7 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def send_trace(self, *, timeout: float = 30.0) -> TracePathResult:
+    async def send_trace(self, *, timeout: float = 15.0) -> TracePathResult:
         """Send a trace packet and wait for the TRACE_DATA response.
 
         Trace is a one-shot broadcast — there's no explicit destination.
@@ -545,7 +567,10 @@ class MeshCoreClient:
 
         trace_event = await waiter
         if trace_event is None:
-            raise TimeoutError(f"No TRACE_DATA response within {timeout}s")
+            raise TimeoutError(
+                f"No trace reply within {timeout:g}s"
+                " — mesh may have no reachable repeaters or all repeaters dropped the trace packet"
+            )
 
         p = trace_event.payload
         hops_raw = p.get("path", []) or []

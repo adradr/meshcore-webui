@@ -247,3 +247,96 @@ async def test_action_503_on_connection_error(client):
         assert r.status_code == 503
     finally:
         _uninstall_mock_client()
+
+
+# ----- Bugfix 2: timeout classification (no reply ⇒ 504, not 502) -----
+
+
+@pytest.mark.asyncio
+async def test_timeout_runtime_error_returns_504():
+    """RuntimeError with 'no reply' must surface as 504, not 502.
+
+    The contacts endpoints (ping/telemetry/path/acl) raise RuntimeError when
+    the meshcore lib's *_sync helpers return None (= no reply within timeout).
+    Those are upstream timeouts (504), not upstream brokenness (502).
+    """
+    from fastapi import HTTPException
+    from app.api.contacts import _call
+
+    async def coro_timeout():
+        raise RuntimeError("Telemetry: no reply from abcd1234… within 15s — peer may be unreachable")
+
+    with pytest.raises(HTTPException) as ei:
+        await _call(coro_timeout())
+    assert ei.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_timeout_runtime_error_with_legacy_phrasing_returns_504():
+    """Also classify legacy 'timed out' phrasing as 504, for resilience."""
+    from fastapi import HTTPException
+    from app.api.contacts import _call
+
+    async def coro_legacy():
+        raise RuntimeError("telemetry request failed or timed out")
+
+    with pytest.raises(HTTPException) as ei:
+        await _call(coro_legacy())
+    assert ei.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_non_timeout_runtime_error_still_502():
+    """Non-timeout RuntimeError (real upstream brokenness) stays at 502."""
+    from fastapi import HTTPException
+    from app.api.contacts import _call
+
+    async def coro_bad():
+        raise RuntimeError("device returned ERROR_BAD_FRAME")
+
+    with pytest.raises(HTTPException) as ei:
+        await _call(coro_bad())
+    assert ei.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_timeout_error_returns_504():
+    """asyncio TimeoutError surfaces as 504 directly."""
+    from fastapi import HTTPException
+    from app.api.contacts import _call
+
+    async def coro_timeout():
+        raise TimeoutError("hit timeout")
+
+    with pytest.raises(HTTPException) as ei:
+        await _call(coro_timeout())
+    assert ei.value.status_code == 504
+
+
+@pytest.mark.asyncio
+async def test_telemetry_endpoint_returns_504_on_no_reply(client):
+    """End-to-end: telemetry endpoint maps 'no reply' RuntimeError to 504."""
+    mc = _install_mock_client()
+    mc.req_telemetry = AsyncMock(side_effect=RuntimeError(
+        "Telemetry: no reply from abcd1234… within 15s — peer may be unreachable or asleep"
+    ))
+    try:
+        r = await client.post(f"/api/contacts/{PK}/telemetry")
+        assert r.status_code == 504
+        assert "no reply" in r.json()["detail"]
+    finally:
+        _uninstall_mock_client()
+
+
+@pytest.mark.asyncio
+async def test_discover_path_endpoint_returns_504_on_no_reply(client):
+    """End-to-end: path discover endpoint maps 'no reply' RuntimeError to 504."""
+    mc = _install_mock_client()
+    mc.disc_path = AsyncMock(side_effect=RuntimeError(
+        "Path discovery: no reply from abcd1234… within 15s — peer may be unreachable"
+    ))
+    try:
+        r = await client.post(f"/api/contacts/{PK}/path/discover")
+        assert r.status_code == 504
+    finally:
+        _uninstall_mock_client()

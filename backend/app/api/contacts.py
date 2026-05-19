@@ -23,13 +23,32 @@ def _require_client(request: Request):
 
 
 async def _call(coro):
-    """Run a wrapper coroutine and translate exceptions to HTTPException."""
+    """Run a wrapper coroutine and translate exceptions to HTTPException.
+
+    Status code mapping (bugfix 2):
+    - ConnectionError → 503 Service Unavailable (radio link down)
+    - TimeoutError → 504 Gateway Timeout (upstream didn't respond in time)
+    - RuntimeError → 504 if the message looks like a "no reply" / "timed out"
+      RF unreachability (matches the wording in meshcore_client.req_* /
+      disc_path), else 502 Bad Gateway (genuine upstream error).
+
+    Why this distinction matters: a 30s wait followed by "502 Bad Gateway"
+    reads to users as "the backend is broken". The truth is "the peer didn't
+    reply over the radio" — a transient RF condition, NOT a backend bug.
+    504 communicates exactly that.
+    """
     try:
         return await coro
     except ConnectionError as e:
         raise HTTPException(503, str(e))
+    except TimeoutError as e:
+        raise HTTPException(504, str(e))
     except RuntimeError as e:
-        raise HTTPException(502, str(e))
+        msg = str(e)
+        lower = msg.lower()
+        if "no reply" in lower or "timed out" in lower:
+            raise HTTPException(504, msg)
+        raise HTTPException(502, msg)
 
 
 @router.get("")

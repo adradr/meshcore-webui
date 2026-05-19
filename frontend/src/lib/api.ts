@@ -18,9 +18,31 @@ async function request<T>(
 
   const res = await fetch(path, { ...opts, headers })
   if (!res.ok) {
-    const err = new Error(`${res.status} ${res.statusText}`) as Error & {
-      status?: number
+    // Surface the backend's detail message (typically FastAPI's `detail`)
+    // so error toasts everywhere in the app become actionable instead of
+    // showing a bare "502 Bad Gateway". This is the single point that
+    // unlocks meaningful errors for every mutation in the codebase.
+    let detail = ""
+    try {
+      const body = await res.text()
+      if (body) {
+        try {
+          const parsed = JSON.parse(body) as { detail?: unknown }
+          detail =
+            typeof parsed.detail === "string"
+              ? parsed.detail
+              : body.slice(0, 200)
+        } catch {
+          detail = body.slice(0, 200)
+        }
+      }
+    } catch {
+      // ignore body read errors — we'll fall back to the status line
     }
+    const msg = detail
+      ? `${res.status} ${res.statusText}: ${detail}`
+      : `${res.status} ${res.statusText}`
+    const err = new Error(msg) as Error & { status?: number }
     err.status = res.status
     throw err
   }
