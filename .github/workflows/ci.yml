@@ -28,23 +28,27 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10  # matches the lockfile + Dockerfile
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - name: Install
-        run: pnpm install --frozen-lockfile
+        # --ignore-scripts skips puppeteer's install-time gate (same as the
+        # Dockerfile does); we never need its bundled Chromium in CI.
+        run: pnpm install --frozen-lockfile --ignore-scripts
         working-directory: frontend
       - name: Tests
-        run: pnpm test --run
+        # `pnpm exec vitest run` avoids the `pnpm test --run` arg-forwarding
+        # difference between pnpm versions.
+        run: pnpm exec vitest run
         working-directory: frontend
       - name: Typecheck
-        run: pnpm tsc --noEmit
+        run: pnpm exec tsc --noEmit
         working-directory: frontend
       - name: Build
-        run: pnpm build
+        run: pnpm run build
         working-directory: frontend
 
   docker:
