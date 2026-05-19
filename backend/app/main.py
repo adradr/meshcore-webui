@@ -15,6 +15,7 @@ from app.api.device import router as device_router
 from app.api.los import router as los_router
 from app.api.messages import router as messages_router
 from app.api.push import router as push_router
+from app.api.trace import router as trace_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.vapid import load_vapid
@@ -160,6 +161,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(conversations_router)
     app.include_router(los_router)
+    app.include_router(trace_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():

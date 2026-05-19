@@ -8,9 +8,10 @@ through ``app.dependency_overrides[...]``.
 
 from __future__ import annotations
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 
 from app.services.elevation import ElevationProvider
+from app.services.meshcore_client import MeshCoreClient
 
 
 def get_elevation_provider(request: Request) -> ElevationProvider:
@@ -23,3 +24,16 @@ def get_elevation_provider(request: Request) -> ElevationProvider:
     if provider is None:
         raise RuntimeError("ElevationProvider not initialized in lifespan")
     return provider
+
+
+def get_meshcore_client(request: Request) -> MeshCoreClient:
+    """Return the singleton ``MeshCoreClient`` from app state.
+
+    Surfaced as a 503 (rather than a 500) when the lifespan hasn't put a
+    client on ``app.state`` yet, since "the radio link isn't up" is a
+    transient operational condition rather than a programming bug.
+    """
+    client = getattr(request.app.state, "meshcore_client", None)
+    if client is None:
+        raise HTTPException(status_code=503, detail="MeshCore client not initialised")
+    return client
