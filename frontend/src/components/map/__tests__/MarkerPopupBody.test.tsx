@@ -184,4 +184,37 @@ describe("MarkerPopupBody", () => {
     )
     expect(screen.getByLabelText(/trace path to/i)).toBeDisabled()
   })
+
+  it("shows spinner instead of Route icon when traceInFlight=true", () => {
+    const repContact = { ...contact, nodeType: "REP" as const }
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={repContact}
+          onTraceRequest={vi.fn()}
+          traceInFlight={true}
+          isSelf={false}
+        />
+      </MemoryRouter>,
+    )
+    const btn = screen.getByLabelText(/trace path to/i)
+    // Loader2 has class animate-spin
+    expect(btn.querySelector(".animate-spin")).toBeTruthy()
+  })
+
+  it("shows Route icon (no spinner) when traceInFlight=false", () => {
+    const repContact = { ...contact, nodeType: "REP" as const }
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={repContact}
+          onTraceRequest={vi.fn()}
+          traceInFlight={false}
+          isSelf={false}
+        />
+      </MemoryRouter>,
+    )
+    const btn = screen.getByLabelText(/trace path to/i)
+    expect(btn.querySelector(".animate-spin")).toBeNull()
+  })
 })

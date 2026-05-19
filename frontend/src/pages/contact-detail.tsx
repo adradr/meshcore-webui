@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Compass,
   Copy,
+  Loader2,
   MapPin,
   MessageCircle,
   Navigation,
@@ -169,7 +170,7 @@ function ActionTile({ icon: Icon, label, onClick, loading, disabled }: ActionTil
       onClick={onClick}
       disabled={disabled || loading}
     >
-      <Icon className={`h-5 w-5 ${loading ? "animate-pulse" : ""}`} />
+      {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Icon className="h-5 w-5" />}
       <span className="text-[11px] font-medium">{label}</span>
     </Button>
   )
@@ -496,6 +497,9 @@ export function ContactDetailPage() {
                 onClick={() => discoverPath.mutate({ pubkey: pubKey })}
                 disabled={discoverPath.isPending}
               >
+                {discoverPath.isPending && (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                )}
                 Discover
               </Button>
               <Button
@@ -504,6 +508,9 @@ export function ContactDetailPage() {
                 onClick={() => resetPath.mutate({ pubkey: pubKey })}
                 disabled={resetPath.isPending}
               >
+                {resetPath.isPending && (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                )}
                 Reset
               </Button>
             </div>
@@ -561,7 +568,14 @@ export function ContactDetailPage() {
                 }
                 disabled={acl.isPending}
               >
-                {acl.isPending ? "Requesting…" : "Request ACL"}
+                {acl.isPending ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    Requesting…
+                  </>
+                ) : (
+                  "Request ACL"
+                )}
               </Button>
             </CardHeader>
             <CardContent>

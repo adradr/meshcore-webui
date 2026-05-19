@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ArrowRight, MessageCircle, Radio, Route, User } from "lucide-react"
+import { ArrowRight, Loader2, MessageCircle, Radio, Route, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ContactMarker } from "./MarkersLayer"
 import type { NodeType } from "./nodeIcons"
@@ -117,7 +117,11 @@ export function MarkerPopupBody({
               disabled={traceDisabled}
               onClick={() => onTraceRequest?.(contact)}
             >
-              <Route className="h-3.5 w-3.5" />
+              {traceInFlight ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Route className="h-3.5 w-3.5" />
+              )}
             </Button>
           )}
         </div>
