@@ -128,6 +128,187 @@ This is the lowest-effort option if you're already a Tailscale user and don't ne
 
 ---
 
+## 6. Authentication with Authelia + Nginx Proxy Manager
+
+The WebUI itself supports `MESHCORE_WEBUI_API_KEY` for a single shared bearer token, but for anything beyond a homelab-of-one you want a real authenticator in front of NPM. **Authelia** is the natural fit: lightweight, single binary, cookie-based SSO, integrates cleanly with NPM via `auth_request`.
+
+### Layered auth model
+
+Think of authentication as two layers stacked in front of the WebUI:
+
+1. **Layer 1 — proxy-level auth (recommended): Authelia in front of NPM.** Every request to `https://meshcore.example.com` is intercepted, validated against an Authelia session cookie, and only forwarded upstream if the cookie is valid. If not, the user is bounced to `https://auth.example.com` to sign in. Once they have the cookie, every app on your domain (Sonarr, Grafana, MeshCore, …) is single-sign-on.
+2. **Layer 2 — defense-in-depth: `MESHCORE_WEBUI_API_KEY` bearer token.** Set this on the WebUI container even when Authelia is in front. It's a kill-switch in case the proxy is ever misconfigured, removed, or bypassed (someone hits the container's `:8080` directly on the LAN). The browser stores the key in localStorage and the React client sends it as `Authorization: Bearer …` on every API call — invisible to the user once entered.
+
+### Why cookie auth (not HTTP Basic) matters for iOS PWA
+
+- **HTTP Basic Auth re-prompts every cold start of the home-screen PWA.** iOS treats each new launch of a standalone PWA as a fresh process; the Basic credentials don't survive, and the user gets a native auth modal every time. Unusable.
+- **Cookies survive Add-to-Home-Screen and re-launches.** Authelia issues a `Set-Cookie` on the parent domain; iOS preserves it across PWA cold starts as long as the session is still valid (default 12 h, refreshed transparently on each navigation).
+- **Web Push works regardless.** Push notifications are delivered by Apple's APNs / Mozilla's autopush / FCM — never by your reverse proxy. Even if the user's session expires, queued push notifications still arrive; tapping the notification just sends them through Authelia first.
+
+### docker-compose snippet
+
+Put both behind your existing Docker networking (NPM and the WebUI must be reachable on the same network as Authelia):
+
+```yaml
+# docker-compose.auth.yml
+services:
+  authelia:
+    image: authelia/authelia:latest
+    restart: unless-stopped
+    volumes:
+      - ./authelia/config:/config
+    ports:
+      - "9091:9091"
+
+  # NPM is configured in its UI; below is just a reminder of its required env
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"   # NPM admin UI
+    volumes:
+      - ./npm/data:/data
+      - ./npm/letsencrypt:/etc/letsencrypt
+```
+
+### Authelia minimal `configuration.yml` (single user, no LDAP)
+
+```yaml
+# ./authelia/config/configuration.yml
+server:
+  host: 0.0.0.0
+  port: 9091
+theme: auto
+jwt_secret: <generate with `openssl rand -hex 64`>
+default_redirection_url: https://meshcore.example.com
+
+authentication_backend:
+  file:
+    path: /config/users_database.yml
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: meshcore.example.com
+      policy: one_factor   # require password
+
+session:
+  name: authelia_session
+  secret: <generate with `openssl rand -hex 64`>
+  expiration: 12h
+  inactivity: 45m
+  domain: example.com      # parent domain so cookie is sent to subdomains
+
+storage:
+  local:
+    path: /config/db.sqlite3
+  encryption_key: <generate with `openssl rand -hex 64`>
+
+notifier:
+  filesystem:
+    filename: /config/notification.txt
+```
+
+> The `filesystem` notifier writes "password reset"-style emails to a local file instead of sending real SMTP. Fine for single-user homelab; swap for `smtp` in production.
+
+### Users database
+
+```yaml
+# ./authelia/config/users_database.yml
+users:
+  adr:
+    displayname: "MeshCore Admin"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..."   # generated below
+    email: adr@example.com
+    groups:
+      - admins
+```
+
+Generate the argon2id hash with Authelia itself:
+
+```bash
+docker run --rm authelia/authelia:latest \
+  authelia hash-password 'your-strong-password-here'
+```
+
+Copy the `Digest:` value into the `password:` field.
+
+### NPM proxy host configuration
+
+**Proxy host for the WebUI:**
+
+- Domain Names: `meshcore.example.com`
+- Scheme: `http`
+- Forward Hostname / IP: `meshcore-webui` (Docker service name) or your host IP
+- Forward Port: `8080`
+- **Cache Assets**: off
+- **Block Common Exploits**: on
+- **Websockets Support: ON** (mandatory)
+
+**SSL tab:** request a Let's Encrypt cert, **Force SSL: ON**, **HTTP/2 Support: ON**.
+
+**Advanced tab** — paste this nginx snippet (it tells NPM to call out to Authelia on every request and redirect to the login portal on a 401):
+
+```nginx
+location /authelia {
+    internal;
+    proxy_pass http://authelia:9091/api/verify;
+    proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+    proxy_set_header X-Forwarded-Method $request_method;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header X-Forwarded-Uri $request_uri;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_pass_request_body off;
+    proxy_set_header Content-Length "";
+}
+
+location / {
+    auth_request /authelia;
+    auth_request_set $target_url $scheme://$http_host$request_uri;
+    auth_request_set $user $upstream_http_remote_user;
+    auth_request_set $groups $upstream_http_remote_groups;
+    proxy_set_header Remote-User $user;
+    proxy_set_header Remote-Groups $groups;
+    error_page 401 =302 https://auth.example.com/?rd=$target_url;
+    proxy_pass http://meshcore-webui:8080;
+
+    # WebSocket upgrade headers (NPM's "Websockets Support" toggle adds
+    # these too, but it's safe to set them explicitly here as well).
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+**Second proxy host for the Authelia portal itself:**
+
+- Domain Names: `auth.example.com`
+- Forward to: `authelia:9091`
+- **Websockets Support: ON** (Authelia uses WS for some UI flows)
+- **Force SSL: ON**
+
+That second host is what the WebUI redirects to on a 401; once the user signs in, Authelia drops them back to the original URL via the `rd=` query string.
+
+### iOS PWA flow (end-to-end)
+
+1. User opens `https://meshcore.example.com` in mobile Safari.
+2. NPM's `auth_request` returns 401, browser is redirected to `https://auth.example.com`.
+3. User signs in with the password from `users_database.yml`. Authelia sets `authelia_session=<cookie>` on `.example.com`.
+4. Browser is bounced back to `https://meshcore.example.com` — request now carries the cookie, NPM forwards it upstream, WebUI loads.
+5. User taps Share → **Add to Home Screen**. The cookie comes along.
+6. Subsequent PWA launches: cookie is still valid → WebUI loads with no auth prompt. After 45 min of inactivity Authelia silently re-validates on the next navigation; after 12 h the user must re-enter the password once.
+7. Push notifications delivered via APNs arrive even while the PWA is closed; tapping them opens the PWA, the cookie is still there, the user lands directly in the chat.
+
+### References
+
+- Authelia + NPM integration guide: <https://www.authelia.com/integration/proxies/nginx-proxy-manager/>
+- Authelia full docs: <https://www.authelia.com/>
+- Nginx Proxy Manager docs: <https://nginxproxymanager.com/>
+
+---
+
 ## Troubleshooting
 
 - **WebUI loads but contacts never appear / "Connecting..." forever:** WebSocket upgrades aren't reaching the container. NPM users: re-check the **Websockets Support** toggle. Custom nginx: ensure `proxy_set_header Upgrade $http_upgrade;` and `proxy_set_header Connection "upgrade";` are present.
