@@ -26,6 +26,7 @@ from app.middleware.api_key import APIKeyMiddleware
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient
+from app.services.noise_poller import NoisePoller
 from app.services.push_sender import PushSender
 from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
@@ -143,9 +144,19 @@ async def lifespan(app: FastAPI):
     pool.spawn(relay(), name="event-relay")
     await client.start()
 
+    log.info(
+        "Starting NoisePoller (interval=%.2fs)",
+        settings.noise_poll_interval_s,
+    )
+    noise_poller = NoisePoller(
+        client, interval_s=settings.noise_poll_interval_s,
+    )
+    await noise_poller.start()
+
     app.state.meshcore_client = client
     app.state.push_sender = sender
     app.state.task_pool = pool
+    app.state.noise_poller = noise_poller
 
     log.info("Initializing ElevationProvider (%s/%s)",
              settings.elevation_base_url, settings.elevation_dataset)
@@ -160,6 +171,7 @@ async def lifespan(app: FastAPI):
         finally:
             log.info("Shutting down")
             app.state.elevation_provider = None
+            await noise_poller.stop()
             client.unsubscribe(q)
             await client.stop()
             if rx_log_persist is not None:

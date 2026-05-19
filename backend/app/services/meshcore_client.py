@@ -220,6 +220,32 @@ class MeshCoreClient:
             raise ConnectionError("MeshCore not connected")
         return self._mc
 
+    async def get_stats_radio(self):
+        """Poll device radio stats (noise floor, last RSSI/SNR, air time).
+
+        Returns the meshcore `Event` from `commands.get_stats_radio()`, or
+        `None` if the client isn't connected yet. Callers (e.g. NoisePoller)
+        are responsible for surfacing the payload to subscribers — this method
+        does NOT go through the event dispatcher.
+        """
+        if self._mc is None:
+            return None
+        return await self._mc.commands.get_stats_radio()
+
+    async def broadcast_wire_event(self, wire_event: WireEvent) -> None:
+        """Push a synthesized WireEvent to all WS subscribers.
+
+        Used by background pollers (e.g. NoisePoller) that synthesize events
+        directly from request/response commands rather than via the meshcore
+        dispatcher. Bypasses `_on_event` entirely — this is a direct enqueue
+        into the subscriber queues, matching `_on_event`'s broadcast pattern.
+        """
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(wire_event)
+            except asyncio.QueueFull:
+                log.warning("WS subscriber queue full — dropping")
+
     async def send_dm(self, dst, text: str) -> dict:
         mc = await self._require_mc()
         async with self._lock:
