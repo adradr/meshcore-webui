@@ -1,11 +1,36 @@
 import { createContext, useContext, useMemo } from "react"
 import { useQueryClient } from "@tanstack/react-query"
+import type { InfiniteData } from "@tanstack/react-query"
 import { useWebSocket, type WSStatus } from "./useWebSocket"
 import { parseWSMessage } from "./wsSchema"
 
 interface Ctx {
   status: WSStatus
   send: (msg: { type: string; payload: unknown }) => void
+}
+
+interface MessagesPage {
+  items: unknown[]
+  next_cursor: string | null
+}
+type MessagesData = InfiniteData<MessagesPage>
+
+// Prepend a new arrival to the first page (backend returns DESC by timestamp).
+function prependToMessages(
+  data: MessagesData | undefined,
+  msg: unknown,
+): MessagesData {
+  if (!data || !data.pages || data.pages.length === 0) {
+    return {
+      pages: [{ items: [msg], next_cursor: null }],
+      pageParams: [undefined],
+    }
+  }
+  const [first, ...rest] = data.pages
+  return {
+    pages: [{ ...first, items: [msg, ...first.items] }, ...rest],
+    pageParams: data.pageParams,
+  }
 }
 
 const WSContext = createContext<Ctx | null>(null)
@@ -29,7 +54,9 @@ export function WebSocketProvider({
             "messages",
             msg.payload.pubkey_prefix ?? "unknown",
           ] as const
-          qc.setQueryData<unknown[]>(key, (old = []) => [...old, msg.payload])
+          qc.setQueryData<MessagesData>(key, (old) =>
+            prependToMessages(old, msg.payload),
+          )
           break
         }
         case "channel_message": {
@@ -37,7 +64,9 @@ export function WebSocketProvider({
             "messages",
             `chan:${msg.payload.channel_idx}`,
           ] as const
-          qc.setQueryData<unknown[]>(key, (old = []) => [...old, msg.payload])
+          qc.setQueryData<MessagesData>(key, (old) =>
+            prependToMessages(old, msg.payload),
+          )
           break
         }
         case "ack": {

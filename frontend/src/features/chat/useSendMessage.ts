@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import type { InfiniteData } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 
@@ -17,6 +18,13 @@ interface OptimisticMessage {
   ack_state: string
 }
 
+// Shape returned by useInfiniteQuery in queries.ts
+interface MessagesPage {
+  items: unknown[]
+  next_cursor: string | null
+}
+type MessagesData = InfiniteData<MessagesPage>
+
 export function useSendMessage() {
   const qc = useQueryClient()
   return useMutation({
@@ -32,7 +40,7 @@ export function useSendMessage() {
         vars.contactPubKey ?? `chan:${vars.channelIdx}`,
       ] as const
       await qc.cancelQueries({ queryKey: key })
-      const previous = qc.getQueryData<OptimisticMessage[]>(key) ?? []
+      const previous = qc.getQueryData<MessagesData>(key)
       const tempId = crypto.randomUUID()
       const optimistic: OptimisticMessage = {
         id: tempId,
@@ -42,7 +50,22 @@ export function useSendMessage() {
         timestamp: new Date().toISOString(),
         ack_state: "sending",
       }
-      qc.setQueryData<OptimisticMessage[]>(key, [...previous, optimistic])
+      // Backend returns DESC by timestamp — newest first within each page —
+      // so prepend to the first page so the message renders at the bottom
+      // (MessageList .reverse()s the pages-flattened list).
+      qc.setQueryData<MessagesData>(key, (old) => {
+        if (!old || !old.pages || old.pages.length === 0) {
+          return {
+            pages: [{ items: [optimistic], next_cursor: null }],
+            pageParams: [undefined],
+          }
+        }
+        const [first, ...rest] = old.pages
+        return {
+          pages: [{ ...first, items: [optimistic, ...first.items] }, ...rest],
+          pageParams: old.pageParams,
+        }
+      })
       return { key, previous, tempId }
     },
     onError: (err, _v, ctx) => {
