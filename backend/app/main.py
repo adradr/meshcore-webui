@@ -28,14 +28,33 @@ log = logging.getLogger(__name__)
 
 
 async def _ensure_schema() -> None:
-    """Create all tables if missing. Idempotent; safe to call on every startup.
+    """Apply pending Alembic migrations on every startup.
 
-    For production, replace with `alembic upgrade head` via subprocess.
-    For the v1 single-container deployment this is sufficient and avoids
-    bundling the alembic CLI in the runtime image.
+    `Base.metadata.create_all` alone does NOT add columns to existing tables,
+    so it breaks every time the schema evolves (e.g. v1.5's message.pubkey_prefix).
+    Running `alembic upgrade head` makes the schema always match the model.
+
+    Falls back to `create_all` if Alembic isn't configured (e.g. fresh dev).
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    repo_root = Path(__file__).resolve().parent.parent
+    ini = repo_root / "alembic.ini"
+    if ini.exists():
+        log.info("Running alembic upgrade head")
+        cfg = Config(str(ini))
+        # Alembic env.py reads sqlalchemy.url from app.core.config.settings
+        # (we set_main_option there), so no override needed here.
+        # `command.upgrade` is sync; run in a thread to avoid blocking the loop.
+        import asyncio
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+    else:
+        log.warning("alembic.ini not found at %s — falling back to create_all", ini)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 
 @asynccontextmanager
