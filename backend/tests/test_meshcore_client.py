@@ -158,3 +158,47 @@ class TestTraceDataForwarding:
             {"hash": "ab", "snr": 3.5},
             {"hash": "cd", "snr": 4.0},
         ]
+
+
+class TestRxLogDataForwarding:
+    """RX_LOG_DATA must be forwarded to WS subscribers on topic='rx_log' so
+    the live RX-log UI can display per-packet radio metadata as it arrives."""
+
+    def test_rx_log_data_in_forwarded_events_set(self):
+        from meshcore.events import EventType
+        assert EventType.RX_LOG_DATA in MeshCoreClient._FORWARDED_EVENTS
+
+    @pytest.mark.asyncio
+    async def test_rx_log_data_event_is_forwarded_to_subscribers(self):
+        from meshcore.events import Event, EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        queue = client.subscribe()
+        fake_payload = {
+            "recv_time": 1234567,
+            "snr": 3.5,
+            "rssi": -90,
+            "payload": "deadbeef",
+            "payload_length": 4,
+            "route_type": 1,
+            "route_typename": "DIRECT",
+            "payload_type": 2,
+            "payload_typename": "TXT_PLAIN",
+            "path_len": 0,
+            "path_hash_size": 1,
+            "path": "",
+            "pkt_hash": "abcd1234",
+            "raw_hex": "01 02 03 04",
+        }
+        fake_event = Event(
+            type=EventType.RX_LOG_DATA,
+            payload=fake_payload,
+            attributes={},
+        )
+        await client._on_event(fake_event)
+        wire_event = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert wire_event.type == "rx_log_data"
+        assert wire_event.topic == "rx_log"
+        assert wire_event.payload["snr"] == 3.5
+        assert wire_event.payload["rssi"] == -90
+        assert wire_event.payload["pkt_hash"] == "abcd1234"
