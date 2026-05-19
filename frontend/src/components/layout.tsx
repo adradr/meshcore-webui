@@ -49,9 +49,15 @@ export function Layout() {
     // for the nav via padding on the shell so page content can't render under
     // it. The padding wraps the safe-area inset so home-bar devices still get
     // the bottom gutter automatically.
+    // Shell pads for BOTH safe areas:
+    //   top    → Dynamic Island / notch (otherwise header sits under it on standalone PWA)
+    //   bottom → fixed nav (4rem) + home-indicator inset
     <div
       className="flex h-[100dvh] flex-col"
-      style={{ paddingBottom: "calc(4rem + env(safe-area-inset-bottom))" }}
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "calc(4rem + env(safe-area-inset-bottom))",
+      }}
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
         <h1 className="text-base font-semibold">MeshCore</h1>
@@ -61,14 +67,22 @@ export function Layout() {
       <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
-      <nav className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-8 border-t bg-background pb-[env(safe-area-inset-bottom)]">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-8 border-t bg-background pb-[env(safe-area-inset-bottom)]"
+        aria-label="Primary"
+      >
         {NAV.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}
             end={to === "/"}
+            title={label}
+            aria-label={label}
             className={({ isActive }) =>
-              `relative flex flex-col items-center justify-center gap-1 text-[10px] ${
+              // Below sm: hide the text label so 8 icons fit comfortably on
+              // 360-390px PWAs (was getting cramped + truncated). Icon + title
+              // attr keeps discoverability; aria-label keeps it accessible.
+              `relative flex flex-col items-center justify-center gap-0.5 sm:gap-1 text-[10px] ${
                 isActive ? "text-primary" : "text-muted-foreground"
               }`
             }
@@ -84,7 +98,7 @@ export function Layout() {
                 </span>
               )}
             </span>
-            <span>{label}</span>
+            <span className="hidden sm:inline">{label}</span>
           </NavLink>
         ))}
       </nav>
