@@ -1,3 +1,4 @@
+import { useCallback } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { z } from "zod"
 import { api } from "@/lib/api"
@@ -38,15 +39,23 @@ export function useNoiseSamples(opts: { paused?: boolean } = {}) {
     gcTime: Infinity,
   })
 
-  useWsTopic<NoiseSample>("noise", (sample) => {
-    if (opts.paused) return
-    qc.setQueryData<NoiseSample[]>(NOISE_KEY, (prev = []) => {
-      const next = [...prev, sample]
-      return next.length > MAX_CLIENT_BUFFER
-        ? next.slice(-MAX_CLIENT_BUFFER)
-        : next
-    })
-  })
+  // Memoise the WS handler so its identity is stable across renders. Without
+  // this, `useWsTopic`'s effect (which lists `handler` as a dep) would
+  // unsubscribe + re-subscribe on every render, adding latency to the live
+  // stream and producing brief gaps where samples can be missed.
+  const handleNoiseSample = useCallback(
+    (sample: NoiseSample) => {
+      if (opts.paused) return
+      qc.setQueryData<NoiseSample[]>(NOISE_KEY, (prev = []) => {
+        const next = [...prev, sample]
+        return next.length > MAX_CLIENT_BUFFER
+          ? next.slice(-MAX_CLIENT_BUFFER)
+          : next
+      })
+    },
+    [opts.paused, qc],
+  )
+  useWsTopic<NoiseSample>("noise", handleNoiseSample)
 
   return query
 }

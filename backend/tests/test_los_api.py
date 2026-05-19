@@ -8,6 +8,7 @@ fake provider so tests stay hermetic and don't hit OpenTopoData.
 from __future__ import annotations
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 
 from app.deps import get_elevation_provider
 from app.main import app
@@ -125,6 +126,28 @@ async def test_los_compute_validates_lat_lon_bounds(client, flat_sea_override):
         },
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_los_compute_503_when_provider_missing():
+    """If the elevation provider isn't initialised (e.g. during shutdown or
+    before the lifespan has populated app.state), the endpoint must return a
+    503 rather than a 500. We deliberately bypass the ``client`` fixture so no
+    dependency override is in place and ``app.state.elevation_provider`` is
+    absent under the bare ``ASGITransport`` (lifespan does not run).
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        r = await ac.post(
+            "/api/los/compute",
+            json={
+                "a": {"lat": 0.0, "lon": 0.0, "height_m": 30},
+                "b": {"lat": 0.0, "lon": 0.0898, "height_m": 30},
+                "freq_hz": 868e6,
+            },
+        )
+        assert r.status_code == 503
+        assert "Elevation provider not initialised" in r.json()["detail"]
 
 
 @pytest.mark.asyncio

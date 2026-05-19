@@ -18,12 +18,15 @@ from app.services.noise_poller import NoisePoller
 def get_elevation_provider(request: Request) -> ElevationProvider:
     """Return the singleton ``ElevationProvider`` from app state.
 
-    Raised at request time (not import time) so a misconfigured deployment
-    surfaces as a clear 500 rather than a startup crash unrelated to LoS.
+    Surfaced as a 503 (rather than a 500) when the lifespan hasn't placed a
+    provider on ``app.state`` yet — this is consistent with ``get_meshcore_client``
+    and ``get_noise_poller`` and correctly represents the condition as a
+    transient operational state (e.g., in-flight requests during shutdown,
+    or LoS endpoint hit before the lifespan completed) rather than a bug.
     """
     provider = getattr(request.app.state, "elevation_provider", None)
     if provider is None:
-        raise RuntimeError("ElevationProvider not initialized in lifespan")
+        raise HTTPException(status_code=503, detail="Elevation provider not initialised")
     return provider
 
 

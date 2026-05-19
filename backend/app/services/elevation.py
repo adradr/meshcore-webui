@@ -113,12 +113,19 @@ class ElevationProvider:
         """POST one batch (<= 100 coords) to OpenTopoData; return elevations in order."""
         body = {"locations": "|".join(f"{lat},{lon}" for lat, lon in keys)}
         async with self._lock:
-            if self._rate_limit_s:
-                await asyncio.sleep(self._rate_limit_s)
             try:
                 resp = await self._client.post(self._url, json=body)
             except httpx.HTTPError as exc:
                 raise ElevationLookupError(f"elevation HTTP error: {exc}") from exc
+            # Sleep is held INSIDE the lock but AFTER the HTTP call: the lock
+            # is released only once the rate-limit window has elapsed, so the
+            # next concurrent waiter can issue its HTTP call immediately on
+            # acquisition without stacking the rate-limit delay on top of its
+            # own wait. (Putting the sleep BEFORE the POST would force the
+            # next acquirer to wait `rate_limit_s + http_time` before its own
+            # `rate_limit_s` sleep even started — doubling tail latency.)
+            if self._rate_limit_s:
+                await asyncio.sleep(self._rate_limit_s)
         if not (200 <= resp.status_code < 300):
             raise ElevationLookupError(
                 f"elevation lookup failed: HTTP {resp.status_code} {resp.text[:200]}"

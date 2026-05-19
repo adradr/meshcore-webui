@@ -114,3 +114,39 @@ async def test_elevation_raises_on_non_2xx():
         provider = ElevationProvider("http://x/v1", "srtm30m", client, rate_limit_s=0)
         with pytest.raises(ElevationLookupError):
             await provider.lookup([(0.0, 0.0)])
+
+
+@pytest.mark.asyncio
+async def test_elevation_rate_limit_does_not_serialize_concurrent_requests_into_waiting():
+    """Two concurrent ``.lookup()`` calls should complete close to back-to-back.
+
+    With the (fixed) sleep-after-HTTP-inside-lock ordering, the second waiter
+    can start its HTTP call immediately after the first releases the lock —
+    the rate-limit wait was already absorbed inside the first request, so the
+    gap between the two HTTP calls is ~rate_limit_s, not 2*rate_limit_s.
+    """
+    import asyncio
+    import time
+
+    call_times: list[float] = []
+
+    async def handler(req: httpx.Request) -> httpx.Response:
+        call_times.append(time.monotonic())
+        return httpx.Response(200, json={"results": [{"elevation": 100.0}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        provider = ElevationProvider(
+            "http://x/v1", "srtm30m", client, rate_limit_s=0.05
+        )
+        # Two distinct coords (cache miss each) — they serialize through the lock.
+        results = await asyncio.gather(
+            provider.lookup([(1.0, 1.0)]),
+            provider.lookup([(2.0, 2.0)]),
+        )
+        assert results == [[100.0], [100.0]]
+        assert len(call_times) == 2
+        # The two HTTP calls should be ~rate_limit_s apart, NOT 2*rate_limit_s
+        # as it would be if the sleep were inside the lock BEFORE the HTTP call.
+        gap = call_times[1] - call_times[0]
+        assert 0.04 <= gap <= 0.15  # generous upper bound for CI flake
