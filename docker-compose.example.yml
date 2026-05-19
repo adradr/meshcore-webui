@@ -5,7 +5,9 @@ services:
     ports:
       - "8080:8080"
     environment:
-      MESHCORE_HOST: 192.168.88.223
+      # Default is the LilyGo T3-S3 WiFi-firmware default AP address.
+      # Set to your device's actual LAN IP.
+      MESHCORE_HOST: 192.168.4.1
       MESHCORE_PORT: "5000"
       VAPID_SUBJECT: mailto:you@example.com
       # MESHCORE_WEBUI_API_KEY: "your-long-random-string"
