@@ -69,7 +69,7 @@ function ThreadRow({ thread, title, href }: ThreadRowProps) {
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
             <time
-              className={`text-xs ${
+              className={`text-xs tabular-nums ${
                 unread ? "text-primary font-medium" : "text-muted-foreground"
               }`}
               dateTime={thread.last_timestamp ?? undefined}
@@ -78,7 +78,7 @@ function ThreadRow({ thread, title, href }: ThreadRowProps) {
             </time>
             {unread && (
               <span
-                className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-none text-primary-foreground"
+                className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-none tabular-nums text-primary-foreground"
                 aria-label={`${thread.unread_count} unread`}
               >
                 {thread.unread_count > 99 ? "99+" : thread.unread_count}
