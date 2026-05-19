@@ -158,14 +158,21 @@ class MeshCoreClient:
         if not max_ch:
             info = await mc.commands.send_device_query()
             max_ch = info.payload.get("max_channels", 0)
+        # MeshCore firmware allocates MAX_GROUP_CHANNELS slots (typically 40).
+        # Most are empty; the device returns CHANNEL_INFO with empty name for
+        # unused slots. Filter those out so the UI shows only real channels.
         out = []
         for i in range(max_ch):
             r = await mc.commands.get_channel(i)
-            if r.type == EventType.CHANNEL_INFO:
-                out.append({
-                    k: v.hex() if isinstance(v, bytes) else v
-                    for k, v in r.payload.items()
-                })
+            if r.type != EventType.CHANNEL_INFO:
+                continue
+            name = (r.payload.get("channel_name") or "").strip()
+            if not name:
+                continue
+            out.append({
+                k: v.hex() if isinstance(v, bytes) else v
+                for k, v in r.payload.items()
+            })
         return out
 
     async def get_device_info(self) -> dict:
