@@ -193,3 +193,118 @@ class MeshCoreClient:
             # Refresh by re-sending appstart so meshcore repopulates self_info.
             await mc.commands.send_appstart()
         return dict(mc.self_info) if mc.self_info else {}
+
+    # ----- Contact actions (v1.5) -----
+
+    @staticmethod
+    def _serialize(payload: dict | None) -> dict:
+        """Recursively convert bytes → hex for JSON serialization."""
+        if not payload:
+            return {}
+        return {
+            k: (v.hex() if isinstance(v, bytes) else v)
+            for k, v in payload.items()
+        }
+
+    async def _resolve_contact(self, pubkey: str) -> dict:
+        """Resolve a (full or prefix) pubkey hex to the cached contact dict."""
+        mc = await self._require_mc()
+        if not mc.contacts:
+            await mc.ensure_contacts()
+        # Try exact key lookup first.
+        if pubkey in mc.contacts:
+            return mc.contacts[pubkey]
+        # Fallback: prefix match (mc.contacts is keyed by full 64-char pubkey).
+        for k, v in mc.contacts.items():
+            if k.startswith(pubkey) or pubkey.startswith(k[: len(pubkey)]):
+                return v
+        raise RuntimeError(f"contact not found: {pubkey}")
+
+    async def import_contact(self, uri: str) -> dict:
+        """Import a contact from a meshcore:// URI."""
+        mc = await self._require_mc()
+        # Strip the meshcore:// scheme if present and decode hex to bytes.
+        hex_part = uri.split("://", 1)[1] if "://" in uri else uri
+        try:
+            card = bytes.fromhex(hex_part)
+        except ValueError as e:
+            raise RuntimeError(f"invalid contact URI: {e}") from e
+        async with self._lock:
+            r = await mc.commands.import_contact(card)
+            if hasattr(r, "is_error") and r.is_error():
+                raise RuntimeError(r.payload)
+            return self._serialize(dict(r.payload) if hasattr(r, "payload") else {})
+
+    async def share_contact(self, pubkey: str) -> dict:
+        mc = await self._require_mc()
+        async with self._lock:
+            r = await mc.commands.share_contact(pubkey)
+            if r.is_error():
+                raise RuntimeError(r.payload)
+            return self._serialize(r.payload)
+
+    async def remove_contact(self, pubkey: str) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            r = await mc.commands.remove_contact(pubkey)
+            if hasattr(r, "is_error") and r.is_error():
+                raise RuntimeError(r.payload)
+
+    async def change_flags(self, pubkey: str, flags: int) -> None:
+        """Set the raw flags byte on a contact.
+
+        The meshcore lib's change_contact_flags requires a contact dict
+        (used to reconstruct the full update_contact packet), so we resolve
+        the pubkey to the cached contact first.
+        """
+        mc = await self._require_mc()
+        contact = await self._resolve_contact(pubkey)
+        async with self._lock:
+            r = await mc.commands.change_contact_flags(contact, flags)
+            if hasattr(r, "is_error") and r.is_error():
+                raise RuntimeError(r.payload)
+
+    async def req_telemetry(self, pubkey: str, timeout: float = 30.0) -> dict:
+        """Request telemetry from a contact; returns LPP dict or raises on timeout."""
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.req_telemetry_sync(pubkey, timeout=timeout)
+            if res is None:
+                raise RuntimeError("telemetry request failed or timed out")
+            return dict(res) if hasattr(res, "items") else {"data": res}
+
+    async def req_status(self, pubkey: str, timeout: float = 30.0) -> dict:
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.req_status_sync(pubkey, timeout=timeout)
+            if res is None:
+                raise RuntimeError("status request failed or timed out")
+            return self._serialize(dict(res))
+
+    async def req_acl(self, pubkey: str, timeout: float = 30.0) -> dict:
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.req_acl_sync(pubkey, timeout=timeout)
+            if res is None:
+                raise RuntimeError("acl request failed or timed out")
+            # req_acl_sync returns acl_data (list / payload), wrap for JSON.
+            return {"acl": res}
+
+    async def disc_path(self, pubkey: str) -> dict:
+        """Discover the network path to a contact."""
+        mc = await self._require_mc()
+        async with self._lock:
+            r = await mc.commands.send_path_discovery_sync(pubkey)
+            if r is None:
+                raise RuntimeError("path discovery failed or timed out")
+            if hasattr(r, "is_error") and r.is_error():
+                raise RuntimeError(r.payload)
+            payload = r.payload if hasattr(r, "payload") else r
+            return self._serialize(payload or {})
+
+    async def reset_path(self, pubkey: str) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            r = await mc.commands.reset_path(pubkey)
+            if hasattr(r, "is_error") and r.is_error():
+                raise RuntimeError(r.payload)
