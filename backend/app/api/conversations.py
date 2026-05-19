@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.services.read_state import mark_read
+from app.services.read_state import mark_all_read, mark_read
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
@@ -33,6 +33,15 @@ async def post_mark_read(
         channel_idx=payload.channel_idx,
     )
     return {"last_read_at": ts}
+
+
+@router.post("/read-all")
+async def post_mark_all_read(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Mark every conversation as read up to now. Idempotent."""
+    n = await mark_all_read(db)
+    return {"marked_read": n}
 
 
 @router.get("/unread-total")

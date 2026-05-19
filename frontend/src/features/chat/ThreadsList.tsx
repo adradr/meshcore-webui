@@ -1,13 +1,15 @@
 import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { ArrowUpRight, MessagesSquare, Star } from "lucide-react"
+import { ArrowUpRight, CheckCheck, Loader2, MessagesSquare, Star } from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { ChannelAvatar } from "@/components/channel-avatar"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
-import { useThreads, type Thread } from "./queries"
+import { useMarkAllRead, useThreads, useUnreadTotal, type Thread } from "./queries"
 
 function relativeTime(iso: string | null): string {
   if (!iso) return ""
@@ -135,6 +137,42 @@ function findContactByPrefix(
   )
 }
 
+function ThreadsHeader() {
+  const markAll = useMarkAllRead()
+  const unread = useUnreadTotal()
+  const hasUnread = (unread.data?.total ?? 0) > 0
+  return (
+    <div className="flex items-center justify-between gap-2 px-4 pt-4">
+      <h2 className="text-sm font-semibold text-muted-foreground">Conversations</h2>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={!hasUnread || markAll.isPending}
+        onClick={() => {
+          markAll.mutate(undefined, {
+            onSuccess: (r) =>
+              toast.success(
+                `Marked ${r.marked_read} conversation${
+                  r.marked_read === 1 ? "" : "s"
+                } as read`,
+              ),
+            onError: (e) =>
+              toast.error(e instanceof Error ? e.message : "Failed"),
+          })
+        }}
+        title="Mark all conversations as read"
+        aria-label="Mark all as read"
+      >
+        {markAll.isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <CheckCheck className="h-4 w-4" />
+        )}
+      </Button>
+    </div>
+  )
+}
+
 export function ThreadsList() {
   const threads = useThreads()
   const contacts = useContacts()
@@ -185,48 +223,60 @@ export function ThreadsList() {
 
   if (threads.isLoading) {
     return (
-      <div className="space-y-2 p-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-16 w-full rounded-xl" />
-        ))}
+      <div>
+        <ThreadsHeader />
+        <div className="space-y-2 p-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-xl" />
+          ))}
+        </div>
       </div>
     )
   }
 
   if (threads.isError) {
     return (
-      <div className="p-4 text-sm text-destructive">
-        Failed to load threads:{" "}
-        {threads.error instanceof Error ? threads.error.message : "unknown error"}
+      <div>
+        <ThreadsHeader />
+        <div className="p-4 text-sm text-destructive">
+          Failed to load threads:{" "}
+          {threads.error instanceof Error ? threads.error.message : "unknown error"}
+        </div>
       </div>
     )
   }
 
   if (items.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-sm text-muted-foreground">
-        <MessagesSquare className="h-8 w-8 opacity-50" />
-        <p>No conversations yet. Pick a contact from Contacts to start.</p>
+      <div>
+        <ThreadsHeader />
+        <div className="flex flex-col items-center justify-center gap-3 p-10 text-center text-sm text-muted-foreground">
+          <MessagesSquare className="h-8 w-8 opacity-50" />
+          <p>No conversations yet. Pick a contact from Contacts to start.</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <ul className="space-y-2 p-4">
-      {items.map((it) => (
-        <li
-          key={`${it.thread.msg_type}:${it.thread.contact_pub_key ?? ""}:${it.thread.channel_idx ?? ""}`}
-        >
-          <ThreadRow
-            thread={it.thread}
-            title={it.title}
-            href={it.href}
-            pubkey={it.pubkey}
-            isStarred={it.isStarred}
-            isFailed={it.isFailed}
-          />
-        </li>
-      ))}
-    </ul>
+    <div>
+      <ThreadsHeader />
+      <ul className="space-y-2 p-4">
+        {items.map((it) => (
+          <li
+            key={`${it.thread.msg_type}:${it.thread.contact_pub_key ?? ""}:${it.thread.channel_idx ?? ""}`}
+          >
+            <ThreadRow
+              thread={it.thread}
+              title={it.title}
+              href={it.href}
+              pubkey={it.pubkey}
+              isStarred={it.isStarred}
+              isFailed={it.isFailed}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }

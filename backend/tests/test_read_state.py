@@ -160,6 +160,114 @@ async def test_unread_total_sums_across_conversations(client, db):
 
 
 @pytest.mark.asyncio
+async def test_mark_all_read_updates_all_observed_threads(client, db):
+    from app.db.models import Message
+    from app.services.read_state import mark_all_read, get_last_read
+
+    db.add(Message(
+        msg_type="dm",
+        contact_pub_key="ab" + "00" * 31,
+        channel_idx=None,
+        direction="in",
+        text="hi",
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        ack_state="pending",
+    ))
+    db.add(Message(
+        msg_type="chan",
+        contact_pub_key=None,
+        channel_idx=2,
+        direction="in",
+        text="hello",
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        ack_state="pending",
+    ))
+    await db.commit()
+    n = await mark_all_read(db)
+    assert n == 2
+    dm_ptr = await get_last_read(db, contact_pub_key="ab" + "00" * 31, channel_idx=None)
+    chan_ptr = await get_last_read(db, contact_pub_key=None, channel_idx=2)
+    assert dm_ptr > "2026-05-01"
+    assert chan_ptr > "2026-05-01"
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_returns_0_with_no_messages(client, db):
+    from app.services.read_state import mark_all_read
+
+    assert (await mark_all_read(db)) == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_is_idempotent(client, db):
+    from app.db.models import Message
+    from app.services.read_state import mark_all_read, get_last_read
+
+    db.add(Message(
+        msg_type="dm",
+        contact_pub_key="dd" + "00" * 31,
+        channel_idx=None,
+        direction="in",
+        text="hi",
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        ack_state="pending",
+    ))
+    await db.commit()
+    n1 = await mark_all_read(db)
+    n2 = await mark_all_read(db)
+    assert n1 == 1
+    assert n2 == 1
+    ptr = await get_last_read(db, contact_pub_key="dd" + "00" * 31, channel_idx=None)
+    assert ptr > "2026-05-01"
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_ignores_outbound_messages(client, db):
+    from app.db.models import Message
+    from app.services.read_state import mark_all_read
+
+    db.add(Message(
+        msg_type="dm",
+        contact_pub_key="ee" + "00" * 31,
+        channel_idx=None,
+        direction="out",
+        text="me",
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        ack_state="pending",
+    ))
+    await db.commit()
+    assert (await mark_all_read(db)) == 0
+
+
+@pytest.mark.asyncio
+async def test_endpoint_mark_all_read(client, db):
+    from app.db.models import Message
+
+    db.add(Message(
+        msg_type="dm",
+        contact_pub_key="cc" + "00" * 31,
+        channel_idx=None,
+        direction="in",
+        text="x",
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        ack_state="pending",
+    ))
+    await db.commit()
+    r = await client.post("/api/conversations/read-all")
+    assert r.status_code == 200
+    body = r.json()
+    assert "marked_read" in body
+    assert body["marked_read"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_endpoint_mark_all_read_zero_when_empty(client):
+    r = await client.post("/api/conversations/read-all")
+    assert r.status_code == 200
+    assert r.json() == {"marked_read": 0}
+
+
+@pytest.mark.asyncio
 async def test_unread_total_respects_mark_read(client, db):
     from app.db.models import Message
 

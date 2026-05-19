@@ -1,7 +1,7 @@
 """Helpers for the conversation read-pointer (stored in `settings` table)."""
 from __future__ import annotations
 import datetime as dt
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Setting
@@ -47,6 +47,35 @@ async def mark_read(
     await db.execute(stmt)
     await db.commit()
     return ts
+
+
+async def mark_all_read(
+    db: AsyncSession,
+    when: dt.datetime | None = None,
+) -> int:
+    """Upsert the read pointer to `when` for every conversation observed in
+    the messages table. Returns the number of read pointers updated."""
+    ts = (when or dt.datetime.now(dt.timezone.utc)).isoformat()
+    rows = (await db.execute(text("""
+        SELECT DISTINCT
+          CASE msg_type
+            WHEN 'dm'   THEN 'read:dm:'   || COALESCE(contact_pub_key, '')
+            WHEN 'chan' THEN 'read:chan:' || CAST(COALESCE(channel_idx, -1) AS TEXT)
+          END AS key
+        FROM messages
+        WHERE direction = 'in' AND msg_type IN ('dm', 'chan')
+    """))).fetchall()
+    if not rows:
+        return 0
+    for row in rows:
+        stmt = (
+            sqlite_insert(Setting)
+            .values(key=row.key, value=ts)
+            .on_conflict_do_update(index_elements=["key"], set_={"value": ts})
+        )
+        await db.execute(stmt)
+    await db.commit()
+    return len(rows)
 
 
 async def get_last_read(

@@ -91,6 +91,17 @@ export function useMarkRead() {
   })
 }
 
+export function useMarkAllRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      api.post<{ marked_read: number }>("/api/conversations/read-all", {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["threads"] })
+    },
+  })
+}
+
 export function useDeleteMessage() {
   const qc = useQueryClient()
   return useMutation({
