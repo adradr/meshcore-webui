@@ -2,7 +2,6 @@ import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MessageBubble } from "./MessageBubble"
-import { SenderInfoPopover } from "./SenderInfoPopover"
 import type { EnrichedMessage } from "./MessageList"
 import type { ResolvedSender } from "./MessageActions"
 
@@ -89,29 +88,22 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
     <div className={`mt-3 flex gap-2 ${group.isOut ? "flex-row-reverse" : ""}`}>
       {showAvatarColumn && (
         <div className="flex-shrink-0 self-end">
-          {resolved ? (
-            <Link to={`/contact/${resolved.public_key}`}>
-              <ContactAvatar
-                pubkey={resolved.public_key}
-                name={resolved.adv_name}
-                size="sm"
-              />
-            </Link>
-          ) : (
-            <SenderInfoPopover name={senderName} avatarSeed={avatarSeed}>
-              <button
-                type="button"
-                className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label={`Show info for ${senderName}`}
-              >
-                <ContactAvatar
-                  pubkey={avatarSeed}
-                  name={senderName}
-                  size="sm"
-                />
-              </button>
-            </SenderInfoPopover>
-          )}
+          <Link
+            to={
+              resolved
+                ? `/contact/${resolved.public_key}`
+                : `/contacts?q=${encodeURIComponent(senderName)}`
+            }
+            aria-label={
+              resolved ? `Open ${resolved.adv_name} profile` : `Find ${senderName} in contacts`
+            }
+          >
+            <ContactAvatar
+              pubkey={resolved?.public_key ?? avatarSeed}
+              name={resolved?.adv_name ?? senderName}
+              size="sm"
+            />
+          </Link>
         </div>
       )}
       <div
@@ -121,20 +113,16 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
       >
         {showSender && !group.isOut && (
           <span className="px-2 text-[11px] font-medium text-muted-foreground">
-            {resolved ? (
-              <Link to={`/contact/${resolved.public_key}`} className="hover:underline">
-                {senderName}
-              </Link>
-            ) : (
-              <SenderInfoPopover name={senderName} avatarSeed={avatarSeed}>
-                <button
-                  type="button"
-                  className="cursor-pointer rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {senderName}
-                </button>
-              </SenderInfoPopover>
-            )}
+            <Link
+              to={
+                resolved
+                  ? `/contact/${resolved.public_key}`
+                  : `/contacts?q=${encodeURIComponent(senderName)}`
+              }
+              className="hover:underline"
+            >
+              {senderName}
+            </Link>
           </span>
         )}
         {group.messages.map((m, i) => {

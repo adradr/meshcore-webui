@@ -408,6 +408,10 @@ export function ContactDetailPage() {
             <CardTitle className="text-base">Identity</CardTitle>
           </CardHeader>
           <CardContent className="divide-y divide-border/60 text-sm">
+            <Row label="Name">
+              <span className="font-medium">{displayName}</span>
+              <CopyButton value={displayName} label="Name" />
+            </Row>
             <Row label="Public key">
               <code className="rounded bg-muted px-1.5 py-0.5 text-[11px]">
                 {`${pubKey.slice(0, 16)}…${pubKey.slice(-8)}`}

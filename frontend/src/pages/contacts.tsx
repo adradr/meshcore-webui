@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { Plus, Search, Star } from "lucide-react"
 import {
@@ -113,8 +113,10 @@ function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 export function ContactsPage() {
   const { data, isLoading, isError, error } = useContacts()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const parentRef = useRef<HTMLDivElement>(null)
-  const [filter, setFilter] = useState("")
+  // Initial filter from ?q=... so chat sender clicks can deep-link a search
+  const [filter, setFilter] = useState(() => searchParams.get("q") ?? "")
   const [importOpen, setImportOpen] = useState(false)
   const flags = useSetFlags()
 
