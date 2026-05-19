@@ -4,6 +4,7 @@ import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
 import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
+import { LineOfSightModal } from "@/features/los/LineOfSightModal"
 
 function nodeTypeFor(type: number | undefined): NodeType {
   if (type === 1) return "CLI"
@@ -36,6 +37,11 @@ export function MapPage() {
   const { data } = useContacts()
   const { data: selfInfo } = useSelfInfo()
   const dark = useIsDark()
+  const [losTarget, setLosTarget] = useState<{
+    name: string
+    lat: number
+    lon: number
+  } | null>(null)
 
   const self =
     selfInfo &&
@@ -70,7 +76,25 @@ export function MapPage() {
 
   return (
     <div className="h-full w-full">
-      <ClusteredContactMap contacts={contacts} self={self} dark={dark} />
+      <ClusteredContactMap
+        contacts={contacts}
+        self={self}
+        dark={dark}
+        onLosRequest={
+          self
+            ? (c) => setLosTarget({ name: c.name, lat: c.lat, lon: c.lon })
+            : undefined
+        }
+        selfHasGps={self !== null}
+      />
+      <LineOfSightModal
+        open={losTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setLosTarget(null)
+        }}
+        a={self}
+        b={losTarget}
+      />
     </div>
   )
 }

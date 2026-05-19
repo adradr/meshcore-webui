@@ -16,6 +16,10 @@ interface Props {
   /** Your own device's position; rendered as a distinct, non-clustered marker. */
   self?: { name: string; lat: number; lon: number } | null
   dark?: boolean
+  /** Emitted when the user clicks "Line of sight" in a marker popup. */
+  onLosRequest?: (c: ContactMarker) => void
+  /** When false (self GPS unknown), the LoS button is rendered disabled. */
+  selfHasGps?: boolean
 }
 
 // Initial center is a sane fallback before MapViewPersistence kicks in —
@@ -23,7 +27,13 @@ interface Props {
 const INITIAL_CENTER: LatLngExpression = [47.4979, 19.0402] // Budapest
 const INITIAL_ZOOM = 6
 
-export function ClusteredContactMap({ contacts, self, dark = false }: Props) {
+export function ClusteredContactMap({
+  contacts,
+  self,
+  dark = false,
+  onLosRequest,
+  selfHasGps,
+}: Props) {
   // Include self in fitBounds + center so the camera respects your own pin
   const allPoints = self
     ? [...contacts, { id: "__self__", name: self.name, lat: self.lat, lon: self.lon, nodeType: "SELF" as const }]
@@ -40,7 +50,11 @@ export function ClusteredContactMap({ contacts, self, dark = false }: Props) {
       <MapResizer />
       <MapViewPersistence contacts={allPoints} />
       <MarkerClusterGroup chunkedLoading>
-        <MarkersLayer contacts={contacts} />
+        <MarkersLayer
+          contacts={contacts}
+          onLosRequest={onLosRequest}
+          selfHasGps={selfHasGps}
+        />
       </MarkerClusterGroup>
       {/* Self marker rendered OUTSIDE the cluster so it always shows distinctly */}
       {self && (
