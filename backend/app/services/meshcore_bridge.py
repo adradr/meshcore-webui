@@ -1,5 +1,8 @@
 from __future__ import annotations
+import datetime as dt
 import logging
+
+from sqlalchemy import select, update
 
 from app.db.models import Message
 from app.db.session import SessionLocal
@@ -29,6 +32,12 @@ class MeshCoreBridge:
             self._pool.spawn(
                 self._handle_chan(event.payload, chan),
                 name=f"chan-handler-{chan}",
+            )
+        elif event.type == "ack":
+            code = (event.payload or {}).get("code")
+            self._pool.spawn(
+                self._handle_ack(event.payload or {}),
+                name=f"ack-handler-{code}",
             )
 
     async def _handle_dm(self, payload: dict, sender_prefix: str) -> None:
@@ -66,6 +75,32 @@ class MeshCoreBridge:
             tag=f"meshcore:chan:{chan}",
             url=f"/channel/{chan}",
         ))
+
+    async def _handle_ack(self, payload: dict) -> None:
+        code = payload.get("code")
+        if not code:
+            log.debug("ACK event without code: %r", payload)
+            return
+        async with SessionLocal() as db:
+            # Match the most-recent pending outgoing message with this ack hash.
+            stmt = (
+                select(Message)
+                .where(Message.expected_ack_hex == code)
+                .where(Message.ack_state != "acked")
+                .order_by(Message.timestamp.desc(), Message.id.desc())
+                .limit(1)
+            )
+            row = (await db.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                log.debug("ACK %s did not match any pending message", code)
+                return
+            await db.execute(
+                update(Message)
+                .where(Message.id == row.id)
+                .values(ack_state="acked", ack_received_at=dt.datetime.now(dt.timezone.utc))
+            )
+            await db.commit()
+            log.info("ACK %s → message id=%d marked acked", code, row.id)
 
     async def _notify(self, notification: Notification) -> None:
         async with SessionLocal() as db:

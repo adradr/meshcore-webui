@@ -67,3 +67,87 @@ async def test_incoming_dm_persisted_to_messages_table(db, engine, monkeypatch):
     assert msgs[0].text == "hi mom"
     assert msgs[0].contact_pub_key == "deadbeef"
     assert msgs[0].direction == "in"
+
+
+@pytest.mark.asyncio
+async def test_ack_event_updates_matching_message(db, engine, monkeypatch):
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    # Insert a pending outgoing message expecting an ACK with hash "deadbeef".
+    msg = Message(
+        msg_type="dm",
+        contact_pub_key="abc123",
+        direction="out",
+        text="ping",
+        ack_state="pending",
+        expected_ack_hex="deadbeef",
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    msg_id = msg.id
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    bridge.handle_event(WireEvent(
+        type="ack",
+        payload={"code": "deadbeef"},
+        attributes={"code": "deadbeef"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    from sqlalchemy import select
+    db.expire_all()
+    refreshed = (await db.execute(select(Message).where(Message.id == msg_id))).scalar_one()
+    assert refreshed.ack_state == "acked"
+    assert refreshed.ack_received_at is not None
+
+
+@pytest.mark.asyncio
+async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    msg = Message(
+        msg_type="dm",
+        contact_pub_key="abc123",
+        direction="out",
+        text="ping",
+        ack_state="pending",
+        expected_ack_hex="cafef00d",
+    )
+    db.add(msg)
+    await db.commit()
+    await db.refresh(msg)
+    msg_id = msg.id
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    bridge.handle_event(WireEvent(
+        type="ack",
+        payload={"code": "deadbeef"},
+        attributes={"code": "deadbeef"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    from sqlalchemy import select
+    refreshed = (await db.execute(select(Message).where(Message.id == msg_id))).scalar_one()
+    assert refreshed.ack_state == "pending"
+    assert refreshed.ack_received_at is None
