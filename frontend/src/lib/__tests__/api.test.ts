@@ -3,11 +3,11 @@ import { api } from "@/lib/api"
 
 describe("api error handling", () => {
   beforeEach(() => {
-    global.fetch = vi.fn() as unknown as typeof fetch
+    globalThis.fetch = vi.fn() as unknown as typeof fetch
   })
 
   it("includes backend detail in thrown error (JSON detail)", async () => {
-    ;(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    ;(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response(
         JSON.stringify({
           detail: "Telemetry: no reply from deadbeef… within 15s",
@@ -23,7 +23,7 @@ describe("api error handling", () => {
   })
 
   it("includes raw body when response is not JSON", async () => {
-    ;(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    ;(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response("some plaintext error", {
         status: 500,
         statusText: "Internal Server Error",
@@ -33,14 +33,14 @@ describe("api error handling", () => {
   })
 
   it("falls back to plain status when body is empty", async () => {
-    ;(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    ;(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response("", { status: 500, statusText: "Internal Server Error" }),
     )
     await expect(api.get("/x")).rejects.toThrow("500")
   })
 
   it("preserves the status code on the thrown error", async () => {
-    ;(global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+    ;(globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
       new Response(JSON.stringify({ detail: "nope" }), {
         status: 504,
         statusText: "Gateway Timeout",
