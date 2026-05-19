@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider } from "react-router-dom"
+import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { Layout } from "@/components/layout"
 import { ChatPage } from "@/pages/chat"
 import { ContactsPage } from "@/pages/contacts"
@@ -7,8 +7,6 @@ import { ChannelsPage } from "@/pages/channels"
 import { MapPage } from "@/pages/map"
 import { SettingsPage } from "@/pages/settings"
 import { DevicePage } from "@/pages/device"
-import { RxLogPage } from "@/pages/rx-log"
-import { NoisePage } from "@/pages/noise"
 
 const router = createBrowserRouter([
   {
@@ -23,8 +21,10 @@ const router = createBrowserRouter([
       { path: "channels", element: <ChannelsPage /> },
       { path: "map", element: <MapPage /> },
       { path: "device", element: <DevicePage /> },
-      { path: "rx-log", element: <RxLogPage /> },
-      { path: "noise", element: <NoisePage /> },
+      // Legacy routes — RX Log and Noise are now tabs on /device.
+      // Redirect old deep links so external bookmarks keep working.
+      { path: "rx-log", element: <Navigate to="/device?tab=rx-log" replace /> },
+      { path: "noise", element: <Navigate to="/device?tab=noise" replace /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },

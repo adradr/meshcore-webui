@@ -52,7 +52,11 @@ function Stat({
   )
 }
 
-export function NoisePage() {
+/**
+ * Body of the Noise floor view. Renders inside a Tabs panel on the /device
+ * page; does NOT own page-level chrome (container) so it can be embedded.
+ */
+export function NoisePanel() {
   const [paused, setPaused] = useState(false)
   const { data, isLoading, isError } = useNoiseSamples({ paused })
   const samples = data ?? []
@@ -66,11 +70,11 @@ export function NoisePage() {
   )
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
+    <div className="flex h-full flex-col gap-4">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity className="h-5 w-5 text-primary" />
-          <h1 className="text-lg font-semibold">Noise floor</h1>
+          <h2 className="text-lg font-semibold">Noise floor</h2>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <span>Pause</span>

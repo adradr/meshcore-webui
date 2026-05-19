@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
-// Re-exports for tests that still import these helpers from the page module.
+// Re-exports for tests that still import these helpers from the panel module.
 export {
   deriveOptions,
   formatRecvClock,
@@ -41,7 +41,11 @@ export {
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 40
 
-export function RxLogPage() {
+/**
+ * Body of the RX log view. Renders inside a Tabs panel on the /device page;
+ * does NOT own page-level chrome (header, container) so it can be embedded.
+ */
+export function RxLogPanel() {
   const [paused, setPaused] = useState(false)
   const [search, setSearch] = useState("")
   const [routeFilter, setRouteFilter] = useState<string>("All")

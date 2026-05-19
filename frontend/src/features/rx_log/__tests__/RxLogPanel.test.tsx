@@ -5,11 +5,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { WebSocketContext } from "@/realtime/WebSocketProvider"
 import {
-  RxLogPage,
+  RxLogPanel,
   formatRecvClock,
   relativeTime,
   deriveOptions,
-} from "../rx-log"
+} from "../RxLogPanel"
 import type { RxEntry } from "@/features/rx_log/api"
 
 vi.mock("@/lib/api", () => ({ api: { get: vi.fn() } }))
@@ -68,14 +68,14 @@ const seed: RxEntry[] = [
   },
 ]
 
-describe("RxLogPage", () => {
+describe("RxLogPanel", () => {
   it("renders rows from REST seed", async () => {
     ;(api.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       items: seed,
       total_buffered: 2,
       returned: 2,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/aabbccdd/)).toBeInTheDocument(),
     )
@@ -88,7 +88,7 @@ describe("RxLogPage", () => {
       total_buffered: 2,
       returned: 2,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/aabbccdd/)).toBeInTheDocument(),
     )
@@ -105,7 +105,7 @@ describe("RxLogPage", () => {
       total_buffered: 0,
       returned: 0,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/no rx events yet/i)).toBeInTheDocument(),
     )
@@ -117,7 +117,7 @@ describe("RxLogPage", () => {
       total_buffered: 2,
       returned: 2,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/aabbccdd/)).toBeInTheDocument(),
     )
@@ -145,7 +145,7 @@ describe("RxLogPage", () => {
       total_buffered: 1,
       returned: 1,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/deadbeef/)).toBeInTheDocument(),
     )
@@ -161,7 +161,7 @@ describe("RxLogPage", () => {
       total_buffered: 2,
       returned: 2,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/aabbccdd/)).toBeInTheDocument(),
     )
@@ -186,7 +186,7 @@ describe("RxLogPage", () => {
       total_buffered: 2,
       returned: 2,
     })
-    render(wrap(<RxLogPage />))
+    render(wrap(<RxLogPanel />))
     await waitFor(() =>
       expect(screen.getByText(/aabbccdd/)).toBeInTheDocument(),
     )

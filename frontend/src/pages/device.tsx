@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { Copy, MapPin, Radio, Send, Waves } from "lucide-react"
 import { toast } from "sonner"
 import {
@@ -7,7 +7,8 @@ import {
   useSelfInfo,
   useSendAdvert,
 } from "@/features/device/queries"
-import { NoiseWidget } from "@/features/noise/NoiseWidget"
+import { RxLogPanel } from "@/features/rx_log/RxLogPanel"
+import { NoisePanel } from "@/features/noise/NoisePanel"
 import { useRealtime } from "@/realtime/WebSocketProvider"
 import {
   Card,
@@ -19,6 +20,19 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs"
+
+const VALID_TABS = ["info", "rx-log", "noise"] as const
+type DeviceTab = (typeof VALID_TABS)[number]
+
+function isDeviceTab(value: string | null): value is DeviceTab {
+  return value !== null && (VALID_TABS as readonly string[]).includes(value)
+}
 
 function truncatePubKey(pk: string): string {
   if (pk.length <= 16) return pk
@@ -271,16 +285,73 @@ function ActionsCard() {
   )
 }
 
+function DeviceInfoPanel() {
+  return (
+    <div className="flex flex-col gap-4">
+      <IdentityCard />
+      <RadioCard />
+      <HardwareCard />
+      <PositionCard />
+      <ActionsCard />
+    </div>
+  )
+}
+
 export function DevicePage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get("tab")
+  const activeTab: DeviceTab = isDeviceTab(requestedTab)
+    ? requestedTab
+    : "info"
+
+  const handleTabChange = (value: string) => {
+    if (!isDeviceTab(value)) return
+    const next = new URLSearchParams(searchParams)
+    if (value === "info") {
+      next.delete("tab")
+    } else {
+      next.set("tab", value)
+    }
+    setSearchParams(next, { replace: true })
+  }
+
   return (
     <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
-        <IdentityCard />
-        <RadioCard />
-        <HardwareCard />
-        <PositionCard />
-        <ActionsCard />
-        <NoiseWidget />
+      <div className="mx-auto flex h-full max-w-3xl flex-col p-4">
+        <Tabs
+          value={activeTab}
+          onValueChange={handleTabChange}
+          className="flex h-full flex-col gap-4"
+        >
+          <TabsList className="sticky top-0 z-10 w-full self-stretch">
+            <TabsTrigger value="info" className="flex-1">
+              Info
+            </TabsTrigger>
+            <TabsTrigger value="rx-log" className="flex-1">
+              RX Log
+            </TabsTrigger>
+            <TabsTrigger value="noise" className="flex-1">
+              Noise
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="info" className="mt-0">
+            <DeviceInfoPanel />
+          </TabsContent>
+          <TabsContent
+            value="rx-log"
+            className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden"
+            forceMount
+          >
+            <RxLogPanel />
+          </TabsContent>
+          <TabsContent
+            value="noise"
+            className="mt-0 min-h-0 flex-1 data-[state=inactive]:hidden"
+            forceMount
+          >
+            <NoisePanel />
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   )

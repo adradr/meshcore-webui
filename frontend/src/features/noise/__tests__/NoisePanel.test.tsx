@@ -8,7 +8,7 @@ vi.mock("@/features/noise/api", () => ({ useNoiseSamples: vi.fn() }))
 vi.mock("uplot-react", () => ({ default: () => null }))
 
 import { useNoiseSamples } from "@/features/noise/api"
-import { NoisePage } from "../noise"
+import { NoisePanel } from "../NoisePanel"
 
 function wrap(ui: React.ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -19,7 +19,7 @@ function wrap(ui: React.ReactNode) {
   )
 }
 
-describe("NoisePage", () => {
+describe("NoisePanel", () => {
   it("computes stats from samples", () => {
     ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
       data: [
@@ -30,7 +30,7 @@ describe("NoisePage", () => {
       isLoading: false,
       isError: false,
     })
-    render(wrap(<NoisePage />))
+    render(wrap(<NoisePanel />))
     // Current = last = -115
     expect(screen.getByText(/-115 dBm/)).toBeInTheDocument()
     // Min = -120, Max = -110
@@ -46,7 +46,7 @@ describe("NoisePage", () => {
       isLoading: false,
       isError: false,
     })
-    render(wrap(<NoisePage />))
+    render(wrap(<NoisePanel />))
     const dashes = screen.getAllByText("—")
     expect(dashes.length).toBeGreaterThanOrEqual(4) // current, min, max, mean
   })
@@ -60,7 +60,7 @@ describe("NoisePage", () => {
         _paused: opts?.paused,
       }),
     )
-    render(wrap(<NoisePage />))
+    render(wrap(<NoisePanel />))
     const sw = screen.getByLabelText(/pause stream/i)
     expect(sw).not.toBeChecked()
     fireEvent.click(sw)
