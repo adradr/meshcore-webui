@@ -262,11 +262,16 @@ function ActionsCard() {
         <Waves className="h-4 w-4 text-muted-foreground" />
         <CardTitle className="text-base">Actions</CardTitle>
       </CardHeader>
+      {/*
+        Mobile-first: stack vertically with comfortable tap heights (h-11 ≈
+        44pt, the Apple HIG minimum) and shrink back to default height side-
+        by-side on sm+. Was h-9 stacked, which read as visually cramped.
+      */}
       <CardContent className="flex flex-col gap-2 sm:flex-row">
         <Button
           type="button"
           variant="outline"
-          className="flex-1"
+          className="h-11 flex-1 sm:h-9"
           onClick={() => advert.mutate(false)}
           disabled={advert.isPending}
         >
@@ -275,7 +280,7 @@ function ActionsCard() {
         </Button>
         <Button
           type="button"
-          className="flex-1"
+          className="h-11 flex-1 sm:h-9"
           onClick={() => advert.mutate(true)}
           disabled={advert.isPending}
         >

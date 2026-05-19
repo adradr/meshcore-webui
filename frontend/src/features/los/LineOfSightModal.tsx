@@ -252,14 +252,29 @@ export function LineOfSightModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-w-0 flex-col gap-4 overflow-x-hidden">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="los-h-tx">TX antenna height (m)</Label>
+        {/*
+          Wrap inputs in a real <form> so the on-screen keyboard's submit
+          (Go / Done) key triggers Compute. The Button is type="submit" and
+          handleCompute is invoked via onSubmit (with preventDefault to keep
+          the page from reloading).
+        */}
+        <form
+          className="flex min-w-0 flex-col gap-4 overflow-x-hidden"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canCompute) handleCompute()
+          }}
+        >
+          {/* Side-by-side on every viewport — saves a row and matches the */}
+          {/* TX / RX mental pairing. Narrowest mobile (320px) still fits. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Label htmlFor="los-h-tx">TX height (m)</Label>
               <Input
                 id="los-h-tx"
                 type="number"
                 inputMode="decimal"
+                enterKeyHint="send"
                 step="0.5"
                 min="0"
                 max="200"
@@ -267,12 +282,13 @@ export function LineOfSightModal({
                 onChange={(e) => setHTx(Number(e.target.value))}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="los-h-rx">RX antenna height (m)</Label>
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <Label htmlFor="los-h-rx">RX height (m)</Label>
               <Input
                 id="los-h-rx"
                 type="number"
                 inputMode="decimal"
+                enterKeyHint="send"
                 step="0.5"
                 min="0"
                 max="200"
@@ -299,7 +315,7 @@ export function LineOfSightModal({
           </div>
 
           <div>
-            <Button onClick={handleCompute} disabled={!canCompute}>
+            <Button type="submit" disabled={!canCompute}>
               {mutation.isPending ? (
                 <>
                   <Loader2 className="animate-spin" />
@@ -315,7 +331,7 @@ export function LineOfSightModal({
           {mutation.data && !mutation.isPending && (
             <ResultPanel data={mutation.data} hTx={hTx} hRx={hRx} />
           )}
-        </div>
+        </form>
       </DialogContent>
     </Dialog>
   )
