@@ -1,7 +1,8 @@
-import { ArrowLeft, Hash, Info } from "lucide-react"
+import { ArrowLeft, Info } from "lucide-react"
 import { useNavigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { ContactAvatar } from "@/components/contact-avatar"
+import { ChannelAvatar } from "@/components/channel-avatar"
 import { useContact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
 import { useRealtime } from "@/realtime/WebSocketProvider"
@@ -74,9 +75,7 @@ export function ConversationHeader({ contactPubKey, channelIdx }: Props) {
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Back">
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-          <Hash className="h-4 w-4" />
-        </div>
+        <ChannelAvatar idx={channelIdx} name={name} size="sm" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold leading-tight">{name}</p>
           <p className="truncate text-[10px] text-muted-foreground leading-tight flex items-center gap-1">

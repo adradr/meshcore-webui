@@ -1,12 +1,12 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { colorForPubkey, initialsFor } from "@/lib/avatar"
+import { colorForPubkey } from "@/lib/avatar"
 import { identiconBgColor, identiconDataUrl } from "@/lib/identicon"
 import { cn } from "@/lib/utils"
 
 type AvatarSize = "sm" | "default" | "lg" | "xl"
 
 interface Props {
-  pubkey: string
+  idx: number
   name: string
   size?: AvatarSize
   className?: string
@@ -20,28 +20,28 @@ const SIZE_CLASSES: Record<AvatarSize, string> = {
 }
 
 /**
- * Avatar with a deterministic GitHub-style block-pattern identicon derived
- * from the contact's pubkey (or name as fallback). Because the identicon is
- * a pure SVG shape pattern with no text glyphs, contact names that contain
- * emoji or other unsupported glyphs can never render as broken rectangles.
+ * Avatar for a MeshCore channel. Uses a GitHub-style block identicon
+ * seeded by both the channel index and name so different channels with
+ * the same idx (e.g. across firmwares) still produce visually distinct
+ * tiles, and renaming a channel produces a fresh look.
  *
- * The colored initials fallback remains as a defensive backstop in the
- * unlikely case the embedded data URL fails to render.
+ * Falls back to "#<idx>" text if the embedded identicon SVG ever fails
+ * to render.
  */
-export function ContactAvatar({ pubkey, name, size = "default", className }: Props) {
-  const seed = pubkey || name
+export function ChannelAvatar({ idx, name, size = "default", className }: Props) {
+  const seed = `chan:${idx}:${name}`
   const dataUrl = identiconDataUrl(seed)
   return (
     <Avatar
-      className={cn(SIZE_CLASSES[size], className)}
+      className={cn(SIZE_CLASSES[size], "ring-1 ring-foreground/10", className)}
       style={{ background: identiconBgColor(seed) }}
     >
-      <AvatarImage src={dataUrl} alt={name} />
+      <AvatarImage src={dataUrl} alt={`Channel ${name}`} />
       <AvatarFallback
         className="font-semibold tracking-wide text-white"
         style={{ background: colorForPubkey(seed) }}
       >
-        {initialsFor(name)}
+        #{idx}
       </AvatarFallback>
     </Avatar>
   )

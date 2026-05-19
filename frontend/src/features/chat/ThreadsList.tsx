@@ -1,9 +1,10 @@
 import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { ArrowUpRight, Hash, MessagesSquare, Star } from "lucide-react"
+import { ArrowUpRight, MessagesSquare, Star } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ContactAvatar } from "@/components/contact-avatar"
+import { ChannelAvatar } from "@/components/channel-avatar"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
 import { useThreads, type Thread } from "./queries"
@@ -30,21 +31,6 @@ function truncate(s: string, n = 100): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…"
 }
 
-interface ChannelAvatarProps {
-  idx: number
-}
-
-function ChannelAvatar({ idx }: ChannelAvatarProps) {
-  return (
-    <div
-      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-      aria-label={`Channel ${idx}`}
-    >
-      <Hash className="h-5 w-5" />
-    </div>
-  )
-}
-
 interface ThreadRowProps {
   thread: Thread
   title: string
@@ -63,7 +49,11 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
       <Card size="sm" className="transition-colors hover:bg-muted/50">
         <CardContent className="flex items-center gap-3">
           {isChannel ? (
-            <ChannelAvatar idx={thread.channel_idx ?? -1} />
+            <ChannelAvatar
+              idx={thread.channel_idx ?? -1}
+              name={title.replace(/^#\s*/, "")}
+              size="default"
+            />
           ) : (
             <ContactAvatar
               pubkey={pubkey ?? "?"}

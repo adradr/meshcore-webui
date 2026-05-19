@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
+import { ChannelAvatar } from "@/components/channel-avatar"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog,
@@ -50,8 +51,9 @@ function ChannelCard({ channel }: { channel: Channel }) {
       className="cursor-pointer transition-colors hover:bg-accent/40"
       onClick={() => navigate(`/channel/${channel.channel_idx}`)}
     >
-      <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
-        <div className="min-w-0">
+      <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
+        <div className="flex min-w-0 items-center gap-3">
+          <ChannelAvatar idx={channel.channel_idx} name={name} size="sm" />
           <CardTitle className="text-sm font-medium">
             <span className="text-muted-foreground">#{channel.channel_idx}</span>{" "}
             {name}
