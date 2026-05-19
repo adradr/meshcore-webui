@@ -131,6 +131,22 @@
     }
 }
 
+/* Trap Leaflet's z-index world.
+ *
+ * Leaflet panes inside `.leaflet-container` use absolute z-indexes up to 700
+ * (`.leaflet-popup-pane`). The container itself defaults to `z-auto`, so it
+ * does NOT create a stacking context — its descendants compete in the root
+ * stacking context against everything else, including shadcn's Dialog overlay
+ * at `z-50`. Result: modals open *behind* map markers/popups.
+ *
+ * `isolation: isolate` creates a stacking context on `.leaflet-container`,
+ * confining all Leaflet panes inside it. Dialogs (z-50, mounted at the body)
+ * then cleanly cover the map. Cost: nothing — Leaflet's internal layering
+ * still works exactly as before within the container. */
+.leaflet-container {
+    isolation: isolate;
+}
+
 /* Leaflet divIcon wrapper for MeshCore node markers */
 .mc-marker-wrapper {
     background: transparent !important;
