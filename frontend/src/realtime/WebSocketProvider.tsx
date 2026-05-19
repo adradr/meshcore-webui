@@ -72,7 +72,7 @@ export function WebSocketProvider({
           qc.invalidateQueries({ queryKey: ["threads"] })
           break
         }
-        case "ack": {
+        case "acknowledgement": {
           qc.invalidateQueries({ queryKey: ["messages"] })
           qc.invalidateQueries({ queryKey: ["threads"] })
           break

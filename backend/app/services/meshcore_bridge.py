@@ -33,7 +33,7 @@ class MeshCoreBridge:
                 self._handle_chan(event.payload, chan),
                 name=f"chan-handler-{chan}",
             )
-        elif event.type == "ack":
+        elif event.type == "acknowledgement":
             code = (event.payload or {}).get("code")
             self._pool.spawn(
                 self._handle_ack(event.payload or {}),

@@ -131,7 +131,7 @@ async def test_ack_event_updates_matching_message(db, engine, monkeypatch):
     bridge = MeshCoreBridge(sender=sender, pool=pool)
 
     bridge.handle_event(WireEvent(
-        type="ack",
+        type="acknowledgement",
         payload={"code": "deadbeef"},
         attributes={"code": "deadbeef"},
     ))
@@ -173,7 +173,7 @@ async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
     bridge = MeshCoreBridge(sender=sender, pool=pool)
 
     bridge.handle_event(WireEvent(
-        type="ack",
+        type="acknowledgement",
         payload={"code": "deadbeef"},
         attributes={"code": "deadbeef"},
     ))

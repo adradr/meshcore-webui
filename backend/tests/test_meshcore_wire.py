@@ -16,7 +16,7 @@ def test_wire_event_to_dict_is_json_serializable():
 
 def test_wire_event_topic_defaults_to_system():
     from app.services.meshcore_client import WireEvent
-    ev = WireEvent(type="ack", payload={})
+    ev = WireEvent(type="acknowledgement", payload={})
     assert ev.topic == "system"
 
 
@@ -26,7 +26,7 @@ def test_wire_event_topic_defaults_to_messages_for_existing_types():
     assert topic_for_event_type("channel_message") == "messages"
     assert topic_for_event_type("acknowledgement") == "messages"
     assert topic_for_event_type("connected") == "system"
-    assert topic_for_event_type("rx_log") == "rx_log"
+    assert topic_for_event_type("rx_log_data") == "rx_log"
     assert topic_for_event_type("stats_radio") == "noise"
     assert topic_for_event_type("trace_data") == "trace"
 
@@ -34,6 +34,15 @@ def test_wire_event_topic_defaults_to_messages_for_existing_types():
 def test_topic_for_event_type_unknown_falls_back_to_system():
     from app.services.meshcore_client import topic_for_event_type
     assert topic_for_event_type("completely_unknown_type_zzz") == "system"
+
+
+def test_topic_map_keys_match_real_event_type_values():
+    """Catches drift between hardcoded wire-type strings and meshcore.events.EventType.value."""
+    from app.services.meshcore_client import TOPIC_MAP
+    from meshcore.events import EventType
+    valid_values = {e.value for e in EventType}
+    for key in TOPIC_MAP:
+        assert key in valid_values, f"TOPIC_MAP key '{key}' is not a valid EventType.value"
 
 
 def test_topic_map_covers_all_forwarded_events():

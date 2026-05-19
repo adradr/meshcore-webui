@@ -25,7 +25,7 @@ export const WSMessageSchema = z.discriminatedUnion("type", [
     attributes: z.record(z.string(), z.unknown()),
   }),
   z.object({
-    type: z.literal("ack"),
+    type: z.literal("acknowledgement"),
     payload: z.object({ code: z.string() }),
     attributes: z.record(z.string(), z.unknown()),
   }),

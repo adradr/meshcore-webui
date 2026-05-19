@@ -20,7 +20,7 @@ TOPIC_MAP = {
     "battery_info": "system",
     "connected": "system",
     "disconnected": "system",
-    "rx_log": "rx_log",
+    "rx_log_data": "rx_log",
     "stats_radio": "noise",
     "stats_core": "system",
     "stats_packets": "system",
