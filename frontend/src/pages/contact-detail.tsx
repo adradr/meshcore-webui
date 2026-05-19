@@ -63,6 +63,8 @@ import {
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
+import { PageShell } from "@/components/page-shell"
+import { PageHeader } from "@/components/page-header"
 import {
   bearingDeg,
   compassDir,
@@ -205,8 +207,8 @@ function CopyButton({ value, label }: { value: string; label?: string }) {
 
 function SkeletonView() {
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <PageShell header={<PageHeader title="Contact" />}>
+      <div className="mx-auto max-w-3xl space-y-4">
         <Skeleton className="h-8 w-20" />
         <Skeleton className="h-28 w-full rounded-xl" />
         <div className="grid grid-cols-4 gap-2">
@@ -217,15 +219,15 @@ function SkeletonView() {
         <Skeleton className="h-32 w-full rounded-xl" />
         <Skeleton className="h-24 w-full rounded-xl" />
       </div>
-    </div>
+    </PageShell>
   )
 }
 
 function NotFoundView({ pubkey }: { pubkey?: string }) {
   const navigate = useNavigate()
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <PageShell header={<PageHeader title="Contact (not found)" />}>
+      <div className="mx-auto max-w-3xl space-y-4">
         <Button
           variant="ghost"
           size="sm"
@@ -256,7 +258,7 @@ function NotFoundView({ pubkey }: { pubkey?: string }) {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </PageShell>
   )
 }
 
@@ -302,9 +304,42 @@ export function ContactDetailPage() {
   const lastHeard =
     contact.last_advert != null ? relativeTime(contact.last_advert) : null
 
+  const headerActions = (
+    <>
+      <MuteToggle
+        kind="contact"
+        // Bridge stores pubkey_prefix (6 bytes = 12 hex chars).
+        // Slice the full pubkey to that same prefix so the mute key
+        // matches whatever the bridge sees on inbound DMs.
+        targetKey={pubKey.slice(0, 12)}
+        name={displayName}
+        size="icon"
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        aria-label={isStarred ? "Unstar contact" : "Star contact"}
+        aria-pressed={isStarred}
+        onClick={() =>
+          flags.mutate({ pubkey: pubKey, starred: !isStarred })
+        }
+      >
+        <Star
+          className={
+            isStarred
+              ? "h-5 w-5 fill-yellow-400 text-yellow-500"
+              : "h-5 w-5 text-muted-foreground"
+          }
+        />
+      </Button>
+    </>
+  )
+
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <PageShell
+      header={<PageHeader title={displayName} actions={headerActions} />}
+    >
+      <div className="mx-auto max-w-3xl space-y-4">
         <Button
           variant="ghost"
           size="sm"
@@ -336,34 +371,6 @@ export function ContactDetailPage() {
                   </span>
                 )}
               </CardDescription>
-            </div>
-            <div className="flex items-center gap-1">
-              <MuteToggle
-                kind="contact"
-                // Bridge stores pubkey_prefix (6 bytes = 12 hex chars).
-                // Slice the full pubkey to that same prefix so the mute key
-                // matches whatever the bridge sees on inbound DMs.
-                targetKey={pubKey.slice(0, 12)}
-                name={displayName}
-                size="icon"
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label={isStarred ? "Unstar contact" : "Star contact"}
-                aria-pressed={isStarred}
-                onClick={() =>
-                  flags.mutate({ pubkey: pubKey, starred: !isStarred })
-                }
-              >
-                <Star
-                  className={
-                    isStarred
-                      ? "h-5 w-5 fill-yellow-400 text-yellow-500"
-                      : "h-5 w-5 text-muted-foreground"
-                  }
-                />
-              </Button>
             </div>
           </CardHeader>
         </Card>
@@ -690,6 +697,6 @@ export function ContactDetailPage() {
           </pre>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageShell>
   )
 }

@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
+import { PageShell } from "@/components/page-shell"
+import { PageHeader } from "@/components/page-header"
 import { ChannelAvatar } from "@/components/channel-avatar"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -180,36 +182,31 @@ export function ChannelsPage() {
   const { data, isLoading, isError, error } = useChannels()
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b p-3">
-        <h2 className="text-sm font-semibold">Channels</h2>
-        <AddChannelDialog />
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-3">
-        {isLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full rounded-md" />
-            ))}
-          </div>
-        ) : isError ? (
-          <div className="text-sm text-destructive">
-            Failed to load channels:{" "}
-            {error instanceof Error ? error.message : "unknown"}
-          </div>
-        ) : !data || data.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">
-            No channels yet.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {data.map((ch) => (
-              <ChannelCard key={ch.channel_idx} channel={ch} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+    <PageShell
+      header={<PageHeader title="Channels" actions={<AddChannelDialog />} />}
+    >
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 w-full rounded-md" />
+          ))}
+        </div>
+      ) : isError ? (
+        <div className="text-sm text-destructive">
+          Failed to load channels:{" "}
+          {error instanceof Error ? error.message : "unknown"}
+        </div>
+      ) : !data || data.length === 0 ? (
+        <div className="p-8 text-center text-sm text-muted-foreground">
+          No channels yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {data.map((ch) => (
+            <ChannelCard key={ch.channel_idx} channel={ch} />
+          ))}
+        </div>
+      )}
+    </PageShell>
   )
 }

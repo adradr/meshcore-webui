@@ -1,23 +1,25 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { BellOff } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Separator } from "@/components/ui/separator"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { PageShell } from "@/components/page-shell"
+import { PageHeader } from "@/components/page-header"
 import { useTheme } from "@/components/theme-provider"
 import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
-import { useMutes, useToggleMute } from "@/features/mutes/queries"
-import {
-  usePushMode,
-  useSetPushMode,
-  type PushMode,
-} from "@/features/push/queries"
-import { useContacts } from "@/features/contacts/queries"
-import { useChannels } from "@/features/channels/queries"
+import { MutedList } from "@/features/mutes/MutedList"
+import { PushModeRadio } from "@/features/push/PushModeRadio"
+
+const REPO_URL = "https://github.com/randomicon/meshcore-webui"
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme()
@@ -69,219 +71,111 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="space-y-6 p-4">
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">Appearance</h2>
-          <div className="flex items-center gap-3">
-            <Label htmlFor="dark">Dark mode</Label>
-            <Switch
-              id="dark"
-              checked={theme === "dark"}
-              onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
-            />
-          </div>
-        </section>
-
-        <Separator />
-
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">Notifications</h2>
-          {pushAvailable ? (
+    <PageShell header={<PageHeader title="Settings" />}>
+      <div className="mx-auto max-w-3xl space-y-3">
+        <Card>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Appearance</CardTitle>
+            <CardDescription className="text-xs">
+              Dark mode follows the system by default.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="p-3 pt-2">
             <div className="flex items-center gap-3">
-              <Label htmlFor="push">Push notifications</Label>
+              <Label htmlFor="dark">Dark mode</Label>
               <Switch
-                id="push"
-                checked={pushOn}
-                onCheckedChange={togglePush}
+                id="dark"
+                checked={theme === "dark"}
+                onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
               />
             </div>
-          ) : (
-            <PWAInstallPrompt />
-          )}
-        </section>
+          </CardContent>
+        </Card>
 
-        <Separator />
+        <Card>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Notifications</CardTitle>
+            <CardDescription className="text-xs">
+              Master filter applies to every push. Per-conversation mutes
+              layer on top and only matter when the filter is "All messages".
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4 p-3 pt-2">
+            {pushAvailable ? (
+              <div className="flex items-center gap-3">
+                <Label htmlFor="push">Push notifications</Label>
+                <Switch
+                  id="push"
+                  checked={pushOn}
+                  onCheckedChange={togglePush}
+                />
+              </div>
+            ) : (
+              <PWAInstallPrompt />
+            )}
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">
-            Push notification filter
-          </h2>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Master switch applied to every push. Per-conversation mutes below
-            only matter when this is set to "All messages".
-          </p>
-          <PushModeRadio />
-        </section>
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Push filter
+              </h3>
+              <PushModeRadio />
+            </div>
 
-        <Separator />
+            <div className="space-y-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Muted conversations
+              </h3>
+              <MutedList />
+            </div>
+          </CardContent>
+        </Card>
 
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">Muted conversations</h2>
-          <MutedList />
-        </section>
+        <Card>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">Security</CardTitle>
+            <CardDescription className="text-xs">
+              Required when the server has{" "}
+              <code className="rounded bg-muted px-1 text-[11px]">
+                MESHCORE_WEBUI_API_KEY
+              </code>{" "}
+              set. Reloading the page applies the change.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2 p-3 pt-2">
+            <Label htmlFor="api-key">API key</Label>
+            <div className="flex gap-2">
+              <Input
+                id="api-key"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="bearer token"
+                className="flex-1"
+              />
+              <Button onClick={saveApiKey}>Save</Button>
+            </div>
+          </CardContent>
+        </Card>
 
-        <Separator />
-
-        <section>
-          <h2 className="mb-2 text-sm font-semibold">API key (optional)</h2>
-          <Input
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="bearer token"
-          />
-          <Button className="mt-2" onClick={saveApiKey}>
-            Save
-          </Button>
-        </section>
+        <Card>
+          <CardHeader className="p-3 pb-2">
+            <CardTitle className="text-sm">About</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 p-3 pt-2 text-xs text-muted-foreground">
+            <p>
+              MeshCore WebUI —{" "}
+              <a
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-foreground"
+              >
+                source on GitHub
+              </a>
+              .
+            </p>
+          </CardContent>
+        </Card>
       </div>
-    </div>
-  )
-}
-
-/**
- * Read-only list of currently muted conversations with a per-row unmute
- * button. Resolves contact/channel names from the existing caches when
- * possible — falls back to the raw key so an orphan mute is still visible
- * and removable.
- */
-function MutedList() {
-  const { data, isLoading } = useMutes()
-  const { data: contacts } = useContacts()
-  const { data: channels } = useChannels()
-  const toggle = useToggleMute()
-
-  if (isLoading) {
-    return (
-      <p className="text-xs text-muted-foreground">Loading…</p>
-    )
-  }
-  const items = data?.items ?? []
-  if (items.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Nothing muted. Open a contact or channel and tap the bell icon to
-        silence its push notifications.
-      </p>
-    )
-  }
-
-  function nameFor(kind: "contact" | "channel", key: string): string {
-    if (kind === "channel") {
-      const idx = Number(key)
-      const ch = channels?.find((c) => c.channel_idx === idx)
-      return ch?.channel_name ?? `Channel ${key}`
-    }
-    // Match by full-pubkey prefix.
-    const entry = contacts
-      ? Object.entries(contacts).find(([pk]) =>
-          pk.toLowerCase().startsWith(key.toLowerCase()),
-        )
-      : undefined
-    return entry?.[1]?.adv_name ?? key
-  }
-
-  return (
-    <ul className="space-y-1">
-      {items.map((m) => (
-        <li
-          key={`${m.kind}:${m.key}`}
-          className="flex items-center justify-between gap-2 rounded-md border border-border/40 bg-muted/30 px-3 py-2"
-        >
-          <span className="flex min-w-0 items-center gap-2 text-sm">
-            <BellOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="truncate">
-              {nameFor(m.kind, m.key)}
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {m.kind}
-              </span>
-            </span>
-          </span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={toggle.isPending}
-            onClick={() =>
-              toggle.mutate(
-                { kind: m.kind, key: m.key, muted: false },
-                {
-                  onSuccess: () => toast.success("Unmuted"),
-                  onError: (e) =>
-                    toast.error(e instanceof Error ? e.message : "Failed"),
-                },
-              )
-            }
-          >
-            Unmute
-          </Button>
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/**
- * Global push-mode picker (all / mentions / mute).
- *
- * Server-wide setting — applies to every subscribed device. Per-conversation
- * mutes (the section below) layer ON TOP of this and only take effect when
- * mode is "all".
- */
-function PushModeRadio() {
-  const pushMode = usePushMode()
-  const setPushMode = useSetPushMode()
-  const current: PushMode = pushMode.data?.mode ?? "all"
-  const disabled = pushMode.isLoading || setPushMode.isPending
-
-  const onChange = (v: string) => {
-    setPushMode.mutate(v as PushMode, {
-      onSuccess: () => toast.success("Push filter saved"),
-      onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Failed"),
-    })
-  }
-
-  return (
-    <RadioGroup
-      value={current}
-      onValueChange={onChange}
-      className="gap-3"
-      disabled={disabled}
-    >
-      <div className="flex items-start gap-2">
-        <RadioGroupItem value="all" id="push-mode-all" className="mt-0.5" />
-        <div className="grid gap-0.5">
-          <Label htmlFor="push-mode-all">All messages</Label>
-          <p className="text-xs text-muted-foreground">
-            Default — push for every inbound message (subject to per-conversation
-            mutes).
-          </p>
-        </div>
-      </div>
-      <div className="flex items-start gap-2">
-        <RadioGroupItem
-          value="mentions"
-          id="push-mode-mentions"
-          className="mt-0.5"
-        />
-        <div className="grid gap-0.5">
-          <Label htmlFor="push-mode-mentions">@-mentions only</Label>
-          <p className="text-xs text-muted-foreground">
-            Push only when your device name appears in a channel message. DMs
-            always push.
-          </p>
-        </div>
-      </div>
-      <div className="flex items-start gap-2">
-        <RadioGroupItem value="mute" id="push-mode-mute" className="mt-0.5" />
-        <div className="grid gap-0.5">
-          <Label htmlFor="push-mode-mute">Mute all</Label>
-          <p className="text-xs text-muted-foreground">
-            Global silence. Overrides per-conversation settings.
-          </p>
-        </div>
-      </div>
-    </RadioGroup>
+    </PageShell>
   )
 }

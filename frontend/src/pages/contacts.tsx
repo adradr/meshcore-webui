@@ -24,6 +24,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
+import { PageShell } from "@/components/page-shell"
+import { PageHeader } from "@/components/page-header"
 
 const NODE_TYPE_LABEL: Record<number, string> = {
   1: "CLI",
@@ -153,26 +155,57 @@ export function ContactsPage() {
     overscan: 8,
   })
 
+  const importAction = (
+    <Dialog open={importOpen} onOpenChange={setImportOpen}>
+      <DialogTrigger asChild>
+        <Button
+          size="sm"
+          variant="outline"
+          className="shrink-0 gap-1"
+          aria-label="Import contact"
+        >
+          <Plus className="h-4 w-4" />
+          <span className="hidden sm:inline">Import</span>
+        </Button>
+      </DialogTrigger>
+    </Dialog>
+  )
+
   if (isLoading) {
     return (
-      <div className="space-y-2 p-4">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <Skeleton key={i} className="h-12 w-full rounded-md" />
-        ))}
-      </div>
+      <PageShell
+        header={<PageHeader title="Contacts" actions={importAction} />}
+      >
+        <div className="space-y-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full rounded-md" />
+          ))}
+        </div>
+        <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      </PageShell>
     )
   }
 
   if (isError) {
     return (
-      <div className="p-4 text-sm text-destructive">
-        Failed to load contacts: {error instanceof Error ? error.message : "unknown"}
-      </div>
+      <PageShell
+        header={<PageHeader title="Contacts" actions={importAction} />}
+      >
+        <div className="text-sm text-destructive">
+          Failed to load contacts:{" "}
+          {error instanceof Error ? error.message : "unknown"}
+        </div>
+        <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
+      </PageShell>
     )
   }
 
   return (
-    <div ref={parentRef} className="h-full overflow-y-auto">
+    <PageShell
+      header={<PageHeader title="Contacts" actions={importAction} />}
+      contentClassName="p-0"
+      scrollRef={parentRef}
+    >
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -188,19 +221,6 @@ export function ContactsPage() {
         <Badge variant="secondary" className="shrink-0 tabular-nums">
           {filtered.length} of {sorted.length}
         </Badge>
-        <Dialog open={importOpen} onOpenChange={setImportOpen}>
-          <DialogTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="shrink-0 gap-1"
-              aria-label="Import contact"
-            >
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Import</span>
-            </Button>
-          </DialogTrigger>
-        </Dialog>
       </div>
 
       <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
@@ -280,6 +300,6 @@ export function ContactsPage() {
           })}
         </div>
       )}
-    </div>
+    </PageShell>
   )
 }

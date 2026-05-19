@@ -26,6 +26,8 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs"
+import { PageShell } from "@/components/page-shell"
+import { PageHeader } from "@/components/page-header"
 
 const VALID_TABS = ["info", "rx-log", "noise"] as const
 type DeviceTab = (typeof VALID_TABS)[number]
@@ -316,8 +318,8 @@ export function DevicePage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex h-full max-w-3xl flex-col p-4">
+    <PageShell header={<PageHeader title="Device" />}>
+      <div className="mx-auto flex h-full max-w-3xl flex-col">
         <Tabs
           value={activeTab}
           onValueChange={handleTabChange}
@@ -353,6 +355,6 @@ export function DevicePage() {
           </TabsContent>
         </Tabs>
       </div>
-    </div>
+    </PageShell>
   )
 }
