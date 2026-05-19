@@ -6,6 +6,7 @@ import { ThemedTileLayer } from "./TileLayers"
 import { MapResizer } from "./useMapResize"
 import { MarkersLayer, type ContactMarker } from "./MarkersLayer"
 import { MapViewPersistence } from "./MapViewPersistence"
+import { CenterOnContactsButton } from "./CenterOnContactsButton"
 
 fixDefaultIcon()
 
@@ -33,6 +34,7 @@ export function ClusteredContactMap({ contacts, dark = false }: Props) {
       <MarkerClusterGroup chunkedLoading>
         <MarkersLayer contacts={contacts} />
       </MarkerClusterGroup>
+      <CenterOnContactsButton contacts={contacts} />
     </MapContainer>
   )
 }
