@@ -25,6 +25,8 @@ import {
 import { MessageStatusBadge } from "./messageStatus"
 import { useContacts } from "@/features/contacts/queries"
 import type { Message } from "./queries"
+import { renderMentions } from "./renderMentions"
+import type { MentionContact } from "./MentionInput"
 
 interface Props {
   message: Message
@@ -82,28 +84,44 @@ function renderDropdownItems(items: MessageActionItem[]) {
  * available) in either the dedicated `pubkey_prefix` field or the legacy
  * `contact_pub_key` slot — try both.
  */
-function useResolvedSender(message: Message): ResolvedSender | null {
-  const { data: contactsMap } = useContacts()
-  return useMemo(() => {
-    const prefix = (message.pubkey_prefix ?? message.contact_pub_key ?? "").toLowerCase()
-    if (!prefix || !contactsMap) return null
-    for (const c of Object.values(contactsMap)) {
-      if (
-        c.public_key &&
-        c.adv_name &&
-        c.public_key.toLowerCase().startsWith(prefix)
-      ) {
-        return { adv_name: c.adv_name, public_key: c.public_key }
-      }
+function resolveSender(
+  message: Message,
+  contactsMap: Record<string, { public_key?: string; adv_name?: string }> | undefined,
+): ResolvedSender | null {
+  const prefix = (message.pubkey_prefix ?? message.contact_pub_key ?? "").toLowerCase()
+  if (!prefix || !contactsMap) return null
+  for (const c of Object.values(contactsMap)) {
+    if (
+      c.public_key &&
+      c.adv_name &&
+      c.public_key.toLowerCase().startsWith(prefix)
+    ) {
+      return { adv_name: c.adv_name, public_key: c.public_key }
     }
-    return null
-  }, [contactsMap, message.pubkey_prefix, message.contact_pub_key])
+  }
+  return null
 }
 
 export function MessageBubble({ message, showSender = false }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const navigate = useNavigate()
-  const resolvedSender = useResolvedSender(message)
+  const { data: contactsMap } = useContacts()
+  const resolvedSender = useMemo(
+    () => resolveSender(message, contactsMap),
+    [message, contactsMap],
+  )
+
+  const mentionContacts = useMemo<MentionContact[]>(() => {
+    if (!contactsMap) return []
+    return Object.values(contactsMap)
+      .filter((c) => c.adv_name && c.public_key)
+      .map((c) => ({ adv_name: c.adv_name!, public_key: c.public_key! }))
+  }, [contactsMap])
+
+  const renderedText = useMemo(
+    () => renderMentions(message.text, mentionContacts),
+    [message.text, mentionContacts],
+  )
 
   const items = useMessageActions({
     message,
@@ -144,7 +162,7 @@ export function MessageBubble({ message, showSender = false }: Props) {
                 {senderLabel}
               </button>
             )}
-            <p className="break-words text-sm">{message.text}</p>
+            <p className="break-words text-sm">{renderedText}</p>
             <div className="mt-0.5 flex items-center gap-2">
               <time className="text-[10px] opacity-60">
                 {new Date(message.timestamp).toLocaleTimeString()}
