@@ -1,11 +1,11 @@
 import { renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import type { ReactNode } from "react"
+import type { ReactElement, ReactNode } from "react"
 import { WebSocketContext } from "../WebSocketProvider"
 import { useWsTopic } from "../useWsTopic"
 
 interface FakeProvider {
-  wrapper: ({ children }: { children: ReactNode }) => JSX.Element
+  wrapper: ({ children }: { children: ReactNode }) => ReactElement
   dispatch: (topic: string, payload: unknown) => void
 }
 
