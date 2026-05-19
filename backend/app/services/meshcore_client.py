@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from typing import Any, Optional
 
 from meshcore import MeshCore, EventType
@@ -13,11 +13,11 @@ log = logging.getLogger(__name__)
 TOPIC_MAP = {
     "contact_message": "messages",
     "channel_message": "messages",
-    "ack": "messages",
+    "acknowledgement": "messages",
     "advertisement": "messages",
     "path_update": "messages",
     "new_contact": "messages",
-    "battery": "system",
+    "battery_info": "system",
     "connected": "system",
     "disconnected": "system",
     "rx_log": "rx_log",
@@ -36,9 +36,9 @@ def topic_for_event_type(t: str) -> str:
 @dataclass(frozen=True)
 class WireEvent:
     type: str
-    payload: dict[str, Any]
-    attributes: dict[str, Any] | None = None
-    topic: str = "messages"
+    payload: Any
+    attributes: dict[str, Any] = field(default_factory=dict)
+    topic: str = "system"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
