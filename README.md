@@ -35,6 +35,13 @@ It bridges the gaps the official mobile app can't:
 - 🔒 **Optional API key** auth for defense-in-depth behind your reverse proxy
 - 📦 **Single image** — `~435 MB`, healthcheck, runs anywhere
 
+### RF tools
+
+- 📶 **Line of Sight calculator** (`/map` → click any node's "Line of sight" button) — terrain profile + Fresnel zone analysis between your device and any contact. Uses [OpenTopoData](https://www.opentopodata.org/) (public or self-hosted) for elevation.
+- 🧭 **Trace path** (`/map` → click a repeater's "Trace path" button) — broadcasts a trace packet and renders the multi-hop path as a polyline with per-hop SNR data.
+- 📜 **RX log** (`/rx-log`) — realtime stream of every packet your device receives, with filter, search, and CSV/JSON export. Optional SQLite persistence.
+- 📉 **Noise floor chart** (`/noise` or as a widget on `/device`) — realtime sliding chart of the radio noise floor, polled every 2 s.
+
 ## Architecture
 
 ```mermaid
@@ -45,35 +52,52 @@ flowchart TD
 
   subgraph Container["🐳 meshcore-webui container · port 8080"]
     direction TB
-    UI["📦 Static React PWA"]
+    UI["📦 Static React PWA<br/><i>useWsTopic('rx_log' · 'noise' · 'trace' · 'messages' · …)</i>"]
     API["⚡ FastAPI<br/>REST + /ws"]
+    Bus["📣 Topic-tagged WS broadcast<br/><i>{topic, payload} → subscribed clients only</i>"]
     Worker["🔄 Workers<br/>MeshCoreClient · PushSender · Bridge"]
-    DB[("💾 SQLite + WAL<br/>messages · contacts · subscriptions")]
+    Noise["⏱ Noise poller<br/><i>STATS_RADIO every 2 s</i>"]
+    RFTools["📡 RF tools<br/>LoS · Trace · RX log"]
+    DB[("💾 SQLite + WAL<br/>messages · contacts · subscriptions · rx_log*")]
     UI -.- API
     API <--> Worker
+    API <--> RFTools
+    Worker --> Bus
+    Noise --> Bus
+    RFTools --> Bus
+    Bus -- "topic events" --> UI
     Worker <--> DB
+    RFTools <--> DB
+    Worker --> Noise
   end
 
   Device["📻 MeshCore device<br/>T3-S3 · Heltec V3 · RAK<br/>LoRa 433 / 868 / 915 MHz"]
 
   Push["☁️ Web Push relay<br/>Apple · Google · Mozilla<br/><i>VAPID-signed, no account needed</i>"]
 
+  Topo["🗻 OpenTopoData<br/><i>public or self-hosted</i>"]
+
   Client -- "HTTPS + WS" --> Proxy
   Proxy -- "HTTP + WS" --> Container
   Worker <== "TCP :5000<br/>persistent · auto-reconnect" ==> Device
+  RFTools <== "trace req → TRACE_DATA" ==> Device
+  Noise <== "STATS_RADIO poll" ==> Device
   Worker -- "send notification" --> Push
   Push -. "wakes PWA even<br/>when closed" .-> Client
+  RFTools -- "elevation lookup" --> Topo
 
   classDef client fill:#dbeafe,stroke:#1d4ed8,color:#0c224d
   classDef proxy fill:#fef3c7,stroke:#a16207,color:#3f2a06
   classDef container fill:#cffafe,stroke:#0891b2,color:#053844
   classDef device fill:#dcfce7,stroke:#15803d,color:#062812
   classDef push fill:#f3e8ff,stroke:#7e22ce,color:#2c0c4d
+  classDef external fill:#ffe4e6,stroke:#be123c,color:#4c0519
   class Client client
   class Proxy proxy
-  class Container,UI,API,Worker,DB container
+  class Container,UI,API,Worker,DB,Bus,Noise,RFTools container
   class Device device
   class Push push
+  class Topo external
 ```
 
 ### Why this shape?
@@ -114,6 +138,49 @@ sequenceDiagram
     User->>Phone: Tap notification
     Phone->>Backend: Connect WebSocket
     Backend-->>Phone: Stream queued messages
+  end
+```
+
+### RF tools flow
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor User as 👤 You
+  participant Browser as 🖥 Browser<br/>(useWsTopic)
+  participant Backend as 🐳 Backend
+  participant Topo as 🗻 OpenTopoData
+  participant Device as 📻 Device
+
+  rect rgb(240, 248, 255)
+    Note over User,Topo: Line of Sight
+    User->>Browser: Click "Line of sight" on contact
+    Browser->>Backend: POST /api/los/compute {from, to}
+    Backend->>Topo: GET /v1/srtm30m?locations=…
+    Topo-->>Backend: elevations[]
+    Backend-->>Browser: profile + Fresnel + obstructions
+  end
+
+  rect rgb(245, 255, 240)
+    Note over User,Device: Trace path
+    User->>Browser: Click "Trace path" on repeater
+    Browser->>Backend: POST /api/trace/{pk}
+    Backend->>Device: Send TRACE packet (TCP)
+    Device-->>Backend: TRACE_DATA event (per hop, SNR)
+    Backend-->>Browser: WS {topic: "trace", payload}
+    Browser-->>User: Render polyline + SNR labels
+  end
+
+  rect rgb(255, 250, 240)
+    Note over Device,Browser: Live RX stream + noise floor
+    loop every 2 s
+      Backend->>Device: STATS_RADIO
+      Device-->>Backend: noise_floor dBm
+      Backend-->>Browser: WS {topic: "noise", payload}
+    end
+    Device-->>Backend: RX packet
+    Backend-->>Browser: WS {topic: "rx_log", payload}
+    Note right of Backend: persist to SQLite<br/>if RX_LOG_PERSIST=true
   end
 ```
 
@@ -193,6 +260,11 @@ All settings are environment variables on the container:
 | `MESHCORE_WEBUI_API_KEY` | _(unset)_ | If set, requires `Authorization: Bearer <key>` on all `/api/*` + `/ws` requests |
 | `DATABASE_URL` | `sqlite+aiosqlite:////data/meshcore.db` | Override if you want the DB on a different mount |
 | `STATIC_DIR` | `/app/static` | Where the built frontend lives in the image (don't change normally) |
+| `MESHCORE_WEBUI_ELEVATION_BASE_URL` | `https://api.opentopodata.org/v1` | Elevation API for Line of Sight. Point at a self-hosted [OpenTopoData](https://www.opentopodata.org/) instance to avoid public rate limits |
+| `MESHCORE_WEBUI_ELEVATION_DATASET` | `srtm30m` | OpenTopoData dataset name (e.g. `srtm30m`, `aster30m`, `eudem25m`) |
+| `MESHCORE_WEBUI_RX_LOG_PERSIST` | `false` | Set `true` to persist every RX event to SQLite (in addition to the in-memory buffer) |
+| `MESHCORE_WEBUI_RX_LOG_BUFFER_SIZE` | `1000` | In-memory ring buffer size for the `/rx-log` page |
+| `MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S` | `2.0` | Noise floor polling interval in seconds (`STATS_RADIO` cadence) |
 
 Example `docker-compose.yml`:
 
