@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- background: full bleed for maskable -->
+  <rect width="512" height="512" fill="#0a0a0a"/>
+  <!-- mesh network: outer nodes pulled in 15% to fit Android safe-zone -->
+  <g stroke="#0891b2" stroke-width="14" stroke-linecap="round">
+    <line x1="256" y1="256" x2="157" y2="177"/>
+    <line x1="256" y1="256" x2="355" y2="177"/>
+    <line x1="256" y1="256" x2="157" y2="335"/>
+    <line x1="256" y1="256" x2="355" y2="335"/>
+    <line x1="157" y1="177" x2="355" y2="177" opacity="0.45"/>
+    <line x1="157" y1="177" x2="157" y2="335" opacity="0.45"/>
+    <line x1="355" y1="177" x2="355" y2="335" opacity="0.45"/>
+    <line x1="157" y1="335" x2="355" y2="335" opacity="0.45"/>
+  </g>
+  <g fill="#0891b2" stroke="#ffffff" stroke-width="6">
+    <circle cx="157" cy="177" r="32"/>
+    <circle cx="355" cy="177" r="32"/>
+    <circle cx="157" cy="335" r="32"/>
+    <circle cx="355" cy="335" r="32"/>
+  </g>
+  <circle cx="256" cy="256" r="46" fill="#ffffff"/>
+  <circle cx="256" cy="256" r="34" fill="#0891b2"/>
+</svg>
