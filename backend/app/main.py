@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,6 +12,7 @@ from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
 from app.api.conversations import router as conversations_router
 from app.api.device import router as device_router
+from app.api.los import router as los_router
 from app.api.messages import router as messages_router
 from app.api.push import router as push_router
 from app.api.ws import router as ws_router
@@ -19,6 +21,7 @@ from app.core.vapid import load_vapid
 from app.db.models import Base
 from app.db.session import engine
 from app.middleware.api_key import APIKeyMiddleware
+from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient
 from app.services.push_sender import PushSender
@@ -122,14 +125,23 @@ async def lifespan(app: FastAPI):
     app.state.push_sender = sender
     app.state.task_pool = pool
 
-    try:
-        yield
-    finally:
-        log.info("Shutting down")
-        client.unsubscribe(q)
-        await client.stop()
-        await pool.shutdown(timeout=5.0)
-        await engine.dispose()
+    log.info("Initializing ElevationProvider (%s/%s)",
+             settings.elevation_base_url, settings.elevation_dataset)
+    async with httpx.AsyncClient(timeout=30.0) as elev_client:
+        app.state.elevation_provider = ElevationProvider(
+            base_url=settings.elevation_base_url,
+            dataset=settings.elevation_dataset,
+            client=elev_client,
+        )
+        try:
+            yield
+        finally:
+            log.info("Shutting down")
+            app.state.elevation_provider = None
+            client.unsubscribe(q)
+            await client.stop()
+            await pool.shutdown(timeout=5.0)
+            await engine.dispose()
 
 
 def create_app() -> FastAPI:
@@ -147,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(channels_router)
     app.include_router(messages_router)
     app.include_router(conversations_router)
+    app.include_router(los_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():
