@@ -195,6 +195,23 @@ async def test_post_message_requires_target(client):
 
 
 @pytest.mark.asyncio
+async def test_delete_message_removes_row(client, db):
+    rows = await _insert_messages(db, 3)
+    target_id = rows[1].id
+    r = await client.delete(f"/api/messages/{target_id}")
+    assert r.status_code == 204
+    remaining = (await db.execute(select(Message))).scalars().all()
+    assert len(remaining) == 2
+    assert all(m.id != target_id for m in remaining)
+
+
+@pytest.mark.asyncio
+async def test_delete_message_not_found(client):
+    r = await client.delete("/api/messages/999999")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_post_message_502_on_runtime_error(client):
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.send_dm = AsyncMock(side_effect=RuntimeError("boom"))

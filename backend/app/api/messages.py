@@ -2,8 +2,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import and_, select
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Message
@@ -96,3 +96,15 @@ async def send_message(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+@router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_message(
+    message_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    res = await db.execute(delete(Message).where(Message.id == message_id))
+    await db.commit()
+    if res.rowcount == 0:
+        raise HTTPException(404, f"Message id={message_id} not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
