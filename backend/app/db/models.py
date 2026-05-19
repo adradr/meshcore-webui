@@ -90,6 +90,32 @@ class Setting(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class MutePreference(Base):
+    """Per-conversation push-notification mute state.
+
+    A row exists ONLY for muted conversations (absence == unmuted). The
+    composite primary key (kind, key) keeps lookups O(1) and avoids needing a
+    surrogate id. Two `kind`s are valid today:
+
+    - `contact` — `key` is the contact's `pubkey_prefix` (matches the existing
+      `read:dm:<prefix>` convention used by `conversations` API).
+    - `channel` — `key` is the channel index serialised as a string (matches
+      `read:chan:<idx>`).
+
+    Muting only suppresses Web Push fan-out; the message is still persisted to
+    `messages` and broadcast over the WebSocket so the UI stays in sync.
+    """
+
+    __tablename__ = "mute_preferences"
+    kind: Mapped[str] = mapped_column(String(16), primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+    )
+
+
 class RxLogEntry(Base):
     """A persisted RX log entry (one received packet observed by the device).
 

@@ -33,6 +33,7 @@ import {
 import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
 import { ContactAvatar } from "@/components/contact-avatar"
+import { MuteToggle } from "@/features/mutes/MuteToggle"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -336,23 +337,34 @@ export function ContactDetailPage() {
                 )}
               </CardDescription>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={isStarred ? "Unstar contact" : "Star contact"}
-              aria-pressed={isStarred}
-              onClick={() =>
-                flags.mutate({ pubkey: pubKey, starred: !isStarred })
-              }
-            >
-              <Star
-                className={
-                  isStarred
-                    ? "h-5 w-5 fill-yellow-400 text-yellow-500"
-                    : "h-5 w-5 text-muted-foreground"
-                }
+            <div className="flex items-center gap-1">
+              <MuteToggle
+                kind="contact"
+                // Bridge stores pubkey_prefix (6 bytes = 12 hex chars).
+                // Slice the full pubkey to that same prefix so the mute key
+                // matches whatever the bridge sees on inbound DMs.
+                targetKey={pubKey.slice(0, 12)}
+                name={displayName}
+                size="icon"
               />
-            </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={isStarred ? "Unstar contact" : "Star contact"}
+                aria-pressed={isStarred}
+                onClick={() =>
+                  flags.mutate({ pubkey: pubKey, starred: !isStarred })
+                }
+              >
+                <Star
+                  className={
+                    isStarred
+                      ? "h-5 w-5 fill-yellow-400 text-yellow-500"
+                      : "h-5 w-5 text-muted-foreground"
+                  }
+                />
+              </Button>
+            </div>
           </CardHeader>
         </Card>
 

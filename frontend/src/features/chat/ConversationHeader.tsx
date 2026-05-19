@@ -3,6 +3,7 @@ import { useNavigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { ChannelAvatar } from "@/components/channel-avatar"
+import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { useContact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
 import { useRealtime } from "@/realtime/WebSocketProvider"
@@ -58,6 +59,15 @@ export function ConversationHeader({ contactPubKey, channelIdx }: Props) {
             ) : null}
           </div>
         </Link>
+        <MuteToggle
+          kind="contact"
+          // contactPubKey may be either the full 64-char pubkey (from /contact/...)
+          // or a 12-char prefix (from /chat/... routes). Slice to the 12-char
+          // prefix so the mute key matches whatever the bridge emits.
+          targetKey={contactPubKey.slice(0, 12)}
+          name={name}
+          size="icon"
+        />
         <Button variant="ghost" size="icon" asChild aria-label="Contact info">
           <Link to={`/contact/${contactPubKey}`}>
             <Info className="h-4 w-4" />
@@ -85,6 +95,12 @@ export function ConversationHeader({ contactPubKey, channelIdx }: Props) {
             broadcast channel
           </p>
         </div>
+        <MuteToggle
+          kind="channel"
+          targetKey={String(channelIdx)}
+          name={name}
+          size="icon"
+        />
       </header>
     )
   }

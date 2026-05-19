@@ -145,6 +145,131 @@ async def test_ack_event_updates_matching_message(db, engine, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_dm_from_muted_contact_persists_but_skips_push(db, engine, monkeypatch):
+    """A muted contact must still hit DB but never hit _notify."""
+    from app.db.models import Base, Message, MutePreference
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    # Pre-mute the contact whose prefix the bridge will see.
+    db.add(MutePreference(kind="contact", key="deadbeef"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    # Spy on _notify directly so we assert at the right boundary
+    # (push-sender fan-out is mocked above as a defence-in-depth).
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "shh", "pubkey_prefix": "deadbeef"},
+        attributes={"pubkey_prefix": "deadbeef"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+    # ...but the message MUST still be persisted.
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1 and msgs[0].text == "shh"
+
+
+@pytest.mark.asyncio
+async def test_dm_from_unmuted_contact_pushes(db, engine, monkeypatch):
+    from app.db.models import Base
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "hi", "pubkey_prefix": "cafef00d"},
+        attributes={"pubkey_prefix": "cafef00d"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_channel_message_muted_skips_push(db, engine, monkeypatch):
+    from app.db.models import Base, Message, MutePreference
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(MutePreference(kind="channel", key="2"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "quiet", "channel_idx": 2, "pubkey_prefix": "feedface"},
+        attributes={"channel_idx": 2, "pubkey_prefix": "feedface"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1 and msgs[0].text == "quiet"
+
+
+@pytest.mark.asyncio
+async def test_channel_message_unmuted_pushes(db, engine, monkeypatch):
+    from app.db.models import Base
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "loud", "channel_idx": 7, "pubkey_prefix": "feedface"},
+        attributes={"channel_idx": 7, "pubkey_prefix": "feedface"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
     from app.db.models import Base, Message
     async with engine.begin() as c:

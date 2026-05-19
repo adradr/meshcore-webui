@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 from app.db.models import Message
 from app.db.session import SessionLocal
 from app.services.meshcore_client import WireEvent
+from app.services.mute import is_muted
 from app.services.push_sender import Notification, PushSender
 from app.services.task_pool import TaskPool
 
@@ -51,6 +52,15 @@ class MeshCoreBridge:
             )
             db.add(msg)
             await db.commit()
+        # Mute is checked in a SEPARATE session AFTER the persist commit so
+        # we never delay the DB write or the WS broadcast on the mute lookup.
+        # The mute table is tiny (one row per muted conversation) so the
+        # extra round-trip is sub-millisecond.
+        async with SessionLocal() as db:
+            if await is_muted(
+                db, kind="contact", key=payload.get("pubkey_prefix") or ""
+            ):
+                return  # muted — skip web push, DB + WS already delivered
         text = payload.get("text") or ""
         await self._notify(Notification(
             title=f"MeshCore: {sender_prefix}",
@@ -70,6 +80,9 @@ class MeshCoreBridge:
             )
             db.add(msg)
             await db.commit()
+        async with SessionLocal() as db:
+            if await is_muted(db, kind="channel", key=str(chan)):
+                return  # muted — skip web push, DB + WS already delivered
         text = payload.get("text") or ""
         await self._notify(Notification(
             title=f"MeshCore #{chan}",

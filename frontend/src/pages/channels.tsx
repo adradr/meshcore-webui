@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { ChannelAvatar } from "@/components/channel-avatar"
+import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog,
@@ -59,16 +60,24 @@ function ChannelCard({ channel }: { channel: Channel }) {
             {name}
           </CardTitle>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 text-destructive hover:text-destructive"
-          onClick={onRemove}
-          disabled={remove.isPending}
-          aria-label="Remove channel"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <MuteToggle
+            kind="channel"
+            targetKey={String(channel.channel_idx)}
+            name={name}
+            size="icon"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-destructive hover:text-destructive"
+            onClick={onRemove}
+            disabled={remove.isPending}
+            aria-label="Remove channel"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        </div>
       </CardHeader>
     </Card>
   )
