@@ -1,4 +1,4 @@
-import { Copy, MessageCircle, Radio, Send, Trash2 } from "lucide-react"
+import { Copy, MessageCircle, Radio, Send, Trash2, User } from "lucide-react"
 import { toast } from "sonner"
 import type { Message } from "./queries"
 import { useDeleteMessage } from "./queries"
@@ -22,6 +22,7 @@ interface UseMessageActionsArgs {
   onShowHeardRepeats: () => void
   resolvedSender?: ResolvedSender | null
   onMessageSender?: (publicKey: string) => void
+  onViewSenderProfile?: (publicKey: string) => void
 }
 
 export function useMessageActions({
@@ -29,6 +30,7 @@ export function useMessageActions({
   onShowHeardRepeats,
   resolvedSender,
   onMessageSender,
+  onViewSenderProfile,
 }: UseMessageActionsArgs): ItemSpec[] {
   const sendMutation = useSendMessage()
   const deleteMutation = useDeleteMessage()
@@ -62,16 +64,24 @@ export function useMessageActions({
       onSelect: handleCopy,
     },
   ]
-  if (
-    message.direction === "in" &&
-    resolvedSender &&
-    onMessageSender
-  ) {
+  if (message.direction === "in" && resolvedSender && onMessageSender) {
     items.push({
       key: "message-sender",
       label: `Message ${resolvedSender.adv_name}`,
       icon: <MessageCircle className="mr-2 h-4 w-4" />,
       onSelect: () => onMessageSender(resolvedSender.public_key),
+    })
+  }
+  if (
+    message.direction === "in" &&
+    resolvedSender &&
+    onViewSenderProfile
+  ) {
+    items.push({
+      key: "view-sender-profile",
+      label: "View profile",
+      icon: <User className="mr-2 h-4 w-4" />,
+      onSelect: () => onViewSenderProfile(resolvedSender.public_key),
     })
   }
   if (message.direction === "out") {

@@ -128,6 +128,7 @@ export function MessageBubble({ message, showSender = false }: Props) {
     onShowHeardRepeats: () => setSheetOpen(true),
     resolvedSender: showSender ? resolvedSender : null,
     onMessageSender: (pk) => navigate(`/chat/${pk}`),
+    onViewSenderProfile: (pk) => navigate(`/contact/${pk}`),
   })
 
   const isOut = message.direction === "out"
