@@ -168,7 +168,10 @@ export function MentionTextarea({
           rows={MIN_ROWS}
           placeholder={placeholder}
           disabled={disabled}
-          className="min-h-9 resize-none text-sm leading-5"
+          // iOS Safari force-zooms when input font-size < 16px. Use text-base
+          // (16px) on mobile, drop back to text-sm (14px) on sm+ where the
+          // auto-zoom heuristic does not apply.
+          className="min-h-9 resize-none text-base leading-5 sm:text-sm"
           autoComplete="off"
           enterKeyHint="send"
         />
