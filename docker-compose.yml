@@ -14,8 +14,10 @@ services:
     ports:
       - "8090:8080"   # host 8080 is taken by kubectl; using 8090
     environment:
-      MESHCORE_HOST: 192.168.88.223
-      MESHCORE_PORT: "5000"
+      # Point at your MeshCore device's TCP companion port.
+      # `192.168.4.1:5000` is the default for the LilyGo T3-S3 WiFi firmware.
+      MESHCORE_HOST: "${MESHCORE_HOST:-192.168.4.1}"
+      MESHCORE_PORT: "${MESHCORE_PORT:-5000}"
       VAPID_SUBJECT: mailto:adr@example.com
       # Read from .env (gitignored). To run without auth, remove this line or
       # leave MESHCORE_WEBUI_API_KEY empty in .env.

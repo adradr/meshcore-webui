@@ -36,3 +36,5 @@ secrets/
 
 # Docker
 .docker-cache/
+
+docs/

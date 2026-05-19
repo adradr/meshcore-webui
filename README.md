@@ -276,7 +276,7 @@ services:
     ports:
       - "8090:8080"
     environment:
-      MESHCORE_HOST: 192.168.88.223
+      MESHCORE_HOST: 192.168.4.1   # your MeshCore device LAN IP
       MESHCORE_PORT: "5000"
       VAPID_SUBJECT: "mailto:you@example.com"
       # MESHCORE_WEBUI_API_KEY: "long-random-string"
@@ -310,16 +310,13 @@ hostname -I | awk '{print $1}'  # Linux
 
 The container speaks plain HTTP on port 8080. **You** terminate TLS at your reverse proxy and forward WebSocket upgrades through. iOS push notifications require a valid HTTPS cert — `http://` and self-signed origins will silently fail to register.
 
-See **[docs/reverse-proxy.md](docs/reverse-proxy.md)** for working examples for:
+Any reverse proxy works as long as it forwards WebSocket upgrades. Tested with:
 
-- **Nginx Proxy Manager** (easiest if you're new)
-- **Traefik** (Docker labels)
-- **Caddy** (one-liner)
-- **Cloudflare Tunnel** (no port forwarding, free TLS)
-- **Tailscale Funnel** (zero-config TLS via Tailscale)
-- **Authelia + NPM** (cookie-based SSO, iOS PWA-safe)
-
-Quick NPM checklist: Forward Hostname `<your-host>`, Forward Port `8090`, ✅ Websockets Support, ✅ Force SSL.
+- **Nginx Proxy Manager** (easiest if you're new) — Forward Hostname `<your-host>`, Forward Port `8090`, ✅ **Websockets Support**, ✅ Force SSL, Let's Encrypt
+- **Traefik** — standard Docker labels with `traefik.http.services.meshcore-webui.loadbalancer.server.port=8080`
+- **Caddy** — one-liner `meshcore.example.com { reverse_proxy meshcore-webui:8080 }`
+- **Cloudflare Tunnel** — no port forwarding, free TLS, automatic WS support
+- **Tailscale Funnel** — zero-config TLS via Tailscale, instant `*.ts.net` cert
 
 ---
 
@@ -352,7 +349,7 @@ Then send `Authorization: Bearer <key>` on every request. The frontend Settings 
 
 `/api/health` is always open so reverse proxies can health-check it without the key.
 
-For real user-facing auth (SSO, login pages, etc.), put **Authelia** or **Cloudflare Access** in front of the container — see `docs/reverse-proxy.md`. Cookie-based auth survives iOS Add-to-Home-Screen cleanly; HTTP Basic does not.
+For real user-facing auth (SSO, login pages, etc.), put **Authelia** or **Cloudflare Access** in front of the container. Cookie-based auth survives iOS Add-to-Home-Screen cleanly; HTTP Basic does not.
 
 ---
 
@@ -423,9 +420,6 @@ Edit the SVGs first, then rerun to regenerate all PNG sizes + the root `favicon.
 │   │   └── sw/sw.ts          # service worker (push handler + cache strategy)
 │   ├── public/icons/         # source.svg + generated PNG sizes
 │   └── scripts/build-icons.py
-├── docs/
-│   ├── plans/                # implementation plans (this project's history)
-│   └── reverse-proxy.md      # NPM / Traefik / Caddy / CF / Tailscale / Authelia
 ├── Dockerfile                # multi-stage: node-builder → python-runtime
 ├── docker-compose.example.yml
 └── .github/workflows/        # CI: backend tests + frontend build + GHCR push
@@ -435,9 +429,7 @@ Edit the SVGs first, then rerun to regenerate all PNG sizes + the root `favicon.
 
 ## Status
 
-Working with real hardware: tested against a LilyGo T3-S3 V1 running MeshCore companion firmware over TCP at 192.168.88.223:5000. ~107 backend + ~42 frontend tests passing.
-
-Tracked roadmap items in `docs/plans/`.
+Working with real hardware: tested against a LilyGo T3-S3 V1 running MeshCore companion firmware over TCP. 240+ backend / 137+ frontend tests passing.
 
 ---
 
