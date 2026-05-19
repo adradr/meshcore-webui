@@ -21,13 +21,14 @@ from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.vapid import load_vapid
 from app.db.models import Base
-from app.db.session import engine
+from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient
 from app.services.push_sender import PushSender
 from app.services.rx_log_buffer import RxLogBuffer
+from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
 
 log = logging.getLogger(__name__)
@@ -110,10 +111,23 @@ async def lifespan(app: FastAPI):
 
     log.info("Connecting MeshCore at %s:%d", settings.meshcore_host, settings.meshcore_port)
     rx_log_buffer = RxLogBuffer(capacity=settings.rx_log_buffer_size)
+
+    # Optional long-term persistence of RX log entries to SQLite. The realtime
+    # path (WS broadcast + ring buffer) is unaffected when this is disabled.
+    rx_log_persist: RxLogPersistService | None = None
+    if settings.rx_log_persist:
+        rx_log_persist = RxLogPersistService(SessionLocal)
+        await rx_log_persist.start()
+        app.state.rx_log_persist = rx_log_persist
+        log.info("RX log persistence enabled")
+    else:
+        app.state.rx_log_persist = None
+
     client = MeshCoreClient(
         host=settings.meshcore_host,
         port=settings.meshcore_port,
         rx_log_buffer=rx_log_buffer,
+        rx_log_persist_service=rx_log_persist,
     )
     # Forward all events to bridge (which decides whether to push)
     q = client.subscribe()
@@ -148,6 +162,8 @@ async def lifespan(app: FastAPI):
             app.state.elevation_provider = None
             client.unsubscribe(q)
             await client.stop()
+            if rx_log_persist is not None:
+                await rx_log_persist.stop()
             await pool.shutdown(timeout=5.0)
             await engine.dispose()
 

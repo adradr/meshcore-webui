@@ -45,6 +45,18 @@ async def db(engine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest_asyncio.fixture
+async def session_factory(engine):
+    """A callable that yields fresh AsyncSession instances bound to the test DB.
+
+    Creates the full schema once via `Base.metadata.create_all` so the returned
+    factory is usable from the very first call.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    return async_sessionmaker(engine, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
 async def client(engine):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -3,7 +3,7 @@ import datetime as dt
 from typing import Literal
 
 from sqlalchemy import (
-    DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func,
+    BigInteger, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -88,3 +88,29 @@ class Setting(Base):
     __tablename__ = "settings"
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class RxLogEntry(Base):
+    """A persisted RX log entry (one received packet observed by the device).
+
+    Persistence is OPTIONAL — only used when `settings.rx_log_persist` is True.
+    The in-memory ring buffer (`RxLogBuffer`) still handles the realtime path;
+    this table is purely for long-term retention / historical queries.
+    """
+    __tablename__ = "rx_log_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recv_time_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    snr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rssi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload_len: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    route_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload_type: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pkt_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    path_hex: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    raw_hex: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        nullable=False,
+        index=True,
+    )

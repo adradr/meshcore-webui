@@ -9,6 +9,7 @@ from typing import Any, Optional
 from meshcore import MeshCore, EventType
 
 from app.services.rx_log_buffer import RxLogBuffer
+from app.services.rx_log_persist import RxLogPersistService
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +91,7 @@ class MeshCoreClient:
         *,
         max_queue: int = 256,
         rx_log_buffer: RxLogBuffer | None = None,
+        rx_log_persist_service: RxLogPersistService | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -101,6 +103,7 @@ class MeshCoreClient:
         self._disconnect_evt: asyncio.Event | None = None
         self._lock = asyncio.Lock()
         self._rx_log_buffer = rx_log_buffer
+        self._rx_log_persist_service = rx_log_persist_service
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -180,6 +183,14 @@ class MeshCoreClient:
             and hasattr(event.payload, "items")
         ):
             self._rx_log_buffer.append(dict(event.payload))
+        # Optional long-term persistence — fully decoupled from the realtime
+        # path. The service drops on a full queue so DB I/O never blocks here.
+        if (
+            self._rx_log_persist_service is not None
+            and event.type == EventType.RX_LOG_DATA
+            and hasattr(event.payload, "items")
+        ):
+            self._rx_log_persist_service.enqueue(dict(event.payload))
         for q in list(self._subscribers):
             try:
                 q.put_nowait(wire)
