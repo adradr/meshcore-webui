@@ -169,7 +169,7 @@ function ActionTile({ icon: Icon, label, onClick, loading, disabled }: ActionTil
     <Button
       variant="outline"
       type="button"
-      className="h-auto flex-col gap-1.5 py-3"
+      className="h-auto min-h-[4.5rem] flex-col gap-1.5 py-3"
       onClick={onClick}
       disabled={disabled || loading}
     >
@@ -211,7 +211,10 @@ function SkeletonView() {
       <div className="mx-auto max-w-3xl space-y-4">
         <Skeleton className="h-8 w-20" />
         <Skeleton className="h-28 w-full rounded-xl" />
-        <div className="grid grid-cols-4 gap-2">
+        {/* 2-col on phones (each tile ≥150px wide → label never wraps),
+            4-col on sm+ when there's room. min-h keeps icon+label centred
+            comfortably even when the label fits on one line. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-16 rounded-lg" />
           ))}
@@ -376,7 +379,10 @@ export function ContactDetailPage() {
         </Card>
 
         {/* Quick actions */}
-        <div className="grid grid-cols-4 gap-2">
+        {/* 2-col on phones (each tile ≥150px wide → label never wraps),
+            4-col on sm+ when there's room. min-h keeps icon+label centred
+            comfortably even when the label fits on one line. */}
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <ActionTile
             icon={MessageCircle}
             label="Message"

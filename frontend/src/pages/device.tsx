@@ -253,11 +253,18 @@ function ActionsCard() {
         44pt, the Apple HIG minimum) and shrink back to default height side-
         by-side on sm+. Was h-9 stacked, which read as visually cramped.
       */}
-      <CardContent className="flex flex-col gap-2 sm:flex-row">
+      {/*
+        Always stacked, always h-11. The previous `sm:flex-row` side-by-side
+        layout caused "Send Flood Advert" to wrap inside its h-9 button on
+        narrow viewports — text on two lines crammed into 36px reads as
+        vertically squeezed. Stacking gives each button comfortable 44pt
+        height (Apple HIG) without competing for horizontal room.
+      */}
+      <CardContent className="flex flex-col gap-2">
         <Button
           type="button"
           variant="outline"
-          className="h-11 flex-1 sm:h-9"
+          className="h-11"
           onClick={() => advert.mutate(false)}
           disabled={advert.isPending}
         >
@@ -266,7 +273,7 @@ function ActionsCard() {
         </Button>
         <Button
           type="button"
-          className="h-11 flex-1 sm:h-9"
+          className="h-11"
           onClick={() => advert.mutate(true)}
           disabled={advert.isPending}
         >
