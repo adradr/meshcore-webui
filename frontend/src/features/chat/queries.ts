@@ -12,6 +12,8 @@ const MessageSchema = z.object({
   timestamp: z.string(),
   ack_state: z.string(),
   pubkey_prefix: z.string().nullable().optional(),
+  expected_ack_hex: z.string().nullable().optional(),
+  ack_received_at: z.string().nullable().optional(),
 })
 
 const MessagesPage = z.object({

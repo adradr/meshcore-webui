@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { HeardRepeatsSheet } from "./HeardRepeatsSheet"
+import { MessageDetailsSheet } from "./MessageDetailsSheet"
 import {
   useMessageActions,
   type MessageActionItem,
@@ -72,6 +73,7 @@ export function MessageBubble({
   senderPrefix: _senderPrefix,
 }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
   const sendRetry = useSendMessage()
@@ -98,6 +100,7 @@ export function MessageBubble({
   const items = useMessageActions({
     message,
     onShowHeardRepeats: () => setSheetOpen(true),
+    onShowDetails: () => setDetailsOpen(true),
     resolvedSender,
     onMessageSender: (pk) => navigate(`/chat/${pk}`),
     onViewSenderProfile: (pk) => navigate(`/contact/${pk}`),
@@ -163,6 +166,11 @@ export function MessageBubble({
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         contactPubKey={message.contact_pub_key}
+      />
+      <MessageDetailsSheet
+        message={detailsOpen ? message : null}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
       />
     </>
   )

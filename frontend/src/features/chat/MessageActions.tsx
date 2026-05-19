@@ -1,4 +1,4 @@
-import { Copy, MessageCircle, Radio, Send, Trash2, User } from "lucide-react"
+import { Copy, Info, MessageCircle, Radio, Send, Trash2, User } from "lucide-react"
 import { toast } from "sonner"
 import type { Message } from "./queries"
 import { useDeleteMessage } from "./queries"
@@ -20,6 +20,7 @@ export interface ResolvedSender {
 interface UseMessageActionsArgs {
   message: Message
   onShowHeardRepeats: () => void
+  onShowDetails?: () => void
   resolvedSender?: ResolvedSender | null
   onMessageSender?: (publicKey: string) => void
   onViewSenderProfile?: (publicKey: string) => void
@@ -28,6 +29,7 @@ interface UseMessageActionsArgs {
 export function useMessageActions({
   message,
   onShowHeardRepeats,
+  onShowDetails,
   resolvedSender,
   onMessageSender,
   onViewSenderProfile,
@@ -90,6 +92,14 @@ export function useMessageActions({
       label: "Send again",
       icon: <Send className="mr-2 h-4 w-4" />,
       onSelect: handleSendAgain,
+    })
+  }
+  if (onShowDetails) {
+    items.push({
+      key: "details",
+      label: "Show details",
+      icon: <Info className="mr-2 h-4 w-4" />,
+      onSelect: onShowDetails,
     })
   }
   items.push({
