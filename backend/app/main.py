@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
+from app.api.conversations import router as conversations_router
 from app.api.device import router as device_router
 from app.api.messages import router as messages_router
 from app.api.push import router as push_router
@@ -92,6 +93,7 @@ def create_app() -> FastAPI:
     app.include_router(contacts_router)
     app.include_router(channels_router)
     app.include_router(messages_router)
+    app.include_router(conversations_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():
