@@ -8,6 +8,8 @@ from typing import Any, Optional
 
 from meshcore import MeshCore, EventType
 
+from app.services.rx_log_buffer import RxLogBuffer
+
 log = logging.getLogger(__name__)
 
 
@@ -81,7 +83,14 @@ class MeshCoreClient:
         EventType.RX_LOG_DATA,
     )
 
-    def __init__(self, host: str, port: int, *, max_queue: int = 256) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        max_queue: int = 256,
+        rx_log_buffer: RxLogBuffer | None = None,
+    ) -> None:
         self._host = host
         self._port = port
         self._mc: MeshCore | None = None
@@ -91,6 +100,7 @@ class MeshCoreClient:
         self._max_queue = max_queue
         self._disconnect_evt: asyncio.Event | None = None
         self._lock = asyncio.Lock()
+        self._rx_log_buffer = rx_log_buffer
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -160,11 +170,31 @@ class MeshCoreClient:
         )
         if event.type == EventType.DISCONNECTED and self._disconnect_evt is not None:
             self._disconnect_evt.set()
+        # Mirror RX_LOG_DATA into the optional in-memory ring buffer so the
+        # GET /api/rx-log endpoint can serve recent packets without requiring
+        # an active WS subscription. We copy the payload to avoid mutating the
+        # dict that's also being broadcast on `wire`.
+        if (
+            self._rx_log_buffer is not None
+            and event.type == EventType.RX_LOG_DATA
+            and hasattr(event.payload, "items")
+        ):
+            self._rx_log_buffer.append(dict(event.payload))
         for q in list(self._subscribers):
             try:
                 q.put_nowait(wire)
             except asyncio.QueueFull:
                 log.warning("WS subscriber queue full — dropping")
+
+    def rx_log_snapshot(self) -> list[dict]:
+        """Return a list copy of recent RX log entries, oldest first.
+
+        Returns an empty list when no buffer was injected at construction
+        time, so callers can rely on a stable shape regardless of wiring.
+        """
+        if self._rx_log_buffer is None:
+            return []
+        return self._rx_log_buffer.snapshot()
 
     def subscribe(self) -> asyncio.Queue[WireEvent]:
         q: asyncio.Queue[WireEvent] = asyncio.Queue(maxsize=self._max_queue)

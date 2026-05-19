@@ -26,6 +26,7 @@ from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient
 from app.services.push_sender import PushSender
+from app.services.rx_log_buffer import RxLogBuffer
 from app.services.task_pool import TaskPool
 
 log = logging.getLogger(__name__)
@@ -107,7 +108,12 @@ async def lifespan(app: FastAPI):
     bridge = MeshCoreBridge(sender=sender, pool=pool)
 
     log.info("Connecting MeshCore at %s:%d", settings.meshcore_host, settings.meshcore_port)
-    client = MeshCoreClient(host=settings.meshcore_host, port=settings.meshcore_port)
+    rx_log_buffer = RxLogBuffer(capacity=settings.rx_log_buffer_size)
+    client = MeshCoreClient(
+        host=settings.meshcore_host,
+        port=settings.meshcore_port,
+        rx_log_buffer=rx_log_buffer,
+    )
     # Forward all events to bridge (which decides whether to push)
     q = client.subscribe()
 

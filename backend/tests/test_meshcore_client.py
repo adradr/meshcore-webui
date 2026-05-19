@@ -202,3 +202,55 @@ class TestRxLogDataForwarding:
         assert wire_event.payload["snr"] == 3.5
         assert wire_event.payload["rssi"] == -90
         assert wire_event.payload["pkt_hash"] == "abcd1234"
+
+
+class TestRxLogBufferIntegration:
+    """When an RxLogBuffer is injected, RX_LOG_DATA events should be appended
+    to it (in addition to being broadcast to WS subscribers). Non-RX_LOG_DATA
+    events must not pollute the buffer, and the client must work without a
+    buffer at all."""
+
+    @pytest.mark.asyncio
+    async def test_rx_log_buffer_receives_rx_log_data_events(self):
+        from app.services.rx_log_buffer import RxLogBuffer
+        from meshcore.events import Event, EventType
+
+        buf = RxLogBuffer(capacity=10)
+        client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
+        payload = {"snr": 3.5, "rssi": -90, "pkt_hash": "abcd"}
+        await client._on_event(
+            Event(type=EventType.RX_LOG_DATA, payload=payload, attributes={})
+        )
+        assert buf.snapshot() == [payload]
+        assert client.rx_log_snapshot() == [payload]
+
+    @pytest.mark.asyncio
+    async def test_rx_log_buffer_is_optional(self):
+        """Client without a buffer doesn't crash on RX_LOG_DATA events."""
+        from meshcore.events import Event, EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        await client._on_event(
+            Event(type=EventType.RX_LOG_DATA, payload={"snr": 1.0}, attributes={})
+        )
+        assert client.rx_log_snapshot() == []
+
+    @pytest.mark.asyncio
+    async def test_rx_log_buffer_only_receives_rx_log_data_events(self):
+        """Non-RX_LOG_DATA events do NOT go into the buffer."""
+        from app.services.rx_log_buffer import RxLogBuffer
+        from meshcore.events import Event, EventType
+
+        buf = RxLogBuffer(capacity=10)
+        client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
+        await client._on_event(
+            Event(
+                type=EventType.CONTACT_MSG_RECV,
+                payload={"text": "hi"},
+                attributes={},
+            )
+        )
+        await client._on_event(
+            Event(type=EventType.ADVERTISEMENT, payload={}, attributes={})
+        )
+        assert buf.snapshot() == []
