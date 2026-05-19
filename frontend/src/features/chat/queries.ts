@@ -44,6 +44,7 @@ const ThreadSchema = z.object({
   last_text: z.string(),
   last_timestamp: z.string().nullable(),
   last_direction: z.enum(["in", "out"]),
+  unread_count: z.number().default(0),
 })
 export type Thread = z.infer<typeof ThreadSchema>
 
@@ -52,6 +53,38 @@ export function useThreads() {
     queryKey: ["threads"],
     queryFn: () => api.get("/api/messages/threads", z.array(ThreadSchema)),
     staleTime: 10_000,
+  })
+}
+
+const UnreadTotalSchema = z.object({ total: z.number() })
+
+export function useUnreadTotal() {
+  return useQuery({
+    queryKey: ["threads", "total"],
+    queryFn: () =>
+      api.get("/api/conversations/unread-total", UnreadTotalSchema),
+    staleTime: 10_000,
+  })
+}
+
+export interface MarkReadVars {
+  contactPubKey?: string
+  channelIdx?: number
+}
+
+export function useMarkRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: MarkReadVars) =>
+      api.post("/api/conversations/read", {
+        contact_pub_key: vars.contactPubKey,
+        channel_idx: vars.channelIdx,
+      }),
+    onSuccess: () => {
+      // Invalidating ["threads"] also matches ["threads", "total"] in
+      // TanStack Query v5 (prefix match by default).
+      qc.invalidateQueries({ queryKey: ["threads"] })
+    },
   })
 }
 
