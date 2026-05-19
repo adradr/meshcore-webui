@@ -157,19 +157,34 @@
     color: var(--popover-foreground);
 }
 
-/* Defeat Leaflet's default link styling INSIDE our action buttons —
- * .leaflet-popup-content a sets color: #0078A8 + underline by default
- * which fights our themed shadcn buttons. */
-.leaflet-popup-content .mc-popup-actions a {
-    color: inherit;
-    text-decoration: none;
-}
-.leaflet-popup-content .mc-popup-actions a:hover {
-    text-decoration: none;
-}
-
 /* Tighten popup body padding so action buttons reach the edges nicely. */
 .leaflet-popup-content {
     margin: 12px 14px;
     line-height: 1.4;
+}
+
+/* Leaflet's bundled CSS sets `.leaflet-popup-content a { color: #0078A8;
+ * text-decoration: underline; }` with specificity (0,1,1), which beats
+ * Tailwind utility classes (0,1,0). When a shadcn Button is rendered
+ * with `asChild` wrapping a <Link>, the resulting <a> inherits Leaflet's
+ * blue + underline, defeating the button's variant text color.
+ *
+ * Restore the correct shadcn variant colors using the same design tokens
+ * the rest of the app uses, scoped to <a data-slot="button"> inside any
+ * Leaflet popup. Selector specificity (0,2,1) beats Leaflet's rule. */
+.leaflet-popup-content a[data-slot="button"] {
+    text-decoration: none;
+    color: var(--foreground);
+}
+.leaflet-popup-content a[data-slot="button"]:hover {
+    text-decoration: none;
+}
+.leaflet-popup-content a[data-slot="button"].bg-primary {
+    color: var(--primary-foreground);
+}
+.leaflet-popup-content a[data-slot="button"].bg-secondary {
+    color: var(--secondary-foreground);
+}
+.leaflet-popup-content a[data-slot="button"].bg-destructive {
+    color: var(--destructive-foreground, oklch(0.985 0 0));
 }
