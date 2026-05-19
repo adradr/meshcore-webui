@@ -20,10 +20,13 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.session import get_db
 from app.deps import get_meshcore_client
 from app.schemas.trace import TraceHopOut, TraceOut
 from app.services.meshcore_client import MeshCoreClient
+from app.services.trace_resolver import resolve_hops
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +43,15 @@ _PUBKEY_PATTERN = r"^[0-9a-fA-F]{64}$"
 async def trace_path(
     pubkey: str = Path(..., pattern=_PUBKEY_PATTERN, description="64-char hex pubkey"),
     client: MeshCoreClient = Depends(get_meshcore_client),
+    db: AsyncSession = Depends(get_db),
 ) -> TraceOut:
-    """Broadcast a TRACE and return the hops the packet traversed."""
+    """Broadcast a TRACE and return the hops the packet traversed.
+
+    Each hop's 1-byte ``hash`` is best-effort resolved against the local
+    ``contacts`` table so the UI can render names / positions for known
+    repeaters without an extra round-trip. See ``trace_resolver`` for the
+    one-match / many-match / no-match semantics.
+    """
     log.info("Trace requested by UI for target pubkey=%s", pubkey)
 
     try:
@@ -53,10 +63,13 @@ async def trace_path(
         # Covers "not connected" and "did not ack" — radio link unavailable.
         raise HTTPException(status_code=503, detail=str(e)) from e
 
+    raw_hops = [{"hash": h.hash, "snr": h.snr} for h in result.hops]
+    resolved = await resolve_hops(raw_hops, db)
+
     return TraceOut(
         requested_target_pubkey=pubkey.lower(),
         tag=result.tag,
         flags=result.flags,
         path_len=result.path_len,
-        hops=[TraceHopOut(hash=h.hash, snr=h.snr) for h in result.hops],
+        hops=[TraceHopOut(**h) for h in resolved],
     )

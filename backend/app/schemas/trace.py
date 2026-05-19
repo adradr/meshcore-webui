@@ -17,6 +17,24 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict
 
 
+class TraceHopCandidate(BaseModel):
+    """One possible contact match for an ambiguous hop hash.
+
+    When the 1-byte hop hash matches more than one local contact, the
+    resolver emits a list of these so the UI can offer disambiguation
+    instead of guessing. ``pub_key`` is the full 64-hex pubkey of the
+    candidate contact; ``name`` / ``lat`` / ``lon`` may be ``None`` if
+    they're unknown for that contact.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = None
+    pub_key: str
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+
 class TraceHopOut(BaseModel):
     """One hop along a trace path, optionally enriched by a resolver."""
 
@@ -24,11 +42,15 @@ class TraceHopOut(BaseModel):
 
     hash: str
     snr: float
-    # Resolved fields — populated by Task 2.4 (resolver); leave None here.
+    # Resolved fields — populated by Task 2.4 (resolver) when the hop hash
+    # matches *exactly one* known contact; otherwise left as ``None``.
     name: Optional[str] = None
     pub_key: Optional[str] = None
     lat: Optional[float] = None
     lon: Optional[float] = None
+    # Populated when the hash matches *more than one* known contact.
+    # Empty list for unique-match, no-match, and empty-hash cases.
+    candidates: list[TraceHopCandidate] = []
 
 
 class TraceOut(BaseModel):
