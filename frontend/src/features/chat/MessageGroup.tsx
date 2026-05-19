@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MessageBubble } from "./MessageBubble"
+import { SenderInfoPopover } from "./SenderInfoPopover"
 import type { EnrichedMessage } from "./MessageList"
 import type { ResolvedSender } from "./MessageActions"
 
@@ -97,7 +98,19 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
               />
             </Link>
           ) : (
-            <ContactAvatar pubkey={avatarSeed} name={senderName} size="sm" />
+            <SenderInfoPopover name={senderName} avatarSeed={avatarSeed}>
+              <button
+                type="button"
+                className="cursor-pointer rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={`Show info for ${senderName}`}
+              >
+                <ContactAvatar
+                  pubkey={avatarSeed}
+                  name={senderName}
+                  size="sm"
+                />
+              </button>
+            </SenderInfoPopover>
           )}
         </div>
       )}
@@ -113,7 +126,14 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
                 {senderName}
               </Link>
             ) : (
-              senderName
+              <SenderInfoPopover name={senderName} avatarSeed={avatarSeed}>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {senderName}
+                </button>
+              </SenderInfoPopover>
             )}
           </span>
         )}
