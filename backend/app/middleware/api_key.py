@@ -8,11 +8,16 @@ from app.core.config import settings
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
     EXEMPT_PATHS = ("/", "/manifest.webmanifest", "/sw.js", "/registerSW.js", "/assets")
-    # /api/health must stay public so the Docker HEALTHCHECK (which can't
-    # carry the bearer token) and external monitors (Uptime Kuma, k8s liveness
-    # probes, etc.) keep working. It only returns {"status": "ok"} — no
-    # sensitive info — so leaving it open does not weaken the auth boundary.
-    EXEMPT_API_PATHS = ("/api/health",)
+    # Endpoints exempt from the bearer-token check even when an API key is
+    # configured. Anything here MUST be safe to expose to the open internet.
+    #
+    # • /api/health — Docker HEALTHCHECK / k8s probes / Uptime-Kuma can't carry
+    #   the bearer token; the response is just `{"status": "ok"}`.
+    # • /api/push/vapid-public-key — the VAPID *public* key is, by definition,
+    #   public. Gating it created a chicken-and-egg problem for first-time
+    #   push enrollment from any origin where the user hadn't yet pasted the
+    #   API key in Settings.
+    EXEMPT_API_PATHS = ("/api/health", "/api/push/vapid-public-key")
 
     async def dispatch(self, request: Request, call_next):
         if settings.api_key is None:
