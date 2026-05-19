@@ -7,6 +7,8 @@ import type { MentionContact } from "@/features/chat/MentionInput"
 const contacts: MentionContact[] = [
   { adv_name: "Alice", public_key: "aaaaaaaaaaaaaaaaaaaa" },
   { adv_name: "Bob", public_key: "bbbbbbbbbbbbbbbbbbbb" },
+  { adv_name: "Alex 📢", public_key: "cccccccccccccccccccc" },
+  { adv_name: "HA3TL WIO L1 🚶", public_key: "dddddddddddddddddddd" },
 ]
 
 function rtl(nodes: React.ReactNode[]) {
@@ -67,5 +69,43 @@ describe("renderMentions", () => {
     const links = container.querySelectorAll("a")
     expect(links).toHaveLength(1)
     expect(links[0].getAttribute("href")).toBe("/chat/aaaaaaaaaaaaaaaaaaaa")
+  })
+
+  it("resolves MeshCore bracketed @[Name] mention", () => {
+    const nodes = renderMentions("hi @[Alice] !", contacts)
+    const { container } = rtl(nodes)
+    const link = container.querySelector("a[href='/chat/aaaaaaaaaaaaaaaaaaaa']")
+    expect(link).not.toBeNull()
+    expect(link!.textContent).toBe("@Alice")
+    expect(container.textContent).toBe("hi @Alice !")
+  })
+
+  it("resolves bracketed mention with spaces + emoji", () => {
+    const nodes = renderMentions("ping @[HA3TL WIO L1 🚶] now", contacts)
+    const { container } = rtl(nodes)
+    const link = container.querySelector("a[href='/chat/dddddddddddddddddddd']")
+    expect(link).not.toBeNull()
+    expect(link!.textContent).toBe("@HA3TL WIO L1 🚶")
+  })
+
+  it("resolves bracketed mention with trailing emoji", () => {
+    const nodes = renderMentions("yo @[Alex 📢]", contacts)
+    const { container } = rtl(nodes)
+    const link = container.querySelector("a[href='/chat/cccccccccccccccccccc']")
+    expect(link).not.toBeNull()
+  })
+
+  it("renders unknown bracketed mention as plain text", () => {
+    const nodes = renderMentions("hey @[no such name] there", contacts)
+    const { container } = rtl(nodes)
+    expect(container.querySelectorAll("a")).toHaveLength(0)
+    expect(container.textContent).toBe("hey @[no such name] there")
+  })
+
+  it("handles mixed bracketed + bare mentions", () => {
+    const nodes = renderMentions("hi @[Alice] and @Bob", contacts)
+    const { container } = rtl(nodes)
+    expect(container.querySelector("a[href='/chat/aaaaaaaaaaaaaaaaaaaa']")).not.toBeNull()
+    expect(container.querySelector("a[href='/chat/bbbbbbbbbbbbbbbbbbbb']")).not.toBeNull()
   })
 })

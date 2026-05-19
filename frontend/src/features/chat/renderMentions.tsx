@@ -108,9 +108,43 @@ export function renderMentions(
     }
   }
 
+  const byNameLower = new Map<string, MentionContact>()
+  for (const c of contacts) byNameLower.set(c.adv_name.toLowerCase(), c)
+
   while (i < text.length) {
     const atWordBoundary = i === 0 || /\s/.test(text[i - 1])
     if (text[i] === "@" && atWordBoundary) {
+      // MeshCore bracketed mention: @[Name with spaces 📢]
+      if (text[i + 1] === "[") {
+        const closeIdx = text.indexOf("]", i + 2)
+        // Bound the inner name to a sane length and forbid newlines.
+        if (closeIdx !== -1 && closeIdx - i - 2 <= 64) {
+          const inner = text.slice(i + 2, closeIdx)
+          if (inner.length > 0 && !/[\n\r]/.test(inner)) {
+            const matched = byNameLower.get(inner.toLowerCase())
+            if (matched) {
+              flushBuffer()
+              nodes.push(
+                <Link
+                  key={`m-${i}`}
+                  to={`/chat/${matched.public_key}`}
+                  className="text-primary font-medium hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  @{matched.adv_name}
+                </Link>,
+              )
+              i = closeIdx + 1
+              continue
+            }
+            // Unknown bracketed name → render as plain "@[name]" text
+            buffer += text.slice(i, closeIdx + 1)
+            i = closeIdx + 1
+            continue
+          }
+        }
+      }
+      // Bare @Name (sorted longest-first to avoid prefix collisions)
       let matched: MentionContact | null = null
       for (const c of sorted) {
         const slice = text.slice(i + 1, i + 1 + c.adv_name.length)
