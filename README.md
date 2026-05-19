@@ -35,93 +35,86 @@ It bridges the gaps the official mobile app can't:
 - 🔒 **Optional API key** auth for defense-in-depth behind your reverse proxy
 - 📦 **Single image** — `~435 MB`, healthcheck, runs anywhere
 
-## Visual
-
-```
-            ○ ─────── ○         outer nodes: cyan with white halo
-            │ ╲     ╱ │
-            │   ●   │           center: white halo + cyan core =
-            │ ╱     ╲ │         "your device" on the mesh
-            ○ ─────── ○
-```
-
-The favicon, PWA icon, and push notification icon all use the same mesh-network mark.
-
----
-
 ## Architecture
 
 ```mermaid
-flowchart TB
-  subgraph Phone["📱 iPhone / Android / Desktop"]
-    Browser["Safari / Chrome / Firefox"]
-    PWA["PWA installed to home screen<br/>(iOS only requirement for push)"]
+flowchart TD
+  Client["📱 Your devices<br/>iPhone PWA · Android Chrome · desktop browsers"]
+
+  Proxy["🌐 Reverse Proxy<br/>NPM / Traefik / Caddy / Cloudflare Tunnel / Tailscale<br/><i>terminates TLS, upgrades WebSocket</i>"]
+
+  subgraph Container["🐳 meshcore-webui container · port 8080"]
+    direction TB
+    UI["📦 Static React PWA"]
+    API["⚡ FastAPI<br/>REST + /ws"]
+    Worker["🔄 Workers<br/>MeshCoreClient · PushSender · Bridge"]
+    DB[("💾 SQLite + WAL<br/>messages · contacts · subscriptions")]
+    UI -.- API
+    API <--> Worker
+    Worker <--> DB
   end
 
-  subgraph Homelab["🏠 Your homelab (Synology / Pi / Mac / VPS)"]
-    Proxy["Reverse Proxy<br/><i>NPM / Traefik / Caddy /<br/>Cloudflare Tunnel / Tailscale</i>"]
+  Device["📻 MeshCore device<br/>T3-S3 · Heltec V3 · RAK<br/>LoRa 433 / 868 / 915 MHz"]
 
-    subgraph Container["🐳 meshcore-webui container (port 8080)"]
-      Static["📦 React PWA<br/>(static dist)"]
-      API["⚡ FastAPI<br/>REST + /ws WebSocket"]
-      Worker["🔄 Background tasks<br/>• MeshCoreClient TCP bridge<br/>• PushSender (pywebpush)<br/>• Message persister"]
-      DB[("💾 SQLite + WAL<br/>messages, contacts,<br/>push subscriptions,<br/>read pointers")]
-    end
+  Push["☁️ Web Push relay<br/>Apple · Google · Mozilla<br/><i>VAPID-signed, no account needed</i>"]
 
-    Device["📻 MeshCore device<br/>T3-S3 / Heltec V3 / RAK<br/>LoRa 433/868/915 MHz"]
-  end
+  Client -- "HTTPS + WS" --> Proxy
+  Proxy -- "HTTP + WS" --> Container
+  Worker <== "TCP :5000<br/>persistent · auto-reconnect" ==> Device
+  Worker -- "send notification" --> Push
+  Push -. "wakes PWA even<br/>when closed" .-> Client
 
-  subgraph PushServices["☁️ Push relay services (no account needed)"]
-    APNs["web.push.apple.com<br/>(Safari / iOS PWA)"]
-    FCM["fcm.googleapis.com<br/>(Chrome / Android)"]
-    Mozilla["push.services.mozilla.com<br/>(Firefox)"]
-  end
-
-  Browser -->|HTTPS| Proxy
-  PWA -.->|HTTPS + WS upgrade| Proxy
-  Proxy -->|HTTP + WS| Static
-  Proxy -->|HTTP + WS| API
-  API <--> Worker
-  Worker <--> DB
-  Worker <-->|TCP :5000<br/>persistent + auto-reconnect| Device
-  Worker -->|Web Push protocol<br/>VAPID signed| APNs
-  Worker --> FCM
-  Worker --> Mozilla
-  APNs -.->|Push wakes PWA<br/>even when closed| PWA
-  FCM -.-> Browser
-  Mozilla -.-> Browser
+  classDef client fill:#dbeafe,stroke:#1d4ed8,color:#0c224d
+  classDef proxy fill:#fef3c7,stroke:#a16207,color:#3f2a06
+  classDef container fill:#cffafe,stroke:#0891b2,color:#053844
+  classDef device fill:#dcfce7,stroke:#15803d,color:#062812
+  classDef push fill:#f3e8ff,stroke:#7e22ce,color:#2c0c4d
+  class Client client
+  class Proxy proxy
+  class Container,UI,API,Worker,DB container
+  class Device device
+  class Push push
 ```
 
 ### Why this shape?
 
-- **Backend holds the TCP socket** — iOS suspends apps in seconds; browsers can't open raw TCP. Putting the persistent connection in a container that lives on your LAN sidesteps both.
-- **Web Push beats native push for self-hosters** — no Apple Developer Program, no APNs cert, no Firebase project. VAPID-signed messages route through whichever push service the user's browser uses, with you as the only "server".
-- **Reverse proxy is yours** — we don't ship Caddy or Let's Encrypt. NPM/Traefik/Cloudflare Tunnel/Tailscale all work; pick what your homelab uses.
+- **Backend holds the TCP socket** — iOS suspends apps in seconds; browsers can't open raw TCP. A persistent container on your LAN sidesteps both.
+- **Web Push beats native push for self-hosters** — no Apple Developer Program, no APNs cert, no Firebase project. VAPID signs the payload; the user's browser picks its own push service.
+- **Reverse proxy is yours** — we don't bundle TLS. Pick what your homelab already runs.
 
 ### Push notification flow
 
 ```mermaid
 sequenceDiagram
-  participant Device as 📻 MeshCore device
-  participant Backend as 🐳 meshcore-webui
+  autonumber
+  actor User as 👤 You
+  participant Phone as 📱 PWA
+  participant Backend as 🐳 Backend
   participant DB as 💾 SQLite
-  participant Push as ☁️ Apple/Mozilla/FCM
-  participant Phone as 📱 iPhone PWA
+  participant Push as ☁️ Web Push
+  participant Device as 📻 Device
 
-  Note over Phone,Backend: One-time setup
-  Phone->>Backend: Subscribe (VAPID pubkey)
-  Backend->>DB: Save subscription endpoint
+  rect rgb(245, 240, 255)
+    Note over Phone,Backend: One-time setup
+    User->>Phone: Enable notifications
+    Phone->>Backend: Subscribe (VAPID pubkey)
+    Backend->>DB: Save subscription
+  end
 
-  Note over Device,Phone: Message arrives
-  Device->>Backend: New message (TCP)
-  Backend->>DB: Persist message
-  Backend->>Backend: PushSender fan-out
-  Backend->>Push: POST /push (VAPID-signed payload)
-  Push-->>Phone: Wake PWA + show notification
+  rect rgb(240, 250, 245)
+    Note over Device,Phone: Message arrives
+    Device->>Backend: New message (TCP)
+    Backend->>DB: Persist
+    Backend->>Push: POST (VAPID-signed)
+    Push-->>Phone: Wake + show notification
+  end
 
-  Note over Phone,Backend: User taps notification
-  Phone->>Backend: Connect WebSocket
-  Backend-->>Phone: Stream pending messages
+  rect rgb(245, 248, 255)
+    Note over User,Backend: User reads
+    User->>Phone: Tap notification
+    Phone->>Backend: Connect WebSocket
+    Backend-->>Phone: Stream queued messages
+  end
 ```
 
 ---
