@@ -24,7 +24,7 @@ export function parseRepeaterPath(
   if (!pathHex) return []
   const clean = pathHex.replace(/[^0-9a-fA-F]/g, "")
   const hashes = clean.match(/.{2}/g) ?? []
-  return hashes.map((h) => {
+  return hashes.map((h: string) => {
     const lower = h.toLowerCase()
     const match = Object.values(contacts).find(
       (c) =>
