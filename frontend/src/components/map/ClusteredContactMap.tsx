@@ -20,6 +20,16 @@ interface Props {
   onLosRequest?: (c: ContactMarker) => void
   /** When false (self GPS unknown), the LoS button is rendered disabled. */
   selfHasGps?: boolean
+  /** Emitted when the user clicks "Trace path" on a REP/ROOM popup. */
+  onTraceRequest?: (c: ContactMarker) => void
+  /** True when any trace mutation is in flight — disables per-popup Trace buttons. */
+  traceInFlight?: boolean
+  /**
+   * Rendered inside the `<MapContainer>` (after markers, before fit button).
+   * Use this to mount react-leaflet overlays like `TracePathLayer` that
+   * require Leaflet map context.
+   */
+  children?: React.ReactNode
 }
 
 // Initial center is a sane fallback before MapViewPersistence kicks in —
@@ -33,6 +43,9 @@ export function ClusteredContactMap({
   dark = false,
   onLosRequest,
   selfHasGps,
+  onTraceRequest,
+  traceInFlight,
+  children,
 }: Props) {
   // Include self in fitBounds + center so the camera respects your own pin
   const allPoints = self
@@ -54,6 +67,8 @@ export function ClusteredContactMap({
           contacts={contacts}
           onLosRequest={onLosRequest}
           selfHasGps={selfHasGps}
+          onTraceRequest={onTraceRequest}
+          traceInFlight={traceInFlight}
         />
       </MarkerClusterGroup>
       {/* Self marker rendered OUTSIDE the cluster so it always shows distinctly */}
@@ -70,6 +85,7 @@ export function ClusteredContactMap({
         </Marker>
       )}
       <CenterOnContactsButton contacts={allPoints} />
+      {children}
     </MapContainer>
   )
 }

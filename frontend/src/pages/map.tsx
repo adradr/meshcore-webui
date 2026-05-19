@@ -1,10 +1,18 @@
 import { useEffect, useState } from "react"
+import { X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
+import { TracePathLayer } from "@/components/map/TracePathLayer"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
 import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
 import { LineOfSightModal } from "@/features/los/LineOfSightModal"
+import {
+  useTracePath,
+  type TraceHopOut,
+  type TraceOut,
+} from "@/features/trace/api"
+import { Button } from "@/components/ui/button"
 
 function nodeTypeFor(type: number | undefined): NodeType {
   if (type === 1) return "CLI"
@@ -43,6 +51,10 @@ export function MapPage() {
     lon: number
   } | null>(null)
 
+  const traceMutation = useTracePath()
+  const [activeTrace, setActiveTrace] = useState<TraceOut | null>(null)
+  const [unplottedHops, setUnplottedHops] = useState<TraceHopOut[]>([])
+
   const self =
     selfInfo &&
     typeof selfInfo.adv_lat === "number" &&
@@ -74,8 +86,23 @@ export function MapPage() {
         }))
     : []
 
+  const handleTraceRequest = (c: { id: string; name: string }) => {
+    traceMutation.mutate(c.id, {
+      onSuccess: (trace) => {
+        setActiveTrace(trace)
+        // Clear stale unplotted hops; TracePathLayer will repopulate on mount.
+        setUnplottedHops([])
+      },
+    })
+  }
+
+  const clearTrace = () => {
+    setActiveTrace(null)
+    setUnplottedHops([])
+  }
+
   return (
-    <div className="h-full w-full">
+    <div className="relative h-full w-full">
       <ClusteredContactMap
         contacts={contacts}
         self={self}
@@ -86,7 +113,17 @@ export function MapPage() {
             : undefined
         }
         selfHasGps={self !== null}
-      />
+        onTraceRequest={handleTraceRequest}
+        traceInFlight={traceMutation.isPending}
+      >
+        {activeTrace && (
+          <TracePathLayer
+            hops={activeTrace.hops}
+            origin={self}
+            onUnplottedHops={setUnplottedHops}
+          />
+        )}
+      </ClusteredContactMap>
       <LineOfSightModal
         open={losTarget !== null}
         onOpenChange={(open) => {
@@ -95,6 +132,28 @@ export function MapPage() {
         a={self}
         b={losTarget}
       />
+      {activeTrace && (
+        <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-2">
+          <Button size="sm" variant="secondary" onClick={clearTrace}>
+            <X className="mr-1 h-4 w-4" />
+            Clear trace
+          </Button>
+          {unplottedHops.length > 0 && (
+            <div className="bg-popover text-popover-foreground max-w-xs rounded-md border p-3 text-xs shadow-lg">
+              <div className="mb-1 font-semibold">
+                {unplottedHops.length} hop(s) without GPS
+              </div>
+              <ul className="space-y-0.5">
+                {unplottedHops.map((h, i) => (
+                  <li key={`${h.hash}-${i}`} className="font-mono">
+                    {h.name ?? `(${h.hash})`} — SNR {h.snr.toFixed(1)} dB
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }

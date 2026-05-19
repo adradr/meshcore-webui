@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ArrowRight, MessageCircle, Radio, User } from "lucide-react"
+import { ArrowRight, MessageCircle, Radio, Route, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ContactMarker } from "./MarkersLayer"
 import type { NodeType } from "./nodeIcons"
@@ -20,7 +20,18 @@ interface Props {
   selfHasGps?: boolean
   /** True when this popup belongs to the user's own device pin (sentinel id `__self__`). */
   isSelf: boolean
+  /** Emitted when the user clicks the "Trace path" button (REP/ROOM only). */
+  onTraceRequest?: (c: ContactMarker) => void
+  /**
+   * True when ANY trace mutation is in flight. Per-marker pending state would
+   * require lifting the mutation per-marker which is overkill for v1 — accept
+   * the coarse disabling.
+   */
+  traceInFlight?: boolean
 }
+
+/** Node types where the "Trace path" button makes sense (multi-hop targets). */
+const TRACEABLE_TYPES: ReadonlySet<NodeType> = new Set(["REP", "ROOM"])
 
 /**
  * Popup body for a marker on the contact map. Extracted from `MarkersLayer`
@@ -33,11 +44,15 @@ export function MarkerPopupBody({
   onLosRequest,
   selfHasGps,
   isSelf,
+  onTraceRequest,
+  traceInFlight,
 }: Props) {
   const losDisabled = !selfHasGps || !onLosRequest
   const losTitle = selfHasGps
     ? `Line of sight to ${contact.name}`
     : "Self location unknown — set up your device's GPS to compute line of sight"
+  const showTrace = TRACEABLE_TYPES.has(contact.nodeType) && !!onTraceRequest
+  const traceDisabled = !!traceInFlight
 
   return (
     <div className="min-w-44 space-y-2">
@@ -91,6 +106,20 @@ export function MarkerPopupBody({
           >
             <Radio className="h-3.5 w-3.5" />
           </Button>
+          {showTrace && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8 w-9 p-0"
+              title="Trace path"
+              aria-label={`Trace path to ${contact.name}`}
+              disabled={traceDisabled}
+              onClick={() => onTraceRequest?.(contact)}
+            >
+              <Route className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
       )}
     </div>

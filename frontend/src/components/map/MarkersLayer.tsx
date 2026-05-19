@@ -16,9 +16,19 @@ interface Props {
   onLosRequest?: (c: ContactMarker) => void
   /** When false (self GPS unknown), LoS button is disabled with a helpful tooltip. */
   selfHasGps?: boolean
+  /** Emitted when the user clicks "Trace path" on a REP/ROOM popup. */
+  onTraceRequest?: (c: ContactMarker) => void
+  /** When true, the per-popup Trace button is disabled (any trace in flight). */
+  traceInFlight?: boolean
 }
 
-export function MarkersLayer({ contacts, onLosRequest, selfHasGps }: Props) {
+export function MarkersLayer({
+  contacts,
+  onLosRequest,
+  selfHasGps,
+  onTraceRequest,
+  traceInFlight,
+}: Props) {
   return (
     <>
       {contacts.map((c) => (
@@ -33,6 +43,8 @@ export function MarkersLayer({ contacts, onLosRequest, selfHasGps }: Props) {
               onLosRequest={onLosRequest}
               selfHasGps={selfHasGps}
               isSelf={c.id === "__self__"}
+              onTraceRequest={onTraceRequest}
+              traceInFlight={traceInFlight}
             />
           </Popup>
         </Marker>
