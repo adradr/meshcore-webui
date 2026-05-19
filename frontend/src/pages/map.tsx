@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { X } from "lucide-react"
+import { List, X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
 import { TracePathLayer } from "@/components/map/TracePathLayer"
 import { useContacts, type Contact } from "@/features/contacts/queries"
@@ -7,11 +7,8 @@ import { useSelfInfo } from "@/features/device/queries"
 import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
 import { LineOfSightModal } from "@/features/los/LineOfSightModal"
-import {
-  useTracePath,
-  type TraceHopOut,
-  type TraceOut,
-} from "@/features/trace/api"
+import { useTracePath, type TraceOut } from "@/features/trace/api"
+import { TraceHopsDrawer } from "@/features/trace/TraceHopsDrawer"
 import { Button } from "@/components/ui/button"
 
 function nodeTypeFor(type: number | undefined): NodeType {
@@ -53,7 +50,7 @@ export function MapPage() {
 
   const traceMutation = useTracePath()
   const [activeTrace, setActiveTrace] = useState<TraceOut | null>(null)
-  const [unplottedHops, setUnplottedHops] = useState<TraceHopOut[]>([])
+  const [hopsOpen, setHopsOpen] = useState(false)
 
   const self =
     selfInfo &&
@@ -90,15 +87,13 @@ export function MapPage() {
     traceMutation.mutate(c.id, {
       onSuccess: (trace) => {
         setActiveTrace(trace)
-        // Clear stale unplotted hops; TracePathLayer will repopulate on mount.
-        setUnplottedHops([])
       },
     })
   }
 
   const clearTrace = () => {
     setActiveTrace(null)
-    setUnplottedHops([])
+    setHopsOpen(false)
   }
 
   return (
@@ -117,11 +112,7 @@ export function MapPage() {
         traceInFlight={traceMutation.isPending}
       >
         {activeTrace && (
-          <TracePathLayer
-            hops={activeTrace.hops}
-            origin={self}
-            onUnplottedHops={setUnplottedHops}
-          />
+          <TracePathLayer hops={activeTrace.hops} origin={self} />
         )}
       </ClusteredContactMap>
       <LineOfSightModal
@@ -134,26 +125,25 @@ export function MapPage() {
       />
       {activeTrace && (
         <div className="absolute right-4 top-4 z-[1000] flex flex-col gap-2">
-          <Button size="sm" variant="secondary" onClick={clearTrace}>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setHopsOpen(true)}
+          >
+            <List className="mr-1 h-4 w-4" />
+            {activeTrace.hops.length} hops
+          </Button>
+          <Button size="sm" variant="ghost" onClick={clearTrace}>
             <X className="mr-1 h-4 w-4" />
             Clear trace
           </Button>
-          {unplottedHops.length > 0 && (
-            <div className="bg-popover text-popover-foreground max-w-xs rounded-md border p-3 text-xs shadow-lg">
-              <div className="mb-1 font-semibold">
-                {unplottedHops.length} hop(s) without GPS
-              </div>
-              <ul className="space-y-0.5">
-                {unplottedHops.map((h, i) => (
-                  <li key={`${h.hash}-${i}`} className="font-mono">
-                    {h.name ?? `(${h.hash})`} — SNR {h.snr.toFixed(1)} dB
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
+      <TraceHopsDrawer
+        open={hopsOpen}
+        onOpenChange={setHopsOpen}
+        trace={activeTrace}
+      />
     </div>
   )
 }
