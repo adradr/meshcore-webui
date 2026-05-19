@@ -123,3 +123,60 @@ async def test_post_endpoint_requires_exactly_one_field_neither(client):
         json={},
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_unread_total_empty_when_no_messages(client):
+    r = await client.get("/api/conversations/unread-total")
+    assert r.status_code == 200
+    assert r.json() == {"total": 0}
+
+
+@pytest.mark.asyncio
+async def test_unread_total_sums_across_conversations(client, db):
+    from app.db.models import Message
+
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    # 2 unread DMs for abc + 3 unread channel msgs on idx 2 = 5 total
+    for i in range(2):
+        db.add(Message(
+            msg_type="dm", contact_pub_key="abc", direction="in",
+            text=f"a{i}", timestamp=base + dt.timedelta(minutes=i),
+        ))
+    for i in range(3):
+        db.add(Message(
+            msg_type="chan", channel_idx=2, direction="in",
+            text=f"c{i}", timestamp=base + dt.timedelta(minutes=i),
+        ))
+    # Outgoing msg should not count
+    db.add(Message(
+        msg_type="dm", contact_pub_key="abc", direction="out",
+        text="me", timestamp=base + dt.timedelta(minutes=5),
+    ))
+    await db.commit()
+
+    r = await client.get("/api/conversations/unread-total")
+    assert r.json() == {"total": 5}
+
+
+@pytest.mark.asyncio
+async def test_unread_total_respects_mark_read(client, db):
+    from app.db.models import Message
+
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    for i in range(4):
+        db.add(Message(
+            msg_type="dm", contact_pub_key="abc", direction="in",
+            text=f"a{i}", timestamp=base + dt.timedelta(minutes=i),
+        ))
+    await db.commit()
+
+    r = await client.get("/api/conversations/unread-total")
+    assert r.json()["total"] == 4
+
+    # mark read after the last message
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    await mark_read(db, contact_pub_key="abc", channel_idx=None, when=when)
+
+    r2 = await client.get("/api/conversations/unread-total")
+    assert r2.json()["total"] == 0

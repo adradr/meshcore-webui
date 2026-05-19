@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -32,3 +33,37 @@ async def post_mark_read(
         channel_idx=payload.channel_idx,
     )
     return {"last_read_at": ts}
+
+
+@router.get("/unread-total")
+async def get_unread_total(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Sum of unread_count across all conversations.
+
+    Uses the same per-conversation unread calculation as
+    /api/messages/threads. Returns `{"total": <int>}`.
+    """
+    sql = text("""
+      SELECT COALESCE(SUM(unread), 0) AS total FROM (
+        SELECT (
+          SELECT COUNT(*) FROM messages m3
+          WHERE m3.direction = 'in'
+            AND m3.msg_type = m1.msg_type
+            AND COALESCE(m3.contact_pub_key, '') = COALESCE(m1.contact_pub_key, '')
+            AND COALESCE(m3.channel_idx, -1)     = COALESCE(m1.channel_idx, -1)
+            AND datetime(m3.timestamp) > datetime(COALESCE((
+              SELECT s2.value FROM settings s2
+              WHERE s2.key = CASE m1.msg_type
+                WHEN 'dm'   THEN 'read:dm:'   || COALESCE(m1.contact_pub_key, '')
+                WHEN 'chan' THEN 'read:chan:' || CAST(COALESCE(m1.channel_idx, -1) AS TEXT)
+                ELSE ''
+              END
+            ), '1970-01-01T00:00:00+00:00'))
+        ) AS unread
+        FROM messages m1
+        GROUP BY m1.msg_type, COALESCE(m1.contact_pub_key, ''), COALESCE(m1.channel_idx, -1)
+      )
+    """)
+    row = (await db.execute(sql)).mappings().one()
+    return {"total": int(row["total"] or 0)}
