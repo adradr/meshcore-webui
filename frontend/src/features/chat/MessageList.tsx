@@ -38,10 +38,12 @@ export function MessageList({ contactPubKey, channelIdx }: Props) {
     )
   }
 
+  const showSender = channelIdx !== undefined
+
   return (
     <ul className="space-y-2 p-4">
       {items.map((m) => (
-        <MessageBubble key={m.id} message={m} />
+        <MessageBubble key={m.id} message={m} showSender={showSender} />
       ))}
     </ul>
   )

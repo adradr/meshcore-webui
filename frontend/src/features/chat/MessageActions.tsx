@@ -1,4 +1,4 @@
-import { Copy, Radio, Send, Trash2 } from "lucide-react"
+import { Copy, MessageCircle, Radio, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import type { Message } from "./queries"
 import { useDeleteMessage } from "./queries"
@@ -12,14 +12,23 @@ interface ItemSpec {
   onSelect: () => void
 }
 
+export interface ResolvedSender {
+  adv_name: string
+  public_key: string
+}
+
 interface UseMessageActionsArgs {
   message: Message
   onShowHeardRepeats: () => void
+  resolvedSender?: ResolvedSender | null
+  onMessageSender?: (publicKey: string) => void
 }
 
 export function useMessageActions({
   message,
   onShowHeardRepeats,
+  resolvedSender,
+  onMessageSender,
 }: UseMessageActionsArgs): ItemSpec[] {
   const sendMutation = useSendMessage()
   const deleteMutation = useDeleteMessage()
@@ -53,6 +62,18 @@ export function useMessageActions({
       onSelect: handleCopy,
     },
   ]
+  if (
+    message.direction === "in" &&
+    resolvedSender &&
+    onMessageSender
+  ) {
+    items.push({
+      key: "message-sender",
+      label: `Message ${resolvedSender.adv_name}`,
+      icon: <MessageCircle className="mr-2 h-4 w-4" />,
+      onSelect: () => onMessageSender(resolvedSender.public_key),
+    })
+  }
   if (message.direction === "out") {
     items.push({
       key: "send-again",
