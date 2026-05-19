@@ -70,7 +70,7 @@ export function ChatPage() {
   return (
     <div className="flex h-full flex-col">
       <ConversationHeader contactPubKey={pubKey} channelIdx={channelIdx} />
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 min-h-0">
         <MessageList contactPubKey={pubKey} channelIdx={channelIdx} />
       </div>
       <MessageInput contactPubKey={pubKey} channelIdx={channelIdx} />
