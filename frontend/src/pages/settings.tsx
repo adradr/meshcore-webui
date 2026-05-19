@@ -31,12 +31,19 @@ export function SettingsPage() {
 
   const togglePush = async () => {
     try {
+      // Read the LATEST stored key, not the in-memory `apiKey` state — that
+      // one only updates after Save, while push toggles should respect what's
+      // actually persisted (and thus what every other API call sends).
+      const storedKey =
+        typeof localStorage !== "undefined"
+          ? (localStorage.getItem("apiKey") ?? undefined)
+          : undefined
       if (pushOn) {
-        await unsubscribeFromPush()
+        await unsubscribeFromPush(storedKey)
         setPushOn(false)
         toast.success("Notifications off")
       } else {
-        await subscribeToPush()
+        await subscribeToPush(storedKey)
         setPushOn(true)
         toast.success("Notifications on")
       }

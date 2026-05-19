@@ -55,14 +55,21 @@ async function getRegistration(): Promise<ServiceWorkerRegistration> {
  * still produces a working push setup — the backend is the single source of
  * truth for the keypair.
  */
-async function resolveVapidPublicKey(): Promise<string> {
+async function resolveVapidPublicKey(apiKey?: string): Promise<string> {
   const baked = import.meta.env.VITE_VAPID_PUBLIC_KEY
   if (baked) return baked
-  const res = await fetch("/api/push/vapid-public-key")
+  // Send the bearer token if we have one — the endpoint sits behind the same
+  // APIKeyMiddleware as the rest of /api/*, so an unauthenticated fetch from
+  // behind a proxy with auth enabled would 401 and break push enable.
+  const headers: Record<string, string> = {}
+  if (apiKey) headers.authorization = `Bearer ${apiKey}`
+  const res = await fetch("/api/push/vapid-public-key", { headers })
   if (!res.ok) {
     throw new Error(
       `VAPID public key unavailable: backend returned ${res.status}. ` +
-        "Ensure the backend has VAPID_PRIVATE_KEY_PATH configured.",
+        (res.status === 401
+          ? "Set your API key in Settings first."
+          : "Ensure the backend has VAPID_PRIVATE_KEY_PATH configured."),
     )
   }
   const body = (await res.json()) as { key?: string }
@@ -75,7 +82,7 @@ export async function subscribeToPush(
 ): Promise<PushSubscription> {
   if (!canUsePush()) throw new Error("Push not supported in this context")
 
-  const vapid = await resolveVapidPublicKey()
+  const vapid = await resolveVapidPublicKey(apiKey)
 
   const perm = await Notification.requestPermission()
   if (perm !== "granted") throw new Error(`Notification permission ${perm}`)
