@@ -1,4 +1,4 @@
-import { Radio } from "lucide-react"
+import { Loader2, Radio, Search } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -6,7 +6,8 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { useContacts } from "@/features/contacts/queries"
+import { Button } from "@/components/ui/button"
+import { useContacts, useDiscoverPath } from "@/features/contacts/queries"
 import { parseRepeaterPath } from "./repeaterPath"
 
 interface Props {
@@ -18,14 +19,19 @@ interface Props {
 
 export function HeardRepeatsSheet({ open, onOpenChange, contactPubKey }: Props) {
   const contacts = useContacts()
+  const discoverPath = useDiscoverPath()
 
   const peer = contactPubKey
     ? Object.values(contacts.data ?? {}).find((c) =>
         c.public_key?.toLowerCase().startsWith(contactPubKey.toLowerCase()),
       )
     : undefined
-  const pathHex = (peer as { path?: string | null } | undefined)?.path ?? null
-  const hops = parseRepeaterPath(pathHex, contacts.data ?? {})
+  // Distinguish "no path stored" from "explicit empty path" (= direct).
+  // The contact's `path` is null/undefined when discovery has never run, and
+  // empty string when the device has explicitly reported a direct/flooded link.
+  const rawPath = (peer as { path?: string | null } | undefined)?.path
+  const pathIsUnknown = peer != null && (rawPath === null || rawPath === undefined)
+  const hops = parseRepeaterPath(rawPath ?? null, contacts.data ?? {})
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -35,16 +41,40 @@ export function HeardRepeatsSheet({ open, onOpenChange, contactPubKey }: Props) 
           <SheetDescription>
             {contactPubKey
               ? "Repeater path most recently observed for this contact."
-              : "Path information is only available for direct-message peers."}
+              : "Channel message — repeater path varies per relay."}
           </SheetDescription>
         </SheetHeader>
         <div className="p-4">
           {!contactPubKey ? (
-            <p className="text-sm text-muted-foreground">Unknown path.</p>
+            <p className="text-sm text-muted-foreground">
+              Not applicable for channel messages.
+            </p>
           ) : !peer ? (
             <p className="text-sm text-muted-foreground">
               Contact not found in the local list.
             </p>
+          ) : pathIsUnknown ? (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                No path discovered yet for this contact.
+              </p>
+              <Button
+                size="sm"
+                onClick={() =>
+                  discoverPath.mutate({
+                    pubkey: peer.public_key ?? contactPubKey,
+                  })
+                }
+                disabled={discoverPath.isPending}
+              >
+                {discoverPath.isPending ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Search className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {discoverPath.isPending ? "Discovering…" : "Discover path"}
+              </Button>
+            </div>
           ) : hops.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               Direct (no repeaters in path).
