@@ -7,6 +7,7 @@ import { ChannelsPage } from "@/pages/channels"
 import { MapPage } from "@/pages/map"
 import { SettingsPage } from "@/pages/settings"
 import { DevicePage } from "@/pages/device"
+import { RxLogPage } from "@/pages/rx-log"
 
 const router = createBrowserRouter([
   {
@@ -21,6 +22,7 @@ const router = createBrowserRouter([
       { path: "channels", element: <ChannelsPage /> },
       { path: "map", element: <MapPage /> },
       { path: "device", element: <DevicePage /> },
+      { path: "rx-log", element: <RxLogPage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },

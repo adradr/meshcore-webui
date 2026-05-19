@@ -10,6 +10,7 @@ import {
   Hash,
   Map,
   Cpu,
+  Radio,
   Settings as SettingsIcon,
 } from "lucide-react"
 
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/channels", icon: Hash, label: "Channels" },
   { to: "/map", icon: Map, label: "Map" },
   { to: "/device", icon: Cpu, label: "Device" },
+  { to: "/rx-log", icon: Radio, label: "RX Log" },
   { to: "/settings", icon: SettingsIcon, label: "Settings" },
 ]
 
@@ -48,7 +50,7 @@ export function Layout() {
       <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
-      <nav className="grid h-16 shrink-0 grid-cols-6 border-t bg-background pb-[env(safe-area-inset-bottom)]">
+      <nav className="grid h-16 shrink-0 grid-cols-7 border-t bg-background pb-[env(safe-area-inset-bottom)]">
         {NAV.map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
