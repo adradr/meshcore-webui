@@ -59,3 +59,40 @@ export function useRxLog(opts: { paused?: boolean } = {}) {
 
   return query
 }
+
+export const RX_LOG_CSV_COLUMNS = [
+  "recv_time",
+  "snr",
+  "rssi",
+  "payload_length",
+  "route_typename",
+  "payload_typename",
+  "pkt_hash",
+  "path",
+  "raw_hex",
+] as const
+
+function csvEscape(v: unknown): string {
+  if (v === null || v === undefined) return ""
+  const s = String(v)
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
+export function serialiseCsv(rows: RxEntry[]): string {
+  const header = RX_LOG_CSV_COLUMNS.join(",")
+  const body = rows
+    .map((r) =>
+      RX_LOG_CSV_COLUMNS.map((c) =>
+        csvEscape((r as Record<string, unknown>)[c]),
+      ).join(","),
+    )
+    .join("\n")
+  return rows.length > 0 ? `${header}\n${body}` : header
+}
+
+export function serialiseJson(rows: RxEntry[]): string {
+  return JSON.stringify(rows, null, 2)
+}

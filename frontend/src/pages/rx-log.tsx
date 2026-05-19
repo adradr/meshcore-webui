@@ -1,6 +1,12 @@
 import { useMemo, useState } from "react"
 import { Download, Search } from "lucide-react"
-import { useRxLog, type RxEntry } from "@/features/rx_log/api"
+import {
+  serialiseCsv,
+  serialiseJson,
+  useRxLog,
+  type RxEntry,
+} from "@/features/rx_log/api"
+import { downloadBlob } from "@/lib/download"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -85,6 +91,8 @@ function Toolbar({
   setPaused,
   filteredCount,
   total,
+  onExportCsv,
+  onExportJson,
 }: {
   search: string
   setSearch: (v: string) => void
@@ -96,6 +104,8 @@ function Toolbar({
   setPaused: (v: boolean) => void
   filteredCount: number
   total: number
+  onExportCsv: () => void
+  onExportJson: () => void
 }) {
   return (
     <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b bg-background p-2">
@@ -145,7 +155,7 @@ function Toolbar({
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => window.open("/api/rx-log/export?format=csv")}
+        onClick={onExportCsv}
       >
         <Download className="mr-1 h-4 w-4" />
         CSV
@@ -154,7 +164,7 @@ function Toolbar({
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => window.open("/api/rx-log/export?format=json")}
+        onClick={onExportJson}
       >
         <Download className="mr-1 h-4 w-4" />
         JSON
@@ -270,6 +280,19 @@ export function RxLogPage() {
     setSheetOpen(true)
   }
 
+  const exportCsv = () => {
+    const ts = Date.now()
+    downloadBlob(serialiseCsv(filtered), `rx-log-${ts}.csv`, "text/csv")
+  }
+  const exportJson = () => {
+    const ts = Date.now()
+    downloadBlob(
+      serialiseJson(filtered),
+      `rx-log-${ts}.json`,
+      "application/json",
+    )
+  }
+
   return (
     <div className="flex h-full flex-col">
       <Toolbar
@@ -283,6 +306,8 @@ export function RxLogPage() {
         setPaused={setPaused}
         filteredCount={filtered.length}
         total={rows.length}
+        onExportCsv={exportCsv}
+        onExportJson={exportJson}
       />
       <div className="flex-1 overflow-y-auto">
         <div className="overflow-x-auto">
