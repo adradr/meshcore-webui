@@ -42,18 +42,26 @@ export function parseChannelSender(
   if (!contacts) {
     return { name: candidateName, body }
   }
-  // Try exact match first
+  // Normalize for comparison: NFC + strip emoji variation selectors (U+FE0F)
+  // + collapse whitespace + case-fold. This handles common drift between
+  // what a sender prefixed into their message body and what's stored in our
+  // contact list (e.g. "🚶‍➡️" vs "🚶‍➡", or "HU_BU3" vs "HU-BU3").
+  const normalized = normalizeName(candidateName)
   for (const c of Object.values(contacts)) {
-    if (c.adv_name === candidateName && c.public_key) {
-      return { name: candidateName, publicKey: c.public_key, body }
-    }
-  }
-  // Case-insensitive fallback (some users send slightly different casing)
-  const lower = candidateName.toLowerCase()
-  for (const c of Object.values(contacts)) {
-    if (c.adv_name?.toLowerCase() === lower && c.public_key) {
+    if (!c.adv_name || !c.public_key) continue
+    if (normalizeName(c.adv_name) === normalized) {
       return { name: candidateName, publicKey: c.public_key, body }
     }
   }
   return { name: candidateName, body }
+}
+
+/** NFC-normalize, strip variation selectors, casefold, collapse whitespace. */
+function normalizeName(s: string): string {
+  return s
+    .normalize("NFC")
+    .replace(/️/g, "") // emoji variation selector
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase()
 }
