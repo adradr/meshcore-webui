@@ -37,6 +37,32 @@ def topic_for_event_type(t: str) -> str:
     return TOPIC_MAP.get(t, "system")
 
 
+def _sanitize_rx_log_payload(payload: dict) -> dict:
+    """Make an RX_LOG_DATA payload JSON-safe AND consistent with our Zod/pydantic schemas.
+
+    - bytes values → hex strings (so json.dumps doesn't choke on the WS path
+      and frontend Zod consumers see a string).
+    - int pkt_hash → 8-char hex string (matches our schema declaration and is
+      the canonical representation used by every other "hash" field in the wire).
+    - Drops 'pkt_payload' entirely — it is fully redundant with 'payload'
+      (which is already a hex string) and 'raw_hex' (raw frame minus header).
+      Carrying both bloats the WS and is a footgun for any future serializer
+      that also can't handle bytes.
+    """
+    out: dict = {}
+    for k, v in payload.items():
+        if k == "pkt_payload":
+            continue
+        if k == "pkt_hash" and isinstance(v, int):
+            out[k] = f"{v & 0xFFFFFFFF:08x}"
+            continue
+        if isinstance(v, (bytes, bytearray, memoryview)):
+            out[k] = bytes(v).hex()
+            continue
+        out[k] = v
+    return out
+
+
 @dataclass(frozen=True)
 class WireEvent:
     type: str
@@ -165,9 +191,27 @@ class MeshCoreClient:
 
     async def _on_event(self, event) -> None:
         wire_type = event.type.value
+        # RX_LOG_DATA payloads from the meshcore lib contain raw `bytes`
+        # (`pkt_payload`) and an `int` `pkt_hash`. Both break our downstream
+        # consumers — `json.dumps` chokes on bytes (WS reconnect storm), and
+        # `RxLogEntry.pkt_hash: str | None` rejects ints (REST 500). Sanitize
+        # at the source so the REST snapshot, persistence queue, and WS
+        # broadcast all see the same clean shape.
+        if event.type == EventType.RX_LOG_DATA and hasattr(event.payload, "items"):
+            sanitized_payload = _sanitize_rx_log_payload(event.payload)
+        else:
+            sanitized_payload = None
         wire = WireEvent(
             type=wire_type,
-            payload=dict(event.payload) if hasattr(event.payload, "items") else event.payload,
+            payload=(
+                sanitized_payload
+                if sanitized_payload is not None
+                else (
+                    dict(event.payload)
+                    if hasattr(event.payload, "items")
+                    else event.payload
+                )
+            ),
             attributes=dict(event.attributes),
             topic=topic_for_event_type(wire_type),
         )
@@ -175,22 +219,22 @@ class MeshCoreClient:
             self._disconnect_evt.set()
         # Mirror RX_LOG_DATA into the optional in-memory ring buffer so the
         # GET /api/rx-log endpoint can serve recent packets without requiring
-        # an active WS subscription. We copy the payload to avoid mutating the
-        # dict that's also being broadcast on `wire`.
+        # an active WS subscription. We feed it the SANITIZED payload so the
+        # REST schema sees the same clean shape as the WS broadcast.
         if (
             self._rx_log_buffer is not None
             and event.type == EventType.RX_LOG_DATA
-            and hasattr(event.payload, "items")
+            and sanitized_payload is not None
         ):
-            self._rx_log_buffer.append(dict(event.payload))
+            self._rx_log_buffer.append(dict(sanitized_payload))
         # Optional long-term persistence — fully decoupled from the realtime
         # path. The service drops on a full queue so DB I/O never blocks here.
         if (
             self._rx_log_persist_service is not None
             and event.type == EventType.RX_LOG_DATA
-            and hasattr(event.payload, "items")
+            and sanitized_payload is not None
         ):
-            self._rx_log_persist_service.enqueue(dict(event.payload))
+            self._rx_log_persist_service.enqueue(dict(sanitized_payload))
         for q in list(self._subscribers):
             try:
                 q.put_nowait(wire)

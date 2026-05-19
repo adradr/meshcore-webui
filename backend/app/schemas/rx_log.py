@@ -26,7 +26,11 @@ class RxLogEntry(BaseModel):
     boots should treat the value as monotonic-only.
     """
 
-    model_config = ConfigDict(extra="ignore")
+    # Real-device RX_LOG_DATA payloads contain many fields beyond what we
+    # explicitly model — `header`, `payload_ver`, and the entire `adv_*`
+    # family for ADVERT-type packets. We let those pass through to clients
+    # so the UI can render any future metadata without a backend bump.
+    model_config = ConfigDict(extra="allow")
 
     recv_time: Optional[int] = None
     snr: Optional[float] = None

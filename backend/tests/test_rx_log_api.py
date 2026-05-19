@@ -148,6 +148,31 @@ async def test_export_json(fake_snapshot):
         app.dependency_overrides.pop(get_meshcore_client, None)
 
 
+def test_rx_log_entry_accepts_extra_fields_from_real_device():
+    """Real-device RX_LOG_DATA payloads (post-sanitization) carry many fields
+    beyond what we explicitly model — header, payload_ver, adv_*, signature.
+    The schema must accept and preserve them so the UI can render any future
+    metadata without a backend bump."""
+    from app.schemas.rx_log import RxLogEntry
+
+    e = RxLogEntry(
+        recv_time=1779206207, snr=0.0, rssi=-118,
+        payload="1145d6", payload_length=130,
+        route_type=1, route_typename="FLOOD",
+        payload_type=4, payload_typename="ADVERT",
+        path_len=5, path_hash_size=2, path="d6007700",
+        pkt_hash=f"{337065226:08x}", raw_hex="008a",
+        # extras from ADVERT payloads
+        header=17, payload_ver=0,
+        adv_name="SK-TO-Wir", adv_key="8c74...", adv_timestamp=1779206187,
+        signature="...", adv_flags=146, adv_type=2,
+        adv_lat=48.558735, adv_lon=18.133219,
+    )
+    dumped = e.model_dump()
+    assert dumped["adv_name"] == "SK-TO-Wir"
+    assert dumped["adv_lat"] == 48.558735
+
+
 @pytest.mark.asyncio
 async def test_export_invalid_format_rejected(fake_snapshot):
     # We override the meshcore-client dep so the request reaches param

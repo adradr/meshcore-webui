@@ -254,3 +254,112 @@ class TestRxLogBufferIntegration:
             Event(type=EventType.ADVERTISEMENT, payload={}, attributes={})
         )
         assert buf.snapshot() == []
+
+
+class TestRxLogSanitization:
+    """RX_LOG_DATA payloads from the real meshcore lib contain `bytes` values
+    (`pkt_payload`) and an `int` `pkt_hash`. Both must be normalized at the
+    SOURCE in `_on_event` so:
+
+    - Bug #8: `websocket.send_json` doesn't raise on bytes (WS reconnect storm)
+    - Bug #7: pydantic `RxLogEntry` schema (pkt_hash: str | None) doesn't 500
+    """
+
+    @pytest.mark.asyncio
+    async def test_rx_log_data_event_strips_pkt_payload_bytes(self):
+        """Bug #8: pkt_payload (bytes) must be removed before WS broadcast."""
+        from app.services.rx_log_buffer import RxLogBuffer
+        from meshcore.events import Event, EventType
+
+        buf = RxLogBuffer(capacity=10)
+        client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
+        await client._on_event(Event(
+            type=EventType.RX_LOG_DATA,
+            payload={
+                "snr": 1.5, "rssi": -90,
+                "pkt_hash": 337065226,
+                "pkt_payload": b"\x00\x01\x02",
+                "payload": "000102",
+            },
+            attributes={},
+        ))
+        snap = buf.snapshot()
+        assert len(snap) == 1
+        assert "pkt_payload" not in snap[0], (
+            "pkt_payload must be dropped (json-unsafe bytes)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_rx_log_data_event_converts_pkt_hash_int_to_hex(self):
+        """Bug #7: pkt_hash int must be coerced to 8-char hex string."""
+        from app.services.rx_log_buffer import RxLogBuffer
+        from meshcore.events import Event, EventType
+
+        buf = RxLogBuffer(capacity=10)
+        client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
+        await client._on_event(Event(
+            type=EventType.RX_LOG_DATA,
+            payload={"snr": 0.0, "rssi": -100, "pkt_hash": 337065226},
+            attributes={},
+        ))
+        snap = buf.snapshot()
+        assert snap[0]["pkt_hash"] == f"{337065226:08x}"  # zero-padded 8-char hex
+
+    @pytest.mark.asyncio
+    async def test_rx_log_data_broadcast_is_json_serializable(self):
+        """Bug #8 end-to-end: WireEvent for RX_LOG_DATA must round-trip through json.dumps."""
+        import json
+        from meshcore.events import Event, EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        queue = client.subscribe()
+        await client._on_event(Event(
+            type=EventType.RX_LOG_DATA,
+            payload={
+                "snr": 2.5, "rssi": -85,
+                "pkt_hash": 619298442,
+                "pkt_payload": b"some bytes",
+                "raw_hex": "abcd",
+            },
+            attributes={},
+        ))
+        wire = await asyncio.wait_for(queue.get(), timeout=1.0)
+        # This used to raise TypeError: Object of type bytes is not JSON serializable
+        body = json.dumps(wire.to_dict())
+        assert "pkt_payload" not in body
+        expected_hex = f"{619298442:08x}"  # 24e9be8a
+        assert (
+            f'"pkt_hash": "{expected_hex}"' in body
+            or f'"pkt_hash":"{expected_hex}"' in body
+        )
+
+    @pytest.mark.asyncio
+    async def test_rx_log_data_other_bytes_fields_become_hex(self):
+        """Defense in depth: any other bytes-typed field should also be hexed."""
+        from app.services.rx_log_buffer import RxLogBuffer
+        from meshcore.events import Event, EventType
+
+        buf = RxLogBuffer(capacity=10)
+        client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
+        await client._on_event(Event(
+            type=EventType.RX_LOG_DATA,
+            payload={"some_future_blob": b"\xde\xad\xbe\xef"},
+            attributes={},
+        ))
+        assert buf.snapshot()[0]["some_future_blob"] == "deadbeef"
+
+    @pytest.mark.asyncio
+    async def test_non_rx_log_events_are_not_sanitized(self):
+        """Sanitization only applies to RX_LOG_DATA — other events pass through unchanged."""
+        from meshcore.events import Event, EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        queue = client.subscribe()
+        await client._on_event(Event(
+            type=EventType.CONTACT_MSG_RECV,
+            payload={"text": "hello"},
+            attributes={},
+        ))
+        wire = await asyncio.wait_for(queue.get(), timeout=1.0)
+        # No magic — payload reaches subscribers as-is for non-rx-log events
+        assert wire.payload == {"text": "hello"}
