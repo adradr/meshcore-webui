@@ -23,6 +23,72 @@ interface MessagesPage {
 }
 type MessagesData = InfiniteData<MessagesPage>
 
+interface WsContactMessagePayload {
+  text: string
+  pubkey_prefix?: string
+  txt_type?: number
+  sender_timestamp?: number
+}
+interface WsChannelMessagePayload {
+  text: string
+  channel_idx: number
+  sender_timestamp?: number
+}
+
+/**
+ * Convert a WS-arrived payload into the canonical `Message` shape that
+ * REST-fetched pages use, so the cached `items[]` stays homogeneous.
+ *
+ * The WS schema (see wsSchema.ts) omits `id`, `timestamp`, `ack_state`,
+ * `direction`, etc. If we prepend raw WS payloads, downstream code that
+ * reads `m.timestamp` (e.g. `new Date(m.timestamp).toISOString()` in
+ * `MessageList.buildTimeline`) gets `undefined` → Invalid Date → RangeError.
+ *
+ * `sender_timestamp` arrives as Unix seconds. Convert to ms then ISO string.
+ * If absent (some firmwares don't include it on broadcast frames), fall back
+ * to wall-clock "now" — better than a crash, and the canonical REST refetch
+ * (triggered by the threads `invalidateQueries`) will replace this synthetic
+ * row shortly after.
+ *
+ * Synthetic `id` is negative so it can never collide with backend auto-ids.
+ */
+export function normalizeWsMessage(
+  payload: WsContactMessagePayload | WsChannelMessagePayload,
+  kind: "dm" | "chan",
+): Record<string, unknown> {
+  const tsMs =
+    typeof payload.sender_timestamp === "number"
+      ? payload.sender_timestamp * 1000
+      : Date.now()
+  const ts = new Date(tsMs)
+  const timestamp = Number.isNaN(ts.getTime())
+    ? new Date().toISOString()
+    : ts.toISOString()
+
+  const base = {
+    id: -Date.now() - Math.floor(Math.random() * 1000),
+    msg_type: kind,
+    direction: "in" as const,
+    text: payload.text,
+    timestamp,
+    ack_state: "pending",
+    expected_ack_hex: null,
+    ack_received_at: null,
+  }
+
+  if (kind === "chan") {
+    const p = payload as WsChannelMessagePayload
+    return { ...base, contact_pub_key: null, channel_idx: p.channel_idx, pubkey_prefix: null }
+  }
+  const p = payload as WsContactMessagePayload
+  return {
+    ...base,
+    contact_pub_key: null, // not always known on the wire
+    channel_idx: null,
+    pubkey_prefix: p.pubkey_prefix ?? null,
+  }
+}
+
 // Prepend a new arrival to the first page (backend returns DESC by timestamp).
 function prependToMessages(
   data: MessagesData | undefined,
@@ -107,9 +173,13 @@ export function WebSocketProvider({
             msg.payload.pubkey_prefix ?? "unknown",
           ] as const
           qc.setQueryData<MessagesData>(key, (old) =>
-            prependToMessages(old, msg.payload),
+            prependToMessages(old, normalizeWsMessage(msg.payload, "dm")),
           )
           qc.invalidateQueries({ queryKey: ["threads"] })
+          // Refresh canonical entries (REST has the real `id`, `timestamp`,
+          // `ack_state` and stable `pubkey_prefix`) so the optimistic row gets
+          // replaced rather than living forever as a synthetic.
+          qc.invalidateQueries({ queryKey: key })
           break
         }
         case "channel_message": {
@@ -118,9 +188,10 @@ export function WebSocketProvider({
             `chan:${msg.payload.channel_idx}`,
           ] as const
           qc.setQueryData<MessagesData>(key, (old) =>
-            prependToMessages(old, msg.payload),
+            prependToMessages(old, normalizeWsMessage(msg.payload, "chan")),
           )
           qc.invalidateQueries({ queryKey: ["threads"] })
+          qc.invalidateQueries({ queryKey: key })
           break
         }
         case "acknowledgement": {
