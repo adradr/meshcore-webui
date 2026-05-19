@@ -1,50 +1,21 @@
 import { AlertCircle, Check, CheckCheck, Loader2 } from "lucide-react"
 
-interface StatusVisual {
-  text: string
-  icon: React.ReactNode
-  tone: "muted" | "destructive"
-}
-
-export function getStatusVisual(state: string): StatusVisual | null {
+/**
+ * Returns the per-state icon + tone class. Text labels are dropped in favor
+ * of icons (iMessage / WhatsApp idiom). The state is shown only on the
+ * latest outgoing message in a conversation — callers decide visibility.
+ */
+export function MessageStatusIcon({ state }: { state: string }) {
   switch (state) {
     case "sending":
-      return {
-        text: "Sending",
-        icon: <Loader2 className="h-3 w-3 animate-spin" />,
-        tone: "muted",
-      }
+      return <Loader2 className="h-3 w-3 animate-spin opacity-70" aria-label="Sending" />
     case "pending":
-      return {
-        text: "Sent",
-        icon: <Check className="h-3 w-3" />,
-        tone: "muted",
-      }
+      return <Check className="h-3 w-3 opacity-70" aria-label="Sent" />
     case "acked":
-      return {
-        text: "Acked",
-        icon: <CheckCheck className="h-3 w-3" />,
-        tone: "muted",
-      }
+      return <CheckCheck className="h-3 w-3 text-blue-400" aria-label="Delivered" />
     case "failed":
-      return {
-        text: "Failed",
-        icon: <AlertCircle className="h-3 w-3" />,
-        tone: "destructive",
-      }
+      return <AlertCircle className="h-3 w-3 text-destructive" aria-label="Failed" />
     default:
       return null
   }
-}
-
-export function MessageStatusBadge({ state }: { state: string }) {
-  const v = getStatusVisual(state)
-  if (!v) return null
-  const cls = v.tone === "destructive" ? "text-destructive" : "opacity-70"
-  return (
-    <span className={`flex items-center gap-1 text-[10px] ${cls}`} title={v.text}>
-      {v.icon}
-      <span>{v.text}</span>
-    </span>
-  )
 }

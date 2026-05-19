@@ -22,7 +22,7 @@ import {
   type MessageActionItem,
   type ResolvedSender,
 } from "./MessageActions"
-import { MessageStatusBadge } from "./messageStatus"
+import { MessageStatusIcon } from "./messageStatus"
 import { useContacts } from "@/features/contacts/queries"
 import type { Message } from "./queries"
 import { renderMentions } from "./renderMentions"
@@ -168,7 +168,7 @@ export function MessageBubble({ message, showSender = false }: Props) {
               <time className="text-[10px] opacity-60">
                 {new Date(message.timestamp).toLocaleTimeString()}
               </time>
-              {isOut && <MessageStatusBadge state={message.ack_state} />}
+              {isOut && <MessageStatusIcon state={message.ack_state} />}
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
