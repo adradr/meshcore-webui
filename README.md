@@ -287,6 +287,25 @@ services:
 
 ---
 
+## LAN access (no proxy)
+
+The Docker container binds `0.0.0.0:8090` by default via `docker-compose.yml`'s `ports: "8090:8080"` mapping — meaning any device on your LAN can reach it once the host's firewall permits port 8090.
+
+```bash
+# 1. Find your host's LAN IP
+ipconfig getifaddr en0       # macOS
+hostname -I | awk '{print $1}'  # Linux
+
+# 2. From another device on the same LAN:
+#    open http://<host-lan-ip>:8090
+```
+
+**Caveats on iPhone/iPad:**
+- Plain `http://` is fine for the chat UI but the **PWA install** and **Web Push** features require HTTPS even on LAN. Use the reverse proxy section below to terminate TLS (Tailscale Funnel + a free `*.ts.net` cert is the lowest-friction option).
+- If macOS is the host and the connection times out, enable LAN access for Docker Desktop in System Settings → Network → Firewall, OR run `sudo pfctl -d` briefly while testing to confirm it's the firewall.
+
+---
+
 ## Reverse proxy + HTTPS
 
 The container speaks plain HTTP on port 8080. **You** terminate TLS at your reverse proxy and forward WebSocket upgrades through. iOS push notifications require a valid HTTPS cert — `http://` and self-signed origins will silently fail to register.
