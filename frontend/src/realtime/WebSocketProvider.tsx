@@ -7,6 +7,7 @@ import { parseWSMessage } from "./wsSchema"
 interface Ctx {
   status: WSStatus
   send: (msg: { type: string; payload: unknown }) => void
+  lastMessage: unknown
 }
 
 interface MessagesPage {
@@ -43,7 +44,7 @@ export function WebSocketProvider({
   children: React.ReactNode
 }) {
   const qc = useQueryClient()
-  const { status, send } = useWebSocket({
+  const { status, send, lastMessage } = useWebSocket({
     url,
     onMessage: (raw) => {
       const msg = parseWSMessage(raw)
@@ -92,7 +93,10 @@ export function WebSocketProvider({
     },
   })
 
-  const value = useMemo<Ctx>(() => ({ status, send }), [status, send])
+  const value = useMemo<Ctx>(
+    () => ({ status, send, lastMessage }),
+    [status, send, lastMessage],
+  )
   return <WSContext.Provider value={value}>{children}</WSContext.Provider>
 }
 

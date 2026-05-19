@@ -41,22 +41,50 @@ function ThreadRow({ thread, title, href }: ThreadRowProps) {
     ) : (
       <ArrowDownLeft className="h-3.5 w-3.5 shrink-0 opacity-70" aria-label="received" />
     )
+  const unread = thread.unread_count > 0
   return (
     <Link to={href} className="block focus:outline-none">
       <Card size="sm" className="transition-colors hover:bg-muted/50">
         <CardContent className="flex items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="truncate font-medium">{title}</span>
+              <span
+                className={`truncate ${unread ? "font-semibold" : "font-medium"}`}
+              >
+                {title}
+              </span>
             </div>
-            <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+            <div
+              className={`mt-0.5 flex items-center gap-1 text-xs ${
+                unread ? "text-foreground" : "text-muted-foreground"
+              }`}
+            >
               {dirIcon}
-              <span className="truncate">{truncate(thread.last_text)}</span>
+              <span
+                className={`truncate ${unread ? "font-medium" : ""}`}
+              >
+                {truncate(thread.last_text)}
+              </span>
             </div>
           </div>
-          <time className="shrink-0 text-xs text-muted-foreground" dateTime={thread.last_timestamp ?? undefined}>
-            {relativeTime(thread.last_timestamp)}
-          </time>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <time
+              className={`text-xs ${
+                unread ? "text-primary font-medium" : "text-muted-foreground"
+              }`}
+              dateTime={thread.last_timestamp ?? undefined}
+            >
+              {relativeTime(thread.last_timestamp)}
+            </time>
+            {unread && (
+              <span
+                className="flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold leading-none text-primary-foreground"
+                aria-label={`${thread.unread_count} unread`}
+              >
+                {thread.unread_count > 99 ? "99+" : thread.unread_count}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
     </Link>
