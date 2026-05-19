@@ -143,9 +143,27 @@ class MeshCoreClient:
     async def send_chan_msg(self, idx: int, text: str) -> None:
         mc = await self._require_mc()
         async with self._lock:
-            res = await mc.commands.send_chan_msg(idx, text)
+            # MeshCore channel messages don't carry a sender field on the
+            # wire — by convention, the sender prepends their own adv_name
+            # as "Name: body". The underlying lib doesn't do this for us,
+            # so we do it here. Skip if the caller already prefixed (e.g.
+            # the text already starts with "<our_name>: ").
+            payload = self._with_sender_prefix(mc, text)
+            res = await mc.commands.send_chan_msg(idx, payload)
             if res.is_error():
                 raise RuntimeError(res.payload)
+
+    @staticmethod
+    def _with_sender_prefix(mc, text: str) -> str:
+        """Prepend "<self_name>: " to a channel message body when missing."""
+        info = getattr(mc, "self_info", None) or {}
+        name = info.get("name")
+        if not name:
+            return text
+        prefix = f"{name}: "
+        if text.startswith(prefix):
+            return text
+        return prefix + text
 
     async def get_contacts(self) -> dict:
         mc = await self._require_mc()
