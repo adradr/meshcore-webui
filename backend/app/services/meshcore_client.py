@@ -10,11 +10,35 @@ from meshcore import MeshCore, EventType
 log = logging.getLogger(__name__)
 
 
+TOPIC_MAP = {
+    "contact_message": "messages",
+    "channel_message": "messages",
+    "ack": "messages",
+    "advertisement": "messages",
+    "path_update": "messages",
+    "new_contact": "messages",
+    "battery": "system",
+    "connected": "system",
+    "disconnected": "system",
+    "rx_log": "rx_log",
+    "stats_radio": "noise",
+    "stats_core": "system",
+    "stats_packets": "system",
+    "trace_data": "trace",
+}
+
+
+def topic_for_event_type(t: str) -> str:
+    """Map a WireEvent.type string to its broadcast topic."""
+    return TOPIC_MAP.get(t, "system")
+
+
 @dataclass(frozen=True)
 class WireEvent:
     type: str
     payload: dict[str, Any]
-    attributes: dict[str, Any]
+    attributes: dict[str, Any] | None = None
+    topic: str = "messages"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -103,10 +127,12 @@ class MeshCoreClient:
             self._mc = None
 
     async def _on_event(self, event) -> None:
+        wire_type = event.type.value
         wire = WireEvent(
-            type=event.type.value,
+            type=wire_type,
             payload=dict(event.payload) if hasattr(event.payload, "items") else event.payload,
             attributes=dict(event.attributes),
+            topic=topic_for_event_type(wire_type),
         )
         if event.type == EventType.DISCONNECTED and self._disconnect_evt is not None:
             self._disconnect_evt.set()
