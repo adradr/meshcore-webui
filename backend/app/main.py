@@ -14,6 +14,7 @@ from app.api.conversations import router as conversations_router
 from app.api.device import router as device_router
 from app.api.los import router as los_router
 from app.api.messages import router as messages_router
+from app.api.noise import router as noise_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
 from app.api.trace import router as trace_router
@@ -198,6 +199,7 @@ def create_app() -> FastAPI:
     app.include_router(los_router)
     app.include_router(trace_router)
     app.include_router(rx_log_router)
+    app.include_router(noise_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():

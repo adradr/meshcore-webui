@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_client import MeshCoreClient
+from app.services.noise_poller import NoisePoller
 
 
 def get_elevation_provider(request: Request) -> ElevationProvider:
@@ -37,3 +38,16 @@ def get_meshcore_client(request: Request) -> MeshCoreClient:
     if client is None:
         raise HTTPException(status_code=503, detail="MeshCore client not initialised")
     return client
+
+
+def get_noise_poller(request: Request) -> NoisePoller:
+    """Return the singleton ``NoisePoller`` from app state.
+
+    Like ``get_meshcore_client``, this surfaces a missing poller as a 503
+    rather than a 500 — it represents "the noise-floor stream isn't running
+    yet" (e.g. radio not connected during early boot) rather than a bug.
+    """
+    poller = getattr(request.app.state, "noise_poller", None)
+    if poller is None:
+        raise HTTPException(status_code=503, detail="Noise poller not initialised")
+    return poller
