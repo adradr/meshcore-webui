@@ -57,6 +57,7 @@ export function WebSocketProvider({
           qc.setQueryData<MessagesData>(key, (old) =>
             prependToMessages(old, msg.payload),
           )
+          qc.invalidateQueries({ queryKey: ["threads"] })
           break
         }
         case "channel_message": {
@@ -67,10 +68,12 @@ export function WebSocketProvider({
           qc.setQueryData<MessagesData>(key, (old) =>
             prependToMessages(old, msg.payload),
           )
+          qc.invalidateQueries({ queryKey: ["threads"] })
           break
         }
         case "ack": {
           qc.invalidateQueries({ queryKey: ["messages"] })
+          qc.invalidateQueries({ queryKey: ["threads"] })
           break
         }
         case "connected":
