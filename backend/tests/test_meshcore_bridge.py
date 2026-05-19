@@ -67,6 +67,38 @@ async def test_incoming_dm_persisted_to_messages_table(db, engine, monkeypatch):
     assert msgs[0].text == "hi mom"
     assert msgs[0].contact_pub_key == "deadbeef"
     assert msgs[0].direction == "in"
+    assert msgs[0].pubkey_prefix == "deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_incoming_channel_persists_pubkey_prefix(db, engine, monkeypatch):
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "hello chan", "channel_idx": 2, "pubkey_prefix": "feedface"},
+        attributes={"channel_idx": 2, "pubkey_prefix": "feedface"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1
+    assert msgs[0].text == "hello chan"
+    assert msgs[0].channel_idx == 2
+    assert msgs[0].msg_type == "chan"
+    assert msgs[0].pubkey_prefix == "feedface"
 
 
 @pytest.mark.asyncio

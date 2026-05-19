@@ -14,6 +14,7 @@ class MessageOut(BaseModel):
     timestamp: dt.datetime
     ack_state: str
     expected_ack_hex: str | None = None
+    pubkey_prefix: str | None = None
 
 
 class MessagesPage(BaseModel):

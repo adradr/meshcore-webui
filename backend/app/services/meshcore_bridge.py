@@ -47,6 +47,7 @@ class MeshCoreBridge:
                 contact_pub_key=payload.get("pubkey_prefix"),
                 direction="in",
                 text=payload.get("text") or "",
+                pubkey_prefix=payload.get("pubkey_prefix"),
             )
             db.add(msg)
             await db.commit()
@@ -65,6 +66,7 @@ class MeshCoreBridge:
                 channel_idx=chan,
                 direction="in",
                 text=payload.get("text") or "",
+                pubkey_prefix=payload.get("pubkey_prefix"),
             )
             db.add(msg)
             await db.commit()

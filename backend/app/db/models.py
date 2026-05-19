@@ -32,6 +32,7 @@ class Message(Base):
     ack_state: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
     ack_received_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     expected_ack_hex: Mapped[str | None] = mapped_column(String(8), index=True)
+    pubkey_prefix: Mapped[str | None] = mapped_column(String(16), index=True)
 
     __table_args__ = (
         Index("ix_messages_contact_ts", "contact_pub_key", "timestamp"),
