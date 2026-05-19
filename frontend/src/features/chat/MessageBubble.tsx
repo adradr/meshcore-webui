@@ -27,6 +27,7 @@ import { useContacts } from "@/features/contacts/queries"
 import type { Message } from "./queries"
 import { renderMentions } from "./renderMentions"
 import type { MentionContact } from "./MentionInput"
+import { useSendMessage } from "./useSendMessage"
 
 interface Props {
   message: Message
@@ -73,7 +74,14 @@ export function MessageBubble({
   const [sheetOpen, setSheetOpen] = useState(false)
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
+  const sendRetry = useSendMessage()
   const isOut = message.direction === "out"
+  const isFailed = message.ack_state === "failed"
+  const retryArgs = message.contact_pub_key
+    ? { contactPubKey: message.contact_pub_key, text: message.text }
+    : message.channel_idx != null
+      ? { channelIdx: message.channel_idx, text: message.text }
+      : null
 
   const mentionContacts = useMemo<MentionContact[]>(() => {
     if (!contactsMap) return []
@@ -106,7 +114,20 @@ export function MessageBubble({
           <div className={bubbleClass}>
             <p className="break-words text-sm leading-snug">{renderedText}</p>
             {showStatus && (
-              <span className="mt-0.5 flex justify-end" title={message.ack_state}>
+              <span className="mt-0.5 flex items-center justify-end gap-1.5" title={message.ack_state}>
+                {isOut && isFailed && retryArgs && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      sendRetry.mutate(retryArgs)
+                    }}
+                    disabled={sendRetry.isPending}
+                    className="text-[10px] text-destructive underline decoration-1 underline-offset-2 hover:opacity-80 disabled:opacity-50"
+                  >
+                    Tap to retry
+                  </button>
+                )}
                 <MessageStatusIcon state={message.ack_state} />
               </span>
             )}
