@@ -15,6 +15,17 @@ async def get_info(request: Request) -> dict:
         raise HTTPException(502, str(e))
 
 
+@router.get("/self-info")
+async def get_self_info(request: Request) -> dict:
+    client = getattr(request.app.state, "meshcore_client", None)
+    if client is None:
+        raise HTTPException(503, "MeshCore client not initialized")
+    try:
+        return await client.get_self_info()
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+
 @router.post("/advert")
 async def send_advert(request: Request, flood: bool = False) -> dict:
     client = getattr(request.app.state, "meshcore_client", None)

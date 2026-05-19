@@ -179,3 +179,10 @@ class MeshCoreClient:
         mc = await self._require_mc()
         async with self._lock:
             await mc.commands.send_advert(flood=flood)
+
+    async def get_self_info(self) -> dict:
+        mc = await self._require_mc()
+        if not mc.self_info:
+            # Refresh by re-sending appstart so meshcore repopulates self_info.
+            await mc.commands.send_appstart()
+        return dict(mc.self_info) if mc.self_info else {}

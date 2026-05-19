@@ -41,6 +41,51 @@ async def test_get_device_info_502_on_runtime_error(client):
 
 
 @pytest.mark.asyncio
+async def test_get_self_info(client):
+    fake = {
+        "name": "adr",
+        "public_key": "33f0",
+        "adv_lat": 47.62,
+        "adv_lon": 18.84,
+        "radio_freq": 869.618,
+        "radio_bw": 62.5,
+        "radio_sf": 8,
+        "radio_cr": 8,
+        "tx_power": 22,
+        "max_tx_power": 22,
+    }
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
+    try:
+        r = await client.get("/api/device/self-info")
+        assert r.status_code == 200
+        assert r.json() == fake
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_self_info_503_when_no_client(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.get("/api/device/self-info")
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_get_self_info_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(
+        side_effect=RuntimeError("boom")
+    )
+    try:
+        r = await client.get("/api/device/self-info")
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
 async def test_post_device_advert(client):
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.send_advert = AsyncMock(return_value=None)
