@@ -103,9 +103,46 @@ async def list_threads(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict]:
-    """Most-recent message per conversation thread (DM contact or channel)."""
+    """Most-recent message per conversation thread (DM contact or channel).
+
+    Each thread carries an `unread_count`: the number of incoming messages
+    (`direction='in'`) for that conversation with a timestamp strictly after
+    the last-read pointer stored in `settings` (key `read:dm:<pk>` or
+    `read:chan:<idx>`). If no pointer exists, EPOCH is used so all incoming
+    messages count as unread.
+
+    SQLite's `datetime()` function normalizes both the messages.timestamp
+    representation ("YYYY-MM-DD HH:MM:SS[.ffffff]") and the ISO 8601 with
+    "+00:00" offset that we store in settings, so direct comparison via
+    `datetime(a) > datetime(b)` is robust across the two formats.
+    """
     sql = text("""
-      SELECT m1.* FROM messages m1
+      SELECT
+        m1.*,
+        COALESCE((
+          SELECT s.value FROM settings s
+          WHERE s.key = CASE m1.msg_type
+            WHEN 'dm'   THEN 'read:dm:'   || COALESCE(m1.contact_pub_key, '')
+            WHEN 'chan' THEN 'read:chan:' || CAST(COALESCE(m1.channel_idx, -1) AS TEXT)
+            ELSE ''
+          END
+        ), '1970-01-01T00:00:00+00:00') AS last_read_at,
+        (
+          SELECT COUNT(*) FROM messages m3
+          WHERE m3.direction = 'in'
+            AND m3.msg_type = m1.msg_type
+            AND COALESCE(m3.contact_pub_key, '') = COALESCE(m1.contact_pub_key, '')
+            AND COALESCE(m3.channel_idx, -1)     = COALESCE(m1.channel_idx, -1)
+            AND datetime(m3.timestamp) > datetime(COALESCE((
+              SELECT s2.value FROM settings s2
+              WHERE s2.key = CASE m1.msg_type
+                WHEN 'dm'   THEN 'read:dm:'   || COALESCE(m1.contact_pub_key, '')
+                WHEN 'chan' THEN 'read:chan:' || CAST(COALESCE(m1.channel_idx, -1) AS TEXT)
+                ELSE ''
+              END
+            ), '1970-01-01T00:00:00+00:00'))
+        ) AS unread_count
+      FROM messages m1
       INNER JOIN (
         SELECT
           msg_type,
@@ -139,6 +176,7 @@ async def list_threads(
             "last_text": r["text"],
             "last_timestamp": ts_iso,
             "last_direction": r["direction"],
+            "unread_count": int(r["unread_count"] or 0),
         })
     return out
 

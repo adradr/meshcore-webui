@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.db.models import Message
 from app.main import app
+from app.services.read_state import mark_read
 
 
 async def _insert_messages(db, count: int, *, contact_pub_key: str = "abc123") -> list[Message]:
@@ -231,6 +232,10 @@ async def test_list_threads_returns_one_per_conversation(client, db):
     assert body[2]["contact_pub_key"] == "abc123"
     assert body[2]["last_text"] == "abc-latest"
     assert body[2]["last_direction"] == "out"
+    # unread_count field present on every row
+    for row in body:
+        assert "unread_count" in row
+        assert isinstance(row["unread_count"], int)
 
 
 @pytest.mark.asyncio
@@ -255,6 +260,84 @@ async def test_delete_message_removes_row(client, db):
 async def test_delete_message_not_found(client):
     r = await client.delete("/api/messages/999999")
     assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_threads_includes_unread_count_when_unread(client, db):
+    await _insert_messages(db, 3, contact_pub_key="abc123")
+    # No mark_read → all 3 incoming messages are unread
+    r = await client.get("/api/messages/threads")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["contact_pub_key"] == "abc123"
+    assert body[0]["unread_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_threads_unread_count_zero_when_all_read(client, db):
+    await _insert_messages(db, 3, contact_pub_key="abc123")
+    # Mark read at a time AFTER the last message (which is base+2min)
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=when)
+
+    r = await client.get("/api/messages/threads")
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["unread_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_threads_unread_count_partial(client, db):
+    # 5 messages at base, base+1m, base+2m, base+3m, base+4m
+    await _insert_messages(db, 5, contact_pub_key="abc123")
+    # Mark read at base+2m30s → 2 messages strictly after are unread (3m, 4m)
+    when = dt.datetime(2026, 5, 18, 12, 2, 30, tzinfo=dt.timezone.utc)
+    await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=when)
+
+    r = await client.get("/api/messages/threads")
+    body = r.json()
+    assert body[0]["unread_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_threads_outgoing_messages_dont_count_unread(client, db):
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    for i in range(3):
+        db.add(Message(
+            msg_type="dm", contact_pub_key="abc123", direction="out",
+            text=f"out {i}", timestamp=base + dt.timedelta(minutes=i),
+        ))
+    await db.commit()
+
+    r = await client.get("/api/messages/threads")
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["unread_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_threads_channel_unread_count(client, db):
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    for i in range(4):
+        db.add(Message(
+            msg_type="chan", channel_idx=2, direction="in",
+            text=f"c {i}", timestamp=base + dt.timedelta(minutes=i),
+        ))
+    await db.commit()
+
+    r = await client.get("/api/messages/threads")
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["msg_type"] == "chan"
+    assert body[0]["channel_idx"] == 2
+    assert body[0]["unread_count"] == 4
+
+    # Mark channel 2 as read
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    await mark_read(db, contact_pub_key=None, channel_idx=2, when=when)
+    r2 = await client.get("/api/messages/threads")
+    assert r2.json()[0]["unread_count"] == 0
 
 
 @pytest.mark.asyncio
