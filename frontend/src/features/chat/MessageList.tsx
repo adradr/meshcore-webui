@@ -1,4 +1,5 @@
-import { useMessages } from "./queries"
+import { useMessages, type Message } from "./queries"
+import { MessageBubble } from "./MessageBubble"
 import { Skeleton } from "@/components/ui/skeleton"
 
 interface Props {
@@ -27,7 +28,7 @@ export function MessageList({ contactPubKey, channelIdx }: Props) {
     )
   }
 
-  const items = q.data?.pages.flatMap((p) => p.items).reverse() ?? []
+  const items = (q.data?.pages.flatMap((p) => p.items) ?? []).slice().reverse() as Message[]
 
   if (items.length === 0) {
     return (
@@ -40,19 +41,7 @@ export function MessageList({ contactPubKey, channelIdx }: Props) {
   return (
     <ul className="space-y-2 p-4">
       {items.map((m) => (
-        <li
-          key={m.id}
-          className={`max-w-[80%] rounded-lg px-3 py-2 ${
-            m.direction === "out"
-              ? "ml-auto bg-primary text-primary-foreground"
-              : "bg-muted"
-          }`}
-        >
-          <p className="break-words text-sm">{m.text}</p>
-          <time className="block text-[10px] opacity-60">
-            {new Date(m.timestamp).toLocaleTimeString()}
-          </time>
-        </li>
+        <MessageBubble key={m.id} message={m} />
       ))}
     </ul>
   )
