@@ -1,7 +1,9 @@
+import { useEffect } from "react"
 import { Outlet, NavLink } from "react-router-dom"
 import { Toaster } from "@/components/ui/sonner"
 import { OfflineBanner } from "@/components/offline-banner"
 import { ModeToggle } from "@/components/mode-toggle"
+import { useUnreadTotal } from "@/features/chat/queries"
 import {
   MessageCircle,
   Users,
@@ -20,7 +22,22 @@ const NAV = [
   { to: "/settings", icon: SettingsIcon, label: "Settings" },
 ]
 
+const BASE_TITLE = "MeshCore"
+
+function useDocumentTitleUnreadBadge(unread: number) {
+  useEffect(() => {
+    document.title = unread > 0 ? `${BASE_TITLE} (${unread > 99 ? "99+" : unread})` : BASE_TITLE
+    return () => {
+      document.title = BASE_TITLE
+    }
+  }, [unread])
+}
+
 export function Layout() {
+  const unread = useUnreadTotal()
+  const total = unread.data?.total ?? 0
+  useDocumentTitleUnreadBadge(total)
+
   return (
     <div className="flex h-[100dvh] flex-col">
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
@@ -38,12 +55,22 @@ export function Layout() {
             to={to}
             end={to === "/"}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center gap-1 text-[10px] ${
+              `relative flex flex-col items-center justify-center gap-1 text-[10px] ${
                 isActive ? "text-primary" : "text-muted-foreground"
               }`
             }
           >
-            <Icon className="h-5 w-5" />
+            <span className="relative">
+              <Icon className="h-5 w-5" />
+              {to === "/" && total > 0 && (
+                <span
+                  className="absolute -right-2 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-none text-destructive-foreground"
+                  aria-label={`${total} unread messages`}
+                >
+                  {total > 99 ? "99+" : total}
+                </span>
+              )}
+            </span>
             <span>{label}</span>
           </NavLink>
         ))}
