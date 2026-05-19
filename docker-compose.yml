@@ -1,0 +1,24 @@
+services:
+  meshcore-webui:
+    image: meshcore-webui:dev
+    # Run `docker compose build` to use this. The runtime VAPID fallback at
+    # `GET /api/push/vapid-public-key` means baking the key into the bundle is
+    # optional — leave VITE_VAPID_PUBLIC_KEY empty unless you want a slightly
+    # faster first push subscription (one fewer HTTP round-trip on enable).
+    build:
+      context: .
+      args:
+        VITE_VAPID_PUBLIC_KEY: "${VITE_VAPID_PUBLIC_KEY:-}"
+    container_name: meshcore-webui
+    restart: unless-stopped
+    ports:
+      - "8090:8080"   # host 8080 is taken by kubectl; using 8090
+    environment:
+      MESHCORE_HOST: 192.168.88.223
+      MESHCORE_PORT: "5000"
+      VAPID_SUBJECT: mailto:adr@example.com
+      # Uncomment to enable bearer-token auth:
+      # MESHCORE_WEBUI_API_KEY: "change-me-to-a-long-random-string"
+    volumes:
+      - ./data:/data
+      - ./backend/secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro

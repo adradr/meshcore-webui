@@ -42,13 +42,40 @@ async function getRegistration(): Promise<ServiceWorkerRegistration> {
   return reg
 }
 
+/**
+ * Resolve the VAPID public key.
+ *
+ * Two sources, in order:
+ *   1. `VITE_VAPID_PUBLIC_KEY` baked in at build time (requires the
+ *      `--build-arg VITE_VAPID_PUBLIC_KEY=…` flag when building the image).
+ *   2. The runtime endpoint `GET /api/push/vapid-public-key`, which derives
+ *      the public key from the private key the backend already loaded.
+ *
+ * The runtime fallback means a stock `docker compose build` (no env wiring)
+ * still produces a working push setup — the backend is the single source of
+ * truth for the keypair.
+ */
+async function resolveVapidPublicKey(): Promise<string> {
+  const baked = import.meta.env.VITE_VAPID_PUBLIC_KEY
+  if (baked) return baked
+  const res = await fetch("/api/push/vapid-public-key")
+  if (!res.ok) {
+    throw new Error(
+      `VAPID public key unavailable: backend returned ${res.status}. ` +
+        "Ensure the backend has VAPID_PRIVATE_KEY_PATH configured.",
+    )
+  }
+  const body = (await res.json()) as { key?: string }
+  if (!body.key) throw new Error("VAPID public key endpoint returned empty body")
+  return body.key
+}
+
 export async function subscribeToPush(
   apiKey?: string,
 ): Promise<PushSubscription> {
   if (!canUsePush()) throw new Error("Push not supported in this context")
 
-  const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY
-  if (!vapid) throw new Error("VITE_VAPID_PUBLIC_KEY not configured")
+  const vapid = await resolveVapidPublicKey()
 
   const perm = await Notification.requestPermission()
   if (perm !== "granted") throw new Error(`Notification permission ${perm}`)
