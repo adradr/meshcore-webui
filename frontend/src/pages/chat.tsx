@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useParams } from "react-router-dom"
+import { ConversationHeader } from "@/features/chat/ConversationHeader"
 import { MessageList } from "@/features/chat/MessageList"
 import { MessageInput } from "@/features/chat/MessageInput"
 import { ThreadsList } from "@/features/chat/ThreadsList"
@@ -68,6 +69,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full flex-col">
+      <ConversationHeader contactPubKey={pubKey} channelIdx={channelIdx} />
       <div className="flex-1 overflow-y-auto">
         <MessageList contactPubKey={pubKey} channelIdx={channelIdx} />
       </div>
