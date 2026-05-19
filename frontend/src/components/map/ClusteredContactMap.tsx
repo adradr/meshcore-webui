@@ -1,4 +1,4 @@
-import { MapContainer } from "react-leaflet"
+import { MapContainer, Marker, Popup } from "react-leaflet"
 import type { LatLngExpression } from "leaflet"
 import MarkerClusterGroup from "react-leaflet-cluster"
 import { fixDefaultIcon } from "@/lib/leaflet/fixDefaultIcon"
@@ -7,11 +7,14 @@ import { MapResizer } from "./useMapResize"
 import { MarkersLayer, type ContactMarker } from "./MarkersLayer"
 import { MapViewPersistence } from "./MapViewPersistence"
 import { CenterOnContactsButton } from "./CenterOnContactsButton"
+import { iconForNodeType } from "./nodeIcons"
 
 fixDefaultIcon()
 
 interface Props {
   contacts: ContactMarker[]
+  /** Your own device's position; rendered as a distinct, non-clustered marker. */
+  self?: { name: string; lat: number; lon: number } | null
   dark?: boolean
 }
 
@@ -20,7 +23,12 @@ interface Props {
 const INITIAL_CENTER: LatLngExpression = [47.4979, 19.0402] // Budapest
 const INITIAL_ZOOM = 6
 
-export function ClusteredContactMap({ contacts, dark = false }: Props) {
+export function ClusteredContactMap({ contacts, self, dark = false }: Props) {
+  // Include self in fitBounds + center so the camera respects your own pin
+  const allPoints = self
+    ? [...contacts, { id: "__self__", name: self.name, lat: self.lat, lon: self.lon, nodeType: "SELF" as const }]
+    : contacts
+
   return (
     <MapContainer
       center={INITIAL_CENTER}
@@ -30,11 +38,24 @@ export function ClusteredContactMap({ contacts, dark = false }: Props) {
     >
       <ThemedTileLayer dark={dark} />
       <MapResizer />
-      <MapViewPersistence contacts={contacts} />
+      <MapViewPersistence contacts={allPoints} />
       <MarkerClusterGroup chunkedLoading>
         <MarkersLayer contacts={contacts} />
       </MarkerClusterGroup>
-      <CenterOnContactsButton contacts={contacts} />
+      {/* Self marker rendered OUTSIDE the cluster so it always shows distinctly */}
+      {self && (
+        <Marker position={[self.lat, self.lon]} icon={iconForNodeType("SELF")} zIndexOffset={1000}>
+          <Popup>
+            <div className="text-sm">
+              <div className="font-medium">{self.name} (this device)</div>
+              <div className="text-[10px] opacity-60">
+                {self.lat.toFixed(5)}, {self.lon.toFixed(5)}
+              </div>
+            </div>
+          </Popup>
+        </Marker>
+      )}
+      <CenterOnContactsButton contacts={allPoints} />
     </MapContainer>
   )
 }

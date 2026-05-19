@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
 import { useContacts, type Contact } from "@/features/contacts/queries"
+import { useSelfInfo } from "@/features/device/queries"
 import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
 
@@ -33,7 +34,20 @@ function useIsDark(): boolean {
 
 export function MapPage() {
   const { data } = useContacts()
+  const { data: selfInfo } = useSelfInfo()
   const dark = useIsDark()
+
+  const self =
+    selfInfo &&
+    typeof selfInfo.adv_lat === "number" &&
+    typeof selfInfo.adv_lon === "number" &&
+    !(Math.abs(selfInfo.adv_lat) < 0.0001 && Math.abs(selfInfo.adv_lon) < 0.0001)
+      ? {
+          name: (selfInfo.name as string | undefined) ?? "This device",
+          lat: selfInfo.adv_lat as number,
+          lon: selfInfo.adv_lon as number,
+        }
+      : null
 
   const contacts = data
     ? Object.entries(data)
@@ -56,7 +70,7 @@ export function MapPage() {
 
   return (
     <div className="h-full w-full">
-      <ClusteredContactMap contacts={contacts} dark={dark} />
+      <ClusteredContactMap contacts={contacts} self={self} dark={dark} />
     </div>
   )
 }
