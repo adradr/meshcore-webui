@@ -77,6 +77,7 @@ class MeshCoreClient:
         EventType.BATTERY,
         EventType.CONNECTED,
         EventType.DISCONNECTED,
+        EventType.TRACE_DATA,
     )
 
     def __init__(self, host: str, port: int, *, max_queue: int = 256) -> None:

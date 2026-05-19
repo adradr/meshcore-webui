@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -118,3 +119,42 @@ class TestSendTrace:
         client._mc = fake_mc
         with pytest.raises(RuntimeError, match="did not ack"):
             await client.send_trace()
+
+
+class TestTraceDataForwarding:
+    """TRACE_DATA must be forwarded to WS subscribers on topic='trace' so
+    the live-trace UI can display path hops as they arrive."""
+
+    def test_trace_data_in_forwarded_events_set(self):
+        from meshcore.events import EventType
+        assert EventType.TRACE_DATA in MeshCoreClient._FORWARDED_EVENTS
+
+    @pytest.mark.asyncio
+    async def test_trace_data_event_is_forwarded_to_subscribers(self):
+        from meshcore.events import Event, EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        queue = client.subscribe()
+        fake_event = Event(
+            type=EventType.TRACE_DATA,
+            payload={
+                "tag": 7777,
+                "auth": 0,
+                "flags": 0,
+                "path_len": 1,
+                "path": [
+                    {"hash": "ab", "snr": 3.5},
+                    {"hash": "cd", "snr": 4.0},
+                ],
+            },
+            attributes={},
+        )
+        await client._on_event(fake_event)
+        wire_event = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert wire_event.type == "trace_data"
+        assert wire_event.topic == "trace"
+        assert wire_event.payload["tag"] == 7777
+        assert wire_event.payload["path"] == [
+            {"hash": "ab", "snr": 3.5},
+            {"hash": "cd", "snr": 4.0},
+        ]
