@@ -8,6 +8,12 @@ import { NewMessagesPill } from "./NewMessagesPill"
 import { ChatEmpty } from "./ChatEmpty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useContacts } from "@/features/contacts/queries"
+import { parseChannelSender, type ChannelSender } from "./channelSender"
+
+export interface EnrichedMessage extends Message {
+  /** Parsed channel sender — populated only when isChannel and parse succeeded. */
+  _parsedSender?: ChannelSender | null
+}
 
 interface Props {
   contactPubKey?: string
@@ -19,7 +25,7 @@ type GroupItem = {
   key: string
   senderId: string | null
   isOut: boolean
-  messages: Message[]
+  messages: EnrichedMessage[]
   isLastOutgoing: boolean
 }
 
@@ -53,9 +59,14 @@ function gapLabel(ms: number): string {
   return `${Math.round(h / 24)} days later`
 }
 
-function senderIdOf(m: Message, isChannel: boolean): string | null {
+function senderIdOf(m: EnrichedMessage, isChannel: boolean): string | null {
   if (m.direction === "out") return "self"
-  if (isChannel) return (m.pubkey_prefix ?? m.contact_pub_key ?? "unknown").toLowerCase()
+  if (isChannel) {
+    const ps = m._parsedSender
+    if (ps?.publicKey) return ps.publicKey.toLowerCase()
+    if (ps?.name) return `name:${ps.name.toLowerCase()}`
+    return (m.pubkey_prefix ?? m.contact_pub_key ?? "unknown").toLowerCase()
+  }
   return "peer"
 }
 
@@ -72,7 +83,7 @@ function senderIdOf(m: Message, isChannel: boolean): string | null {
  * - The last outgoing GROUP is flagged so the bubble layer can show a
  *   single status icon (iMessage-style "last delivery state only").
  */
-function buildTimeline(messages: Message[], isChannel: boolean): TimelineItem[] {
+function buildTimeline(messages: EnrichedMessage[], isChannel: boolean): TimelineItem[] {
   const items: TimelineItem[] = []
   let lastDateKey = ""
   let lastTs: number | null = null
@@ -151,7 +162,15 @@ export function MessageList({ contactPubKey, channelIdx }: Props) {
     [q.data],
   )
 
-  const timeline = useMemo(() => buildTimeline(messages, isChannel), [messages, isChannel])
+  const enriched = useMemo<EnrichedMessage[]>(() => {
+    if (!isChannel) return messages
+    return messages.map((m) => ({
+      ...m,
+      _parsedSender: m.direction === "in" ? parseChannelSender(m.text, contacts) : null,
+    }))
+  }, [messages, contacts, isChannel])
+
+  const timeline = useMemo(() => buildTimeline(enriched, isChannel), [enriched, isChannel])
 
   // Autoscroll: initial load drops us at the bottom; subsequent appends
   // only scroll if we were already near the bottom. Page-up loads restore

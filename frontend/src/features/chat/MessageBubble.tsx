@@ -37,6 +37,12 @@ interface Props {
   showStatus: boolean
   resolvedSender: ResolvedSender | null
   senderPrefix: string | null
+  /**
+   * Override the rendered body text. Channels pass the parsed body here
+   * (with the leading "Name: " stripped); DMs leave it undefined to render
+   * the raw `message.text`.
+   */
+  displayText?: string
 }
 
 /**
@@ -71,6 +77,7 @@ export function MessageBubble({
   showStatus,
   resolvedSender,
   senderPrefix: _senderPrefix,
+  displayText,
 }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
@@ -92,9 +99,10 @@ export function MessageBubble({
       .map((c) => ({ adv_name: c.adv_name!, public_key: c.public_key! }))
   }, [contactsMap])
 
+  const bodyText = displayText ?? message.text
   const renderedText = useMemo(
-    () => renderMentions(message.text, mentionContacts),
-    [message.text, mentionContacts],
+    () => renderMentions(bodyText, mentionContacts),
+    [bodyText, mentionContacts],
   )
 
   const items = useMessageActions({

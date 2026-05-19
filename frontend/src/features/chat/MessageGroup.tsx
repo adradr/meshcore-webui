@@ -2,13 +2,13 @@ import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MessageBubble } from "./MessageBubble"
-import type { Message } from "./queries"
+import type { EnrichedMessage } from "./MessageList"
 import type { ResolvedSender } from "./MessageActions"
 
 interface GroupShape {
   senderId: string | null
   isOut: boolean
-  messages: Message[]
+  messages: EnrichedMessage[]
   isLastOutgoing: boolean
 }
 
@@ -19,13 +19,14 @@ interface Props {
 }
 
 /**
- * Match a channel message's `pubkey_prefix` (8-char) against the full
- * contacts map to recover the sender's display name + full public key.
+ * For DMs, resolve sender from `pubkey_prefix` / `contact_pub_key` against
+ * the contacts map. Channel messages use the parsed `_parsedSender` carried
+ * on each enriched message — see channelSender.ts for the rationale.
  *
- * Returns null when we have no prefix or no matching contact — callers
- * fall back to the raw prefix string.
+ * Returns null when we can't recover a full public_key — callers fall back
+ * to the plain name string and a hash-derived avatar color.
  */
-function resolveSender(
+function resolveDmSender(
   prefix: string | null | undefined,
   contacts: Props["contacts"],
 ): ResolvedSender | null {
@@ -53,12 +54,30 @@ function resolveSender(
 export function MessageGroup({ group, showSender, contacts }: Props) {
   const first = group.messages[0]
   const last = group.messages[group.messages.length - 1]
-  const senderPrefix = first.pubkey_prefix ?? first.contact_pub_key ?? null
-  const resolved = useMemo(
-    () => resolveSender(senderPrefix, contacts),
-    [senderPrefix, contacts],
-  )
-  const senderName = resolved?.adv_name ?? senderPrefix ?? "Unknown"
+  const parsed = first._parsedSender ?? null
+  const isChannelGroup = showSender
+
+  // Channel groups derive sender from the parsed "Name: " prefix.
+  // DM groups still resolve via pubkey_prefix → contacts.
+  const dmSenderPrefix = isChannelGroup
+    ? null
+    : (first.pubkey_prefix ?? first.contact_pub_key ?? null)
+  const resolved = useMemo<ResolvedSender | null>(() => {
+    if (isChannelGroup) {
+      if (parsed?.publicKey && parsed.name) {
+        return { adv_name: parsed.name, public_key: parsed.publicKey }
+      }
+      return null
+    }
+    return resolveDmSender(dmSenderPrefix, contacts)
+  }, [isChannelGroup, parsed, dmSenderPrefix, contacts])
+
+  const senderName = isChannelGroup
+    ? (parsed?.name ?? "Unknown")
+    : (resolved?.adv_name ?? dmSenderPrefix ?? "Unknown")
+  const avatarSeed = isChannelGroup
+    ? (parsed?.publicKey ?? parsed?.name ?? "?")
+    : (dmSenderPrefix ?? "?")
   const showAvatarColumn = showSender && !group.isOut
   const timeText = new Date(last.timestamp).toLocaleTimeString(undefined, {
     hour: "2-digit",
@@ -78,7 +97,7 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
               />
             </Link>
           ) : (
-            <ContactAvatar pubkey={senderPrefix ?? "?"} name={senderName} size="sm" />
+            <ContactAvatar pubkey={avatarSeed} name={senderName} size="sm" />
           )}
         </div>
       )}
@@ -101,6 +120,9 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
         {group.messages.map((m, i) => {
           const isFirstInGroup = i === 0
           const isLastInGroup = i === group.messages.length - 1
+          // For channel msgs, render the stripped body (no "Name: " prefix).
+          const displayText =
+            isChannelGroup && m._parsedSender ? m._parsedSender.body : undefined
           return (
             <MessageBubble
               key={m.id}
@@ -109,7 +131,8 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
               isLastInGroup={isLastInGroup}
               showStatus={group.isOut && isLastInGroup && group.isLastOutgoing}
               resolvedSender={resolved}
-              senderPrefix={senderPrefix}
+              senderPrefix={dmSenderPrefix}
+              displayText={displayText}
             />
           )
         })}
