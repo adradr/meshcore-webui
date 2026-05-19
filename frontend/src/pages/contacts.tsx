@@ -1,23 +1,38 @@
 import { useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { Search } from "lucide-react"
-import { useContacts, type Contact } from "@/features/contacts/queries"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Plus, Search, Star } from "lucide-react"
+import {
+  useContacts,
+  useImportContact,
+  useSetFlags,
+  type Contact,
+} from "@/features/contacts/queries"
+import { ContactAvatar } from "@/components/contact-avatar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Textarea } from "@/components/ui/textarea"
 
 const NODE_TYPE_LABEL: Record<number, string> = {
   1: "CLI",
   2: "REP",
   3: "ROOM",
+  4: "SENS",
 }
 
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).slice(0, 2)
-  return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "?"
-}
+const STAR_FLAG = 0x01
 
 function relativeTime(epochSeconds: number | null | undefined): string | null {
   if (epochSeconds == null) return null
@@ -32,7 +47,67 @@ interface ContactRow {
   pubKey: string
   name: string
   type: number
+  starred: boolean
   lastAdvert: number | null | undefined
+}
+
+interface ImportDialogProps {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}
+
+function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
+  const [value, setValue] = useState("")
+  const importMutation = useImportContact()
+
+  const handleSubmit = () => {
+    const uri = value.trim()
+    if (!uri) return
+    importMutation.mutate(
+      { uri },
+      {
+        onSuccess: () => {
+          setValue("")
+          onOpenChange(false)
+        },
+      },
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Import contact</DialogTitle>
+          <DialogDescription>
+            Paste a <code className="rounded bg-muted px-1 text-xs">meshcore://</code> URI shared from another node.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Label htmlFor="contact-uri">Contact URI</Label>
+          <Textarea
+            id="contact-uri"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="meshcore://..."
+            rows={4}
+            className="font-mono text-xs"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSubmit}
+            disabled={!value.trim() || importMutation.isPending}
+          >
+            {importMutation.isPending ? "Importing…" : "Import"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export function ContactsPage() {
@@ -40,6 +115,8 @@ export function ContactsPage() {
   const navigate = useNavigate()
   const parentRef = useRef<HTMLDivElement>(null)
   const [filter, setFilter] = useState("")
+  const [importOpen, setImportOpen] = useState(false)
+  const flags = useSetFlags()
 
   const sorted: ContactRow[] = useMemo(() => {
     if (!data) return []
@@ -48,9 +125,13 @@ export function ContactsPage() {
         pubKey: c.public_key ?? pubKey,
         name: c.adv_name ?? pubKey.slice(0, 8),
         type: c.type ?? 0,
+        starred: Boolean((c.flags ?? 0) & STAR_FLAG),
         lastAdvert: c.last_advert ?? null,
       }))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => {
+        if (a.starred !== b.starred) return a.starred ? -1 : 1
+        return a.name.localeCompare(b.name)
+      })
   }, [data])
 
   const filtered: ContactRow[] = useMemo(() => {
@@ -105,7 +186,22 @@ export function ContactsPage() {
         <Badge variant="secondary" className="shrink-0 tabular-nums">
           {filtered.length} of {sorted.length}
         </Badge>
+        <Dialog open={importOpen} onOpenChange={setImportOpen}>
+          <DialogTrigger asChild>
+            <Button
+              size="sm"
+              variant="outline"
+              className="shrink-0 gap-1"
+              aria-label="Import contact"
+            >
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Import</span>
+            </Button>
+          </DialogTrigger>
+        </Dialog>
       </div>
+
+      <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
 
       {filtered.length === 0 ? (
         <div className="p-8 text-center text-sm text-muted-foreground">
@@ -121,11 +217,10 @@ export function ContactsPage() {
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const row = filtered[virtualRow.index]
+            const lastSeen = relativeTime(row.lastAdvert)
             return (
-              <button
+              <div
                 key={row.pubKey}
-                type="button"
-                onClick={() => navigate(`/chat/${row.pubKey}`)}
                 style={{
                   position: "absolute",
                   top: 0,
@@ -134,27 +229,51 @@ export function ContactsPage() {
                   height: `${virtualRow.size}px`,
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="flex w-full items-center gap-3 border-b px-4 text-left hover:bg-accent"
+                className="flex items-center gap-3 border-b px-3 transition-colors hover:bg-accent/40"
               >
-                <Avatar>
-                  <AvatarFallback>{initials(row.name)}</AvatarFallback>
-                </Avatar>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium">{row.name}</span>
+                <button
+                  type="button"
+                  aria-label={row.starred ? "Unstar contact" : "Star contact"}
+                  aria-pressed={row.starred}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    flags.mutate({ pubkey: row.pubKey, starred: !row.starred })
+                  }}
+                  className="-ml-1 grid h-8 w-8 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Star
+                    className={
+                      row.starred
+                        ? "h-4 w-4 fill-yellow-400 text-yellow-500"
+                        : "h-4 w-4"
+                    }
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/contact/${row.pubKey}`)}
+                  className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
+                >
+                  <ContactAvatar pubkey={row.pubKey} name={row.name} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium">{row.name}</span>
+                    </div>
+                    {lastSeen && (
+                      <div className="text-[11px] text-muted-foreground">
+                        last seen {lastSeen}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
                     {NODE_TYPE_LABEL[row.type] && (
-                      <Badge variant="secondary" className="h-4 text-[10px]">
+                      <Badge variant="secondary" className="h-5 text-[10px]">
                         {NODE_TYPE_LABEL[row.type]}
                       </Badge>
                     )}
                   </div>
-                  {relativeTime(row.lastAdvert) && (
-                    <div className="text-[11px] text-muted-foreground">
-                      last seen {relativeTime(row.lastAdvert)}
-                    </div>
-                  )}
-                </div>
-              </button>
+                </button>
+              </div>
             )
           })}
         </div>
