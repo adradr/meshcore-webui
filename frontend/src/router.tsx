@@ -8,6 +8,7 @@ import { MapPage } from "@/pages/map"
 import { SettingsPage } from "@/pages/settings"
 import { DevicePage } from "@/pages/device"
 import { RxLogPage } from "@/pages/rx-log"
+import { NoisePage } from "@/pages/noise"
 
 const router = createBrowserRouter([
   {
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
       { path: "map", element: <MapPage /> },
       { path: "device", element: <DevicePage /> },
       { path: "rx-log", element: <RxLogPage /> },
+      { path: "noise", element: <NoisePage /> },
       { path: "settings", element: <SettingsPage /> },
     ],
   },
