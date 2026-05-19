@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import random
 from dataclasses import dataclass, asdict, field
 from typing import Any, Optional
 
@@ -42,6 +43,27 @@ class WireEvent:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class TraceHop:
+    """One hop along a trace path.
+
+    `hash` is a 1-byte hex string (e.g. "ab") — the first byte of the
+    repeater's pubkey that handled this hop. `snr` is the SNR in dB at
+    which that device received the previous transmission.
+    """
+    hash: str
+    snr: float
+
+
+@dataclass(frozen=True)
+class TracePathResult:
+    """Structured result of a send_trace request."""
+    tag: int
+    flags: int
+    hops: list[TraceHop]
+    path_len: int
 
 
 class MeshCoreClient:
@@ -358,3 +380,69 @@ class MeshCoreClient:
             r = await mc.commands.reset_path(pubkey)
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
+
+    async def send_trace(self, *, timeout: float = 30.0) -> TracePathResult:
+        """Send a trace packet and wait for the TRACE_DATA response.
+
+        Trace is a one-shot broadcast — there's no explicit destination.
+        Each hop along the path reports back the SNR at which IT received
+        the previous transmission, plus the first byte of its own pubkey.
+
+        Returns a TracePathResult describing the path travelled. Raises
+        RuntimeError if not connected or the device didn't ack the send,
+        TimeoutError if no TRACE_DATA arrives within `timeout` seconds.
+        """
+        if self._mc is None:
+            raise RuntimeError("MeshCore not connected")
+
+        # Random tag so we can match the response and not cross-pollute
+        # with concurrent traces.
+        tag = random.randint(1, 2**31 - 1)
+
+        # Subscribe BEFORE sending to avoid a race where the TRACE_DATA
+        # arrives before we install the waiter. wait_for_event only
+        # subscribes when scheduled, so wrap it in a Task to ensure the
+        # subscription is registered before we kick off the send.
+        waiter = asyncio.ensure_future(
+            self._mc.dispatcher.wait_for_event(
+                EventType.TRACE_DATA,
+                attribute_filters={"tag": tag},
+                timeout=timeout,
+            )
+        )
+        # Yield once so the dispatcher's subscribe() call inside the
+        # waiter coroutine runs before we send.
+        await asyncio.sleep(0)
+
+        try:
+            ack = await self._mc.commands.send_trace(
+                auth_code=0, tag=tag, flags=None, path=None
+            )
+        except BaseException:
+            waiter.cancel()
+            raise
+        if ack is None or (
+            hasattr(ack, "type")
+            and getattr(ack.type, "name", None) != "MSG_SENT"
+        ):
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await waiter
+            raise RuntimeError(f"send_trace did not ack: {ack!r}")
+
+        trace_event = await waiter
+        if trace_event is None:
+            raise TimeoutError(f"No TRACE_DATA response within {timeout}s")
+
+        p = trace_event.payload
+        hops_raw = p.get("path", []) or []
+        hops = [
+            TraceHop(hash=str(h.get("hash", "")), snr=float(h.get("snr", 0.0)))
+            for h in hops_raw
+        ]
+        return TracePathResult(
+            tag=int(p.get("tag", tag)),
+            flags=int(p.get("flags", 0)),
+            hops=hops,
+            path_len=int(p.get("path_len", len(hops))),
+        )

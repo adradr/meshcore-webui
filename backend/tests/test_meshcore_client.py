@@ -1,7 +1,8 @@
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from app.services.meshcore_client import MeshCoreClient
+from app.services.meshcore_client import MeshCoreClient, TraceHop, TracePathResult
 
 
 @pytest.mark.asyncio
@@ -45,3 +46,75 @@ class TestWithSenderPrefix:
             MeshCoreClient._with_sender_prefix(mc, "Alex: hi")
             == "adr: Alex: hi"
         )
+
+
+class TestSendTrace:
+    """`send_trace` wraps mc.commands.send_trace + waits for TRACE_DATA,
+    returning a structured TracePathResult with parsed hops."""
+
+    @pytest.mark.asyncio
+    async def test_send_trace_returns_parsed_trace_path_result(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands = MagicMock()
+        fake_ack = MagicMock()
+        fake_ack.type = MagicMock()
+        fake_ack.type.name = "MSG_SENT"
+        fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
+
+        fake_trace_event = MagicMock()
+        fake_trace_event.payload = {
+            "tag": 12345,
+            "flags": 0,
+            "path_len": 2,
+            "path": [
+                {"hash": "ab", "snr": 3.5},
+                {"hash": "cd", "snr": 4.0},
+                {"hash": "", "snr": 5.5},
+            ],
+        }
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=fake_trace_event)
+
+        client._mc = fake_mc
+
+        result = await client.send_trace(timeout=5.0)
+        assert isinstance(result, TracePathResult)
+        assert result.tag == 12345
+        assert result.flags == 0
+        assert result.path_len == 2
+        assert len(result.hops) == 3
+        assert result.hops[0] == TraceHop(hash="ab", snr=3.5)
+        assert result.hops[1] == TraceHop(hash="cd", snr=4.0)
+        assert result.hops[2] == TraceHop(hash="", snr=5.5)
+
+    @pytest.mark.asyncio
+    async def test_send_trace_raises_runtime_error_when_not_connected(self):
+        client = MeshCoreClient(host="x", port=5000)
+        client._mc = None
+        with pytest.raises(RuntimeError, match="not connected"):
+            await client.send_trace()
+
+    @pytest.mark.asyncio
+    async def test_send_trace_raises_timeout_error_when_no_trace_data(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ack = MagicMock()
+        fake_ack.type = MagicMock()
+        fake_ack.type.name = "MSG_SENT"
+        fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(TimeoutError):
+            await client.send_trace(timeout=0.1)
+
+    @pytest.mark.asyncio
+    async def test_send_trace_raises_runtime_error_when_ack_missing(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.send_trace = AsyncMock(return_value=None)
+        # Also stub wait_for_event so the test doesn't hang if logic skips the
+        # ack check; it must raise BEFORE awaiting the waiter.
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="did not ack"):
+            await client.send_trace()
