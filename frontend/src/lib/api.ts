@@ -39,6 +39,12 @@ export const api = {
       { method: "POST", body: JSON.stringify(body) },
       schema,
     ),
+  patch: <T>(path: string, body: unknown, schema?: z.ZodType<T>) =>
+    request<T>(
+      path,
+      { method: "PATCH", body: JSON.stringify(body) },
+      schema,
+    ),
   delete: <T>(path: string, body?: unknown, schema?: z.ZodType<T>) =>
     request<T>(
       path,
