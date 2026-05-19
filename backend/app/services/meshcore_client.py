@@ -236,9 +236,15 @@ class MeshCoreClient:
             return self._serialize(dict(r.payload) if hasattr(r, "payload") else {})
 
     async def share_contact(self, pubkey: str) -> dict:
+        """Return a shareable meshcore:// URI for the contact.
+
+        Note: this uses the lib's `export_contact` (cmd 0x11 → CONTACT_URI
+        response), not `share_contact` (cmd 0x10), which only broadcasts
+        the contact card over the mesh and returns no URI.
+        """
         mc = await self._require_mc()
         async with self._lock:
-            r = await mc.commands.share_contact(pubkey)
+            r = await mc.commands.export_contact(pubkey)
             if r.is_error():
                 raise RuntimeError(r.payload)
             return self._serialize(r.payload)
