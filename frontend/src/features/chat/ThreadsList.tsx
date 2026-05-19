@@ -161,13 +161,14 @@ function ThreadsHeader() {
           })
         }}
         title="Mark all conversations as read"
-        aria-label="Mark all as read"
+        aria-label="Read all"
       >
         {markAll.isPending ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
           <CheckCheck className="h-4 w-4" />
         )}
+        <span className="ml-1.5 hidden sm:inline">Read all</span>
       </Button>
     </div>
   )

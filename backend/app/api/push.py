@@ -1,11 +1,12 @@
 from __future__ import annotations
 import base64
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from fastapi import APIRouter, Depends, Header, Response, status
-from sqlalchemy import delete, select
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy import delete
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,8 +17,19 @@ from app.db.session import get_db
 from app.schemas.push import (
     PushSubscriptionIn, PushSubscriptionOut, PushUnsubscribeIn,
 )
+from app.services.push_mode import get_mode, set_mode
 
 router = APIRouter(prefix="/api/push", tags=["push"])
+
+
+class PushModeOut(BaseModel):
+    """Wire shape for the global push-mode endpoint.
+
+    ``extra="forbid"`` rejects unknown fields so a typo in a PUT payload
+    surfaces as 422 instead of being silently ignored.
+    """
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["all", "mentions", "mute"]
 
 
 @router.post(
@@ -68,6 +80,24 @@ async def unsubscribe(
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/mode", response_model=PushModeOut)
+async def get_push_mode(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PushModeOut:
+    """Return the current global push mode (default ``"all"``)."""
+    return PushModeOut(mode=await get_mode(db))
+
+
+@router.put("/mode", response_model=PushModeOut)
+async def put_push_mode(
+    payload: PushModeOut,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PushModeOut:
+    """Set the global push mode. Pydantic's ``Literal`` validates the value."""
+    await set_mode(db, payload.mode)
+    return PushModeOut(mode=payload.mode)
 
 
 @router.get("/vapid-public-key")

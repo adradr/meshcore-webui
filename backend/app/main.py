@@ -110,7 +110,6 @@ async def lifespan(app: FastAPI):
     vapid = load_vapid(settings.vapid_private_key_path)
     sender = PushSender(vapid=vapid, subject=settings.vapid_subject)
     pool = TaskPool()
-    bridge = MeshCoreBridge(sender=sender, pool=pool)
 
     log.info("Connecting MeshCore at %s:%d", settings.meshcore_host, settings.meshcore_port)
     rx_log_buffer = RxLogBuffer(capacity=settings.rx_log_buffer_size)
@@ -131,6 +130,20 @@ async def lifespan(app: FastAPI):
         port=settings.meshcore_port,
         rx_log_buffer=rx_log_buffer,
         rx_log_persist_service=rx_log_persist,
+    )
+
+    # Self-name is needed for the "mentions" push-mode filter. We pass a
+    # callable (not the value) because `self_info` is populated asynchronously
+    # by the MeshCore lib AFTER appstart completes — resolving at push time
+    # ensures the bridge always sees the latest name without a startup race.
+    def _self_name_provider() -> str | None:
+        info = getattr(client._mc, "self_info", None) if client._mc else None
+        if not info:
+            return None
+        return info.get("adv_name") or info.get("name")
+
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=_self_name_provider,
     )
     # Forward all events to bridge (which decides whether to push)
     q = client.subscribe()

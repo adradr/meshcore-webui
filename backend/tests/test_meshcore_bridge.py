@@ -270,6 +270,245 @@ async def test_channel_message_unmuted_pushes(db, engine, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mute_mode_skips_notify_for_dm(db, engine, monkeypatch):
+    """Global push:mode=mute must skip _notify on DMs (but still persist)."""
+    from app.db.models import Base, Message, Setting
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mute"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "hi", "pubkey_prefix": "cafef00d"},
+        attributes={"pubkey_prefix": "cafef00d"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_mute_mode_skips_notify_for_chan(db, engine, monkeypatch):
+    from app.db.models import Base, Message, Setting
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mute"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=lambda: "Foo",
+    )
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "@Foo ping", "channel_idx": 3, "pubkey_prefix": "ab"},
+        attributes={"channel_idx": 3, "pubkey_prefix": "ab"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+    from sqlalchemy import select
+    msgs = (await db.execute(select(Message))).scalars().all()
+    assert len(msgs) == 1
+
+
+@pytest.mark.asyncio
+async def test_mentions_mode_skips_chan_without_self_mention(
+    db, engine, monkeypatch,
+):
+    from app.db.models import Base, Setting
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mentions"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=lambda: "Foo",
+    )
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "hi everyone", "channel_idx": 3, "pubkey_prefix": "ab"},
+        attributes={"channel_idx": 3, "pubkey_prefix": "ab"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_mentions_mode_pushes_chan_with_self_mention(
+    db, engine, monkeypatch,
+):
+    from app.db.models import Base, Setting
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mentions"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=lambda: "Foo",
+    )
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "hey @Foo ack", "channel_idx": 3, "pubkey_prefix": "ab"},
+        attributes={"channel_idx": 3, "pubkey_prefix": "ab"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mentions_mode_always_pushes_dm(db, engine, monkeypatch):
+    """DMs in mentions-mode always push — they're inherently addressed to us."""
+    from app.db.models import Base, Setting
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mentions"))
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=lambda: "Foo",
+    )
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    # DM text contains no mention of "Foo" — should STILL push.
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "private hello", "pubkey_prefix": "cafef00d"},
+        attributes={"pubkey_prefix": "cafef00d"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_all_mode_pushes_chan_without_mention(db, engine, monkeypatch):
+    """Default mode=all — channel messages always push regardless of mention."""
+    from app.db.models import Base
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(
+        sender=sender, pool=pool, self_name_provider=lambda: "Foo",
+    )
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="channel_message",
+        payload={"text": "casual chat", "channel_idx": 7, "pubkey_prefix": "ab"},
+        attributes={"channel_idx": 7, "pubkey_prefix": "ab"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_mute_mode_overrides_per_conversation_mute(
+    db, engine, monkeypatch,
+):
+    """Mode=mute short-circuits before the per-conversation check — global wins."""
+    from app.db.models import Base, Setting, MutePreference
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    db.add(Setting(key="push:mode", value="mute"))
+    # Per-conversation mute absent — proves the global mode is what blocks push.
+    await db.commit()
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "ping", "pubkey_prefix": "cafef00d"},
+        attributes={"pubkey_prefix": "cafef00d"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+    # Sanity: per-conversation mute table is empty — the mode is the gate.
+    from sqlalchemy import select
+    rows = (await db.execute(select(MutePreference))).scalars().all()
+    assert rows == []
+
+
+@pytest.mark.asyncio
 async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
     from app.db.models import Base, Message
     async with engine.begin() as c:

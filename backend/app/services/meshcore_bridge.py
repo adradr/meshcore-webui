@@ -1,6 +1,7 @@
 from __future__ import annotations
 import datetime as dt
 import logging
+from typing import Callable
 
 from sqlalchemy import select, update
 
@@ -8,18 +9,45 @@ from app.db.models import Message
 from app.db.session import SessionLocal
 from app.services.meshcore_client import WireEvent
 from app.services.mute import is_muted
+from app.services.push_mode import get_mode, is_mention
 from app.services.push_sender import Notification, PushSender
 from app.services.task_pool import TaskPool
 
 log = logging.getLogger(__name__)
 
 
+SelfNameProvider = Callable[[], str | None]
+
+
+def _default_self_name_provider() -> str | None:
+    """Fallback provider used when the bridge is constructed without one.
+
+    Returning ``None`` makes ``is_mention`` short-circuit to ``False`` — so
+    in ``mentions`` mode an unconfigured bridge silently swallows channel
+    pushes rather than misbehaving. Production wiring always supplies a
+    real provider from the MeshCore client.
+    """
+    return None
+
+
 class MeshCoreBridge:
     """Bridge MeshCore events → persistence + Web Push notifications."""
 
-    def __init__(self, sender: PushSender, pool: TaskPool) -> None:
+    def __init__(
+        self,
+        sender: PushSender,
+        pool: TaskPool,
+        *,
+        self_name_provider: SelfNameProvider | None = None,
+    ) -> None:
         self._sender = sender
         self._pool = pool
+        # Callable rather than a value because `self_info` is populated
+        # asynchronously after the device connects — resolving at push time
+        # always picks up the latest name.
+        self._self_name_provider: SelfNameProvider = (
+            self_name_provider or _default_self_name_provider
+        )
 
     def handle_event(self, event: WireEvent) -> None:
         if event.type == "contact_message":
@@ -52,6 +80,13 @@ class MeshCoreBridge:
             )
             db.add(msg)
             await db.commit()
+        # Global push-mode is checked FIRST so "mute" short-circuits before
+        # we even hit the per-conversation mute table. In "mentions" mode,
+        # DMs always push (they're inherently targeted to this device).
+        async with SessionLocal() as db:
+            mode = await get_mode(db)
+        if mode == "mute":
+            return
         # Mute is checked in a SEPARATE session AFTER the persist commit so
         # we never delay the DB write or the WS broadcast on the mute lookup.
         # The mute table is tiny (one row per muted conversation) so the
@@ -81,9 +116,20 @@ class MeshCoreBridge:
             db.add(msg)
             await db.commit()
         async with SessionLocal() as db:
+            mode = await get_mode(db)
+        if mode == "mute":
+            return
+        text = payload.get("text") or ""
+        if mode == "mentions":
+            # For channel messages in mentions-mode, only push when our
+            # adv_name appears in the message body. DMs are handled
+            # separately and always push in this mode.
+            self_name = self._self_name_provider()
+            if not is_mention(text, self_name):
+                return
+        async with SessionLocal() as db:
             if await is_muted(db, kind="channel", key=str(chan)):
                 return  # muted — skip web push, DB + WS already delivered
-        text = payload.get("text") or ""
         await self._notify(Notification(
             title=f"MeshCore #{chan}",
             body=text,
