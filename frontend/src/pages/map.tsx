@@ -38,7 +38,13 @@ export function MapPage() {
   const contacts = data
     ? Object.entries(data)
         .map(([pubKey, c]: [string, Contact]) => ({ pubKey, c }))
-        .filter(({ c }) => c.adv_lat != null && c.adv_lon != null)
+        // Many MeshCore nodes broadcast 0,0 as a "no GPS" sentinel — hide those
+        // (they'd otherwise pile up in the Atlantic off the West African coast).
+        .filter(({ c }) => {
+          if (c.adv_lat == null || c.adv_lon == null) return false
+          if (Math.abs(c.adv_lat) < 0.0001 && Math.abs(c.adv_lon) < 0.0001) return false
+          return true
+        })
         .map(({ pubKey, c }) => ({
           id: c.public_key ?? pubKey,
           name: c.adv_name ?? pubKey.slice(0, 8),

@@ -272,12 +272,14 @@ function ActionsCard() {
 
 export function DevicePage() {
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
-      <IdentityCard />
-      <RadioCard />
-      <HardwareCard />
-      <PositionCard />
-      <ActionsCard />
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
+        <IdentityCard />
+        <RadioCard />
+        <HardwareCard />
+        <PositionCard />
+        <ActionsCard />
+      </div>
     </div>
   )
 }
