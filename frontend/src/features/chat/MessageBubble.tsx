@@ -30,86 +30,50 @@ import type { MentionContact } from "./MentionInput"
 
 interface Props {
   message: Message
-  showSender?: boolean
-}
-
-function renderContextItems(items: MessageActionItem[]) {
-  const out: React.ReactNode[] = []
-  items.forEach((it, i) => {
-    const isLast = i === items.length - 1
-    const prev = items[i - 1]
-    if (it.destructive && prev && !prev.destructive) {
-      out.push(<ContextMenuSeparator key={`sep-${it.key}`} />)
-    }
-    out.push(
-      <ContextMenuItem
-        key={it.key}
-        onSelect={it.onSelect}
-        className={it.destructive ? "text-destructive focus:text-destructive" : undefined}
-      >
-        {it.icon}
-        {it.label}
-      </ContextMenuItem>,
-    )
-    if (isLast) return
-  })
-  return out
-}
-
-function renderDropdownItems(items: MessageActionItem[]) {
-  const out: React.ReactNode[] = []
-  items.forEach((it, i) => {
-    const prev = items[i - 1]
-    if (it.destructive && prev && !prev.destructive) {
-      out.push(<DropdownMenuSeparator key={`sep-${it.key}`} />)
-    }
-    out.push(
-      <DropdownMenuItem
-        key={it.key}
-        onSelect={it.onSelect}
-        variant={it.destructive ? "destructive" : "default"}
-      >
-        {it.icon}
-        {it.label}
-      </DropdownMenuItem>,
-    )
-  })
-  return out
+  isFirstInGroup: boolean
+  isLastInGroup: boolean
+  showStatus: boolean
+  resolvedSender: ResolvedSender | null
+  senderPrefix: string | null
 }
 
 /**
- * Resolve a message's sender prefix → a full contact for display + DM action.
- *
- * For channel messages the bridge stores the 8-char `pubkey_prefix` (when
- * available) in either the dedicated `pubkey_prefix` field or the legacy
- * `contact_pub_key` slot — try both.
+ * Build the asymmetric rounded-corner classes for a bubble inside a
+ * grouped run. The "tail" (last bubble in the group) keeps its outer
+ * corner rounded large; stacked corners are squared (rounded-md) so
+ * consecutive bubbles read as one cohesive cluster.
  */
-function resolveSender(
-  message: Message,
-  contactsMap: Record<string, { public_key?: string; adv_name?: string }> | undefined,
-): ResolvedSender | null {
-  const prefix = (message.pubkey_prefix ?? message.contact_pub_key ?? "").toLowerCase()
-  if (!prefix || !contactsMap) return null
-  for (const c of Object.values(contactsMap)) {
-    if (
-      c.public_key &&
-      c.adv_name &&
-      c.public_key.toLowerCase().startsWith(prefix)
-    ) {
-      return { adv_name: c.adv_name, public_key: c.public_key }
-    }
+function bubbleRoundingClasses(isOut: boolean, first: boolean, last: boolean): string {
+  const base = "rounded-2xl"
+  if (isOut) {
+    // Right side: square top-right when stacked under another bubble.
+    // Bottom-right is the tail when last, otherwise also squared.
+    const tr = first ? "" : "rounded-tr-md"
+    const br = last ? "" : "rounded-br-md"
+    return `${base} ${tr} ${br}`
   }
-  return null
+  const tl = first ? "" : "rounded-tl-md"
+  const bl = last ? "" : "rounded-bl-md"
+  return `${base} ${tl} ${bl}`
 }
 
-export function MessageBubble({ message, showSender = false }: Props) {
+/**
+ * Single message bubble inside a MessageGroup. Owns just the bubble
+ * surface + per-message action menu — the avatar / sender label /
+ * timestamp live on MessageGroup so a run shares them.
+ */
+export function MessageBubble({
+  message,
+  isFirstInGroup,
+  isLastInGroup,
+  showStatus,
+  resolvedSender,
+  senderPrefix: _senderPrefix,
+}: Props) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
-  const resolvedSender = useMemo(
-    () => resolveSender(message, contactsMap),
-    [message, contactsMap],
-  )
+  const isOut = message.direction === "out"
 
   const mentionContacts = useMemo<MentionContact[]>(() => {
     if (!contactsMap) return []
@@ -126,70 +90,52 @@ export function MessageBubble({ message, showSender = false }: Props) {
   const items = useMessageActions({
     message,
     onShowHeardRepeats: () => setSheetOpen(true),
-    resolvedSender: showSender ? resolvedSender : null,
+    resolvedSender,
     onMessageSender: (pk) => navigate(`/chat/${pk}`),
     onViewSenderProfile: (pk) => navigate(`/contact/${pk}`),
   })
 
-  const isOut = message.direction === "out"
-  const alignmentClass = isOut
-    ? "ml-auto bg-primary text-primary-foreground"
-    : "bg-muted"
-
-  // The prefix label fallback when no contact resolves.
-  const senderPrefix =
-    message.pubkey_prefix ?? message.contact_pub_key ?? null
-  const senderLabel = resolvedSender?.adv_name ?? senderPrefix ?? null
-  const senderClickable = !!resolvedSender
+  const bubbleClass = `group/bubble relative px-3 py-2 ${
+    isOut ? "bg-primary text-primary-foreground" : "bg-muted"
+  } ${bubbleRoundingClasses(isOut, isFirstInGroup, isLastInGroup)} animate-in fade-in slide-in-from-bottom-1 duration-200`
 
   return (
     <>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-          <li
-            className={`group/bubble relative max-w-[80%] rounded-lg px-3 py-2 pr-7 ${alignmentClass}`}
-          >
-            {showSender && senderLabel && (
-              <button
-                type="button"
-                disabled={!senderClickable}
-                onClick={() =>
-                  resolvedSender && navigate(`/chat/${resolvedSender.public_key}`)
-                }
-                className={`mb-0.5 block text-[10px] text-muted-foreground ${
-                  senderClickable ? "cursor-pointer hover:underline" : "cursor-default"
-                }`}
-              >
-                {senderLabel}
-              </button>
+          <div className={bubbleClass}>
+            <p className="break-words text-sm leading-snug">{renderedText}</p>
+            {showStatus && (
+              <span className="mt-0.5 flex justify-end" title={message.ack_state}>
+                <MessageStatusIcon state={message.ack_state} />
+              </span>
             )}
-            <p className="break-words text-sm">{renderedText}</p>
-            <div className="mt-0.5 flex items-center gap-2">
-              <time className="text-[10px] opacity-60">
-                {new Date(message.timestamp).toLocaleTimeString()}
-              </time>
-              {isOut && <MessageStatusIcon state={message.ack_state} />}
-            </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="absolute top-1 right-1 h-6 w-6 opacity-60 hover:opacity-100"
+                  className={`absolute -top-2 ${
+                    isOut ? "-left-2" : "-right-2"
+                  } h-6 w-6 rounded-full bg-background/95 opacity-0 shadow-sm transition-opacity group-hover/bubble:opacity-100 focus:opacity-100`}
                   aria-label="Message actions"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-40">
-                {renderDropdownItems(items)}
+              <DropdownMenuContent align={isOut ? "end" : "start"} className="min-w-40">
+                {items.map((it, i) => (
+                  <RenderDropdownItem key={it.key} item={it} prev={items[i - 1]} />
+                ))}
               </DropdownMenuContent>
             </DropdownMenu>
-          </li>
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent className="min-w-40">
-          {renderContextItems(items)}
+          {items.map((it, i) => (
+            <RenderContextItem key={it.key} item={it} prev={items[i - 1]} />
+          ))}
         </ContextMenuContent>
       </ContextMenu>
       <HeardRepeatsSheet
@@ -197,6 +143,50 @@ export function MessageBubble({ message, showSender = false }: Props) {
         onOpenChange={setSheetOpen}
         contactPubKey={message.contact_pub_key}
       />
+    </>
+  )
+}
+
+function RenderDropdownItem({
+  item,
+  prev,
+}: {
+  item: MessageActionItem
+  prev?: MessageActionItem
+}) {
+  return (
+    <>
+      {item.destructive && prev && !prev.destructive && <DropdownMenuSeparator />}
+      <DropdownMenuItem
+        onSelect={item.onSelect}
+        variant={item.destructive ? "destructive" : "default"}
+      >
+        {item.icon}
+        {item.label}
+      </DropdownMenuItem>
+    </>
+  )
+}
+
+function RenderContextItem({
+  item,
+  prev,
+}: {
+  item: MessageActionItem
+  prev?: MessageActionItem
+}) {
+  return (
+    <>
+      {item.destructive && prev && !prev.destructive && <ContextMenuSeparator />}
+      <ContextMenuItem
+        onSelect={item.onSelect}
+        className={
+          item.destructive ? "text-destructive focus:text-destructive" : undefined
+        }
+      >
+        {item.icon}
+        {item.label}
+      </ContextMenuItem>
     </>
   )
 }
