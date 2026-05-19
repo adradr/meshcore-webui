@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { Plus, Trash2, Eye, EyeOff } from "lucide-react"
+import { Plus, Trash2 } from "lucide-react"
 import {
   useAddChannel,
   useChannels,
@@ -11,7 +11,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Dialog,
@@ -24,17 +24,22 @@ import {
 } from "@/components/ui/dialog"
 
 function ChannelCard({ channel }: { channel: Channel }) {
-  const [showPsk, setShowPsk] = useState(false)
   const navigate = useNavigate()
   const remove = useRemoveChannel()
+  const name = channel.channel_name ?? `Channel ${channel.channel_idx}`
 
   const onRemove = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm(`Remove channel "${channel.name}" (idx ${channel.idx})?`)) {
+    if (
+      !window.confirm(
+        `Remove channel "${name}" (idx ${channel.channel_idx}) from local DB? ` +
+          `Note: v1.1 does not push deletes to the device.`,
+      )
+    ) {
       return
     }
-    remove.mutate(channel.idx, {
-      onSuccess: () => toast.success(`Removed channel ${channel.name}`),
+    remove.mutate(channel.channel_idx, {
+      onSuccess: () => toast.success(`Removed channel ${name}`),
       onError: (err) =>
         toast.error(err instanceof Error ? err.message : "Remove failed"),
     })
@@ -43,13 +48,13 @@ function ChannelCard({ channel }: { channel: Channel }) {
   return (
     <Card
       className="cursor-pointer transition-colors hover:bg-accent/40"
-      onClick={() => navigate(`/channel/${channel.idx}`)}
+      onClick={() => navigate(`/channel/${channel.channel_idx}`)}
     >
       <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
         <div className="min-w-0">
           <CardTitle className="text-sm font-medium">
-            <span className="text-muted-foreground">#{channel.idx}</span>{" "}
-            {channel.name}
+            <span className="text-muted-foreground">#{channel.channel_idx}</span>{" "}
+            {name}
           </CardTitle>
         </div>
         <Button
@@ -63,28 +68,6 @@ function ChannelCard({ channel }: { channel: Channel }) {
           <Trash2 className="h-4 w-4" />
         </Button>
       </CardHeader>
-      {channel.psk && (
-        <CardContent className="pt-0">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-muted-foreground">PSK:</span>
-            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">
-              {showPsk ? channel.psk : "•".repeat(Math.min(channel.psk.length, 12))}
-            </code>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6"
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowPsk((s) => !s)
-              }}
-              aria-label={showPsk ? "Hide PSK" : "Show PSK"}
-            >
-              {showPsk ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-            </Button>
-          </div>
-        </CardContent>
-      )}
     </Card>
   )
 }
@@ -135,6 +118,8 @@ function AddChannelDialog() {
           <DialogTitle>Add channel</DialogTitle>
           <DialogDescription>
             Define a new MeshCore channel by index and name. PSK is optional.
+            Note: v1.1 only writes to the local DB and does not push to the
+            device.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
@@ -204,12 +189,12 @@ export function ChannelsPage() {
           </div>
         ) : !data || data.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">
-            No channels yet. Click "Add channel" to create one.
+            No channels yet.
           </div>
         ) : (
           <div className="space-y-2">
             {data.map((ch) => (
-              <ChannelCard key={ch.id} channel={ch} />
+              <ChannelCard key={ch.channel_idx} channel={ch} />
             ))}
           </div>
         )}
