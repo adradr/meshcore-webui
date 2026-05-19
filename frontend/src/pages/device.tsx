@@ -7,6 +7,7 @@ import {
   useSelfInfo,
   useSendAdvert,
 } from "@/features/device/queries"
+import { NoiseWidget } from "@/features/noise/NoiseWidget"
 import { useRealtime } from "@/realtime/WebSocketProvider"
 import {
   Card,
@@ -279,6 +280,7 @@ export function DevicePage() {
         <HardwareCard />
         <PositionCard />
         <ActionsCard />
+        <NoiseWidget />
       </div>
     </div>
   )
