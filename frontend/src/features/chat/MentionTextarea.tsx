@@ -174,9 +174,13 @@ export function MentionTextarea({
         />
       </PopoverTrigger>
       <PopoverContent
+        // `side="top"` keeps the suggestion list above the input — important on
+        // mobile, where the bottom half of the viewport is occluded by the
+        // keyboard the moment the textarea gets focus.
+        side="top"
         align="start"
         sideOffset={4}
-        className="w-72 p-0"
+        className="w-72 max-w-[calc(100vw-2rem)] p-0"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <Command shouldFilter={false}>

@@ -143,7 +143,7 @@ function ResultPanel({
         <VerdictPill verdict={data.verdict} />
         <StatsStrip data={data} />
       </div>
-      <ChartContainer config={chartConfig} className="h-64 w-full">
+      <ChartContainer config={chartConfig} className="aspect-auto h-64 w-full min-w-0">
         <AreaChart data={chartData} accessibilityLayer>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           <XAxis
@@ -224,14 +224,27 @@ export function LineOfSightModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      {/*
+        On mobile the default centered DialogContent (`top-1/2 -translate-y-1/2`)
+        gets pushed off-screen when the virtual keyboard appears: the visual
+        viewport shrinks but the centered transform still references the layout
+        viewport. Anchor to the top on small screens so inputs stay above the
+        keyboard.
+      */}
+      <DialogContent
+        className="top-4 max-h-[calc(100dvh-2rem)] translate-y-0 overflow-y-auto sm:top-1/2 sm:max-w-2xl sm:-translate-y-1/2"
+      >
         <DialogHeader>
-          <DialogTitle className="flex flex-wrap items-center gap-1.5">
-            <Radio className="size-4" />
+          <DialogTitle className="flex flex-wrap items-center gap-x-1.5 gap-y-1 break-words">
+            <Radio className="size-4 shrink-0" />
             <span>Line of sight:</span>
-            <span className="font-semibold">{a?.name ?? "—"}</span>
-            <ArrowRight className="size-3.5" />
-            <span className="font-semibold">{b?.name ?? "—"}</span>
+            <span className="min-w-0 break-words font-semibold">
+              {a?.name ?? "—"}
+            </span>
+            <ArrowRight className="size-3.5 shrink-0" />
+            <span className="min-w-0 break-words font-semibold">
+              {b?.name ?? "—"}
+            </span>
           </DialogTitle>
           <DialogDescription>
             Sample terrain between the two points, calculate Fresnel zone
@@ -239,13 +252,14 @@ export function LineOfSightModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4">
+        <div className="flex min-w-0 flex-col gap-4 overflow-x-hidden">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="los-h-tx">TX antenna height (m)</Label>
               <Input
                 id="los-h-tx"
                 type="number"
+                inputMode="decimal"
                 step="0.5"
                 min="0"
                 max="200"
@@ -258,6 +272,7 @@ export function LineOfSightModal({
               <Input
                 id="los-h-rx"
                 type="number"
+                inputMode="decimal"
                 step="0.5"
                 min="0"
                 max="200"
