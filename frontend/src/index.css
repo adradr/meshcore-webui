@@ -156,3 +156,20 @@
     background: var(--popover);
     color: var(--popover-foreground);
 }
+
+/* Defeat Leaflet's default link styling INSIDE our action buttons —
+ * .leaflet-popup-content a sets color: #0078A8 + underline by default
+ * which fights our themed shadcn buttons. */
+.leaflet-popup-content .mc-popup-actions a {
+    color: inherit;
+    text-decoration: none;
+}
+.leaflet-popup-content .mc-popup-actions a:hover {
+    text-decoration: none;
+}
+
+/* Tighten popup body padding so action buttons reach the edges nicely. */
+.leaflet-popup-content {
+    margin: 12px 14px;
+    line-height: 1.4;
+}

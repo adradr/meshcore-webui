@@ -2,6 +2,7 @@ import { Marker, Popup } from "react-leaflet"
 import { Link } from "react-router-dom"
 import { ArrowRight, MessageCircle, User } from "lucide-react"
 import { iconForNodeType, type NodeType } from "./nodeIcons"
+import { Button } from "@/components/ui/button"
 
 export interface ContactMarker {
   id: string
@@ -44,32 +45,28 @@ export function MarkersLayer({ contacts }: Props) {
                 </div>
               </div>
               {c.id !== "__self__" ? (
-                <div className="flex gap-1.5 border-t pt-2">
-                  <Link
-                    to={`/contact/${c.id}`}
-                    className="flex flex-1 items-center justify-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90"
-                  >
-                    <User className="h-3 w-3" />
-                    Profile
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                  <Link
-                    to={`/chat/${c.id}`}
-                    className="flex items-center justify-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium hover:bg-accent"
-                    title={`Message ${c.name}`}
-                  >
-                    <MessageCircle className="h-3 w-3" />
-                  </Link>
+                <div className="mc-popup-actions flex gap-1.5 border-t pt-2">
+                  <Button asChild size="sm" className="flex-1 h-8">
+                    <Link to={`/contact/${c.id}`}>
+                      <User className="mr-1 h-3.5 w-3.5" />
+                      Profile
+                      <ArrowRight className="ml-auto h-3 w-3 opacity-70" />
+                    </Link>
+                  </Button>
+                  <Button asChild size="sm" variant="outline" className="h-8 w-9 p-0" title={`Message ${c.name}`}>
+                    <Link to={`/chat/${c.id}`} aria-label={`Message ${c.name}`}>
+                      <MessageCircle className="h-3.5 w-3.5" />
+                    </Link>
+                  </Button>
                 </div>
               ) : (
-                <div className="border-t pt-2">
-                  <Link
-                    to="/device"
-                    className="flex items-center justify-center gap-1 rounded-md bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground hover:opacity-90"
-                  >
-                    Device info
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
+                <div className="mc-popup-actions border-t pt-2">
+                  <Button asChild size="sm" className="w-full h-8">
+                    <Link to="/device">
+                      Device info
+                      <ArrowRight className="ml-1 h-3 w-3 opacity-70" />
+                    </Link>
+                  </Button>
                 </div>
               )}
             </div>
