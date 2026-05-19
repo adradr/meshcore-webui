@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { Copy, MapPin, Radio, Send, Waves } from "lucide-react"
+import { Copy, Cpu, MapPin, Send, Waves } from "lucide-react"
 import { toast } from "sonner"
 import {
   useDeviceInfo,
@@ -97,123 +97,109 @@ function ConnectionBadge() {
   )
 }
 
-function IdentityCard() {
-  const { data: self, isLoading } = useSelfInfo()
-  const { data: info } = useDeviceInfo()
+/**
+ * Single compact card combining Identity + Hardware + Radio. Was three
+ * separate cards stacked vertically; collapsing them halves the vertical
+ * noise on the Info tab without losing any data.
+ *
+ * Layout is a 2-column `<dl>` so label/value alignment stays consistent and
+ * long values (pubkey, radio line) truncate gracefully on narrow viewports.
+ */
+function DeviceInfoCard() {
+  const { data: self, isLoading: selfLoading } = useSelfInfo()
+  const { data: info, isLoading: infoLoading } = useDeviceInfo()
+  const isLoading = selfLoading || infoLoading
 
-  const fwVersion = info?.ver ?? (info ? "—" : undefined)
+  const fwVersion = info?.ver
   const fwBuild = info?.fw_build
   const fwLine =
     fwVersion && fwBuild
-      ? `${fwVersion} (built ${fwBuild})`
+      ? `${fwVersion} (${fwBuild})`
       : (fwVersion ?? "—")
 
+  const radioLine =
+    self?.radio_freq != null
+      ? [
+          `${self.radio_freq} MHz`,
+          self.radio_sf != null ? `SF${self.radio_sf}` : null,
+          self.radio_bw != null ? `BW${self.radio_bw} kHz` : null,
+          self.radio_cr != null ? `CR4/${self.radio_cr}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : "—"
+
+  const txPowerLine =
+    self?.tx_power != null
+      ? `${self.tx_power}/${self.max_tx_power ?? "?"} dBm`
+      : "—"
+
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base">Identity</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 p-3 pb-2">
+        <div className="flex items-center gap-2">
+          <Cpu className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Device</CardTitle>
+        </div>
         <ConnectionBadge />
       </CardHeader>
-      <CardContent className="space-y-1">
+      <CardContent className="p-3 pt-2">
         {isLoading ? (
-          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-32 w-full" />
         ) : (
-          <>
-            <KeyValue label="Name">{self?.name ?? "—"}</KeyValue>
-            <Separator />
-            <div className="flex items-center justify-between gap-2 py-1">
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                Public key
-              </span>
-              <div className="flex items-center gap-1">
-                <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                  {self?.public_key
-                    ? truncatePubKey(self.public_key)
-                    : "—"}
-                </code>
-                {self?.public_key && (
-                  <CopyButton value={self.public_key} label="Public key" />
-                )}
-              </div>
-            </div>
-            <Separator />
-            <KeyValue label="Model">{info?.model ?? "—"}</KeyValue>
-            <Separator />
-            <KeyValue label="Firmware">{fwLine ?? "—"}</KeyValue>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
+          <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1.5 text-sm">
+            <dt className="text-muted-foreground">Name</dt>
+            <dd className="truncate font-medium">{self?.name ?? "—"}</dd>
 
-function RadioCard() {
-  const { data: self, isLoading } = useSelfInfo()
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-        <Radio className="h-4 w-4 text-muted-foreground" />
-        <CardTitle className="text-base">Radio</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-1">
-        {isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : (
-          <>
-            <KeyValue label="Frequency">
-              {self?.radio_freq != null ? `${self.radio_freq} MHz` : "—"}
-            </KeyValue>
-            <Separator />
-            <KeyValue label="Bandwidth">
-              {self?.radio_bw != null ? `${self.radio_bw} kHz` : "—"}
-            </KeyValue>
-            <Separator />
-            <KeyValue label="Spreading factor">
-              {self?.radio_sf ?? "—"}
-            </KeyValue>
-            <Separator />
-            <KeyValue label="Coding rate">
-              {self?.radio_cr != null ? `${self.radio_cr} (4/${self.radio_cr})` : "—"}
-            </KeyValue>
-            <Separator />
-            <KeyValue label="TX power">
-              {self?.tx_power != null
-                ? `${self.tx_power} / ${self.max_tx_power ?? "?"} dBm`
-                : "—"}
-            </KeyValue>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
+            <dt className="text-muted-foreground">Public key</dt>
+            <dd className="flex min-w-0 items-center gap-1">
+              <code className="truncate font-mono text-xs">
+                {self?.public_key
+                  ? truncatePubKey(self.public_key)
+                  : "—"}
+              </code>
+              {self?.public_key && (
+                <CopyButton value={self.public_key} label="Public key" />
+              )}
+            </dd>
 
-function HardwareCard() {
-  const { data: info, isLoading } = useDeviceInfo()
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Hardware</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-1">
-        {isLoading ? (
-          <Skeleton className="h-20 w-full" />
-        ) : (
-          <>
-            <KeyValue label="Max contacts">{info?.max_contacts ?? "—"}</KeyValue>
-            <Separator />
-            <KeyValue label="Max channels">{info?.max_channels ?? "—"}</KeyValue>
-            {info?.ble_pin != null && info.ble_pin !== 0 && (
+            <dt className="text-muted-foreground">Model</dt>
+            <dd className="truncate">{info?.model ?? "—"}</dd>
+
+            <dt className="text-muted-foreground">Firmware</dt>
+            <dd className="truncate">{fwLine}</dd>
+
+            <dt className="text-muted-foreground">Radio</dt>
+            <dd className="truncate">{radioLine}</dd>
+
+            <dt className="text-muted-foreground">TX power</dt>
+            <dd>{txPowerLine}</dd>
+
+            {info?.max_contacts != null && (
               <>
-                <Separator />
-                <KeyValue label="BLE pin">{info.ble_pin}</KeyValue>
+                <dt className="text-muted-foreground">Max contacts</dt>
+                <dd>{info.max_contacts}</dd>
               </>
             )}
-            <Separator />
-            <KeyValue label="Repeat mode">
-              {info?.repeat ? "On" : "Off"}
-            </KeyValue>
-          </>
+            {info?.max_channels != null && (
+              <>
+                <dt className="text-muted-foreground">Max channels</dt>
+                <dd>{info.max_channels}</dd>
+              </>
+            )}
+            {info?.ble_pin != null && info.ble_pin !== 0 && (
+              <>
+                <dt className="text-muted-foreground">BLE pin</dt>
+                <dd>{info.ble_pin}</dd>
+              </>
+            )}
+            {info?.repeat != null && (
+              <>
+                <dt className="text-muted-foreground">Repeat mode</dt>
+                <dd>{info.repeat ? "On" : "Off"}</dd>
+              </>
+            )}
+          </dl>
         )}
       </CardContent>
     </Card>
@@ -295,9 +281,7 @@ function ActionsCard() {
 function DeviceInfoPanel() {
   return (
     <div className="flex flex-col gap-4">
-      <IdentityCard />
-      <RadioCard />
-      <HardwareCard />
+      <DeviceInfoCard />
       <PositionCard />
       <ActionsCard />
     </div>

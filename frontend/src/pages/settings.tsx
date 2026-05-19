@@ -4,13 +4,8 @@ import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { useTheme } from "@/components/theme-provider"
@@ -72,76 +67,83 @@ export function SettingsPage() {
 
   return (
     <PageShell header={<PageHeader title="Settings" />}>
-      <div className="mx-auto max-w-3xl space-y-3">
-        <Card>
-          <CardHeader className="p-3 pb-2">
-            <CardTitle className="text-sm">Appearance</CardTitle>
-            <CardDescription className="text-xs">
+      <div className="mx-auto max-w-3xl space-y-6">
+        {/* Appearance */}
+        <section className="space-y-2">
+          <div>
+            <h3 className="text-sm font-semibold">Appearance</h3>
+            <p className="text-xs text-muted-foreground">
               Dark mode follows the system by default.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-3 pt-2">
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Label htmlFor="dark">Dark mode</Label>
+            <Switch
+              id="dark"
+              checked={theme === "dark"}
+              onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
+            />
+          </div>
+        </section>
+        <Separator />
+
+        {/* Notifications — single section, but the Muted list keeps a Card */}
+        {/* because it has its own scrollable inner container. */}
+        <section className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold">Notifications</h3>
+            <p className="text-xs text-muted-foreground">
+              Master filter applies to every push. Per-conversation mutes layer
+              on top and only matter when the filter is "All messages".
+            </p>
+          </div>
+
+          {pushAvailable ? (
             <div className="flex items-center gap-3">
-              <Label htmlFor="dark">Dark mode</Label>
+              <Label htmlFor="push">Push notifications</Label>
               <Switch
-                id="dark"
-                checked={theme === "dark"}
-                onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
+                id="push"
+                checked={pushOn}
+                onCheckedChange={togglePush}
               />
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <PWAInstallPrompt />
+          )}
 
-        <Card>
-          <CardHeader className="p-3 pb-2">
-            <CardTitle className="text-sm">Notifications</CardTitle>
-            <CardDescription className="text-xs">
-              Master filter applies to every push. Per-conversation mutes
-              layer on top and only matter when the filter is "All messages".
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 p-3 pt-2">
-            {pushAvailable ? (
-              <div className="flex items-center gap-3">
-                <Label htmlFor="push">Push notifications</Label>
-                <Switch
-                  id="push"
-                  checked={pushOn}
-                  onCheckedChange={togglePush}
-                />
-              </div>
-            ) : (
-              <PWAInstallPrompt />
-            )}
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Push filter
+            </h4>
+            <PushModeRadio />
+          </div>
 
-            <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Push filter
-              </h3>
-              <PushModeRadio />
-            </div>
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Muted conversations
+            </h4>
+            <Card>
+              <CardContent className="p-2">
+                <MutedList />
+              </CardContent>
+            </Card>
+          </div>
+        </section>
+        <Separator />
 
-            <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Muted conversations
-              </h3>
-              <MutedList />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="p-3 pb-2">
-            <CardTitle className="text-sm">Security</CardTitle>
-            <CardDescription className="text-xs">
+        {/* Security */}
+        <section className="space-y-2">
+          <div>
+            <h3 className="text-sm font-semibold">Security</h3>
+            <p className="text-xs text-muted-foreground">
               Required when the server has{" "}
               <code className="rounded bg-muted px-1 text-[11px]">
                 MESHCORE_WEBUI_API_KEY
               </code>{" "}
               set. Reloading the page applies the change.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-2 p-3 pt-2">
+            </p>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="api-key">API key</Label>
             <div className="flex gap-2">
               <Input
@@ -153,28 +155,28 @@ export function SettingsPage() {
               />
               <Button onClick={saveApiKey}>Save</Button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
+        <Separator />
 
-        <Card>
-          <CardHeader className="p-3 pb-2">
-            <CardTitle className="text-sm">About</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1 p-3 pt-2 text-xs text-muted-foreground">
-            <p>
-              MeshCore WebUI —{" "}
-              <a
-                href={REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-foreground"
-              >
-                source on GitHub
-              </a>
-              .
-            </p>
-          </CardContent>
-        </Card>
+        {/* About */}
+        <section className="space-y-2">
+          <div>
+            <h3 className="text-sm font-semibold">About</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            MeshCore WebUI —{" "}
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="underline hover:text-foreground"
+            >
+              source on GitHub
+            </a>
+            .
+          </p>
+        </section>
       </div>
     </PageShell>
   )

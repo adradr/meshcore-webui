@@ -26,8 +26,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useSelfInfo } from "@/features/device/queries"
 
 import { useLosCompute, type LosOut } from "./api"
+
+/** LoRa EU default — used silently when the device hasn't reported its freq yet. */
+const DEFAULT_FREQ_HZ = 868_000_000
 
 export interface LineOfSightEndpoint {
   name: string
@@ -43,12 +47,6 @@ export interface LineOfSightModalProps {
   /** The "target" / RX endpoint — usually a clicked map marker */
   b: LineOfSightEndpoint | null
 }
-
-const FREQ_OPTIONS = [
-  { label: "868 MHz (EU)", value: 868_000_000 },
-  { label: "915 MHz (US)", value: 915_000_000 },
-  { label: "433 MHz (EU lower)", value: 433_000_000 },
-] as const
 
 const chartConfig = {
   ground: { label: "Terrain", color: "var(--chart-3)" },
@@ -199,7 +197,16 @@ export function LineOfSightModal({
 }: LineOfSightModalProps) {
   const [hTx, setHTx] = React.useState(2)
   const [hRx, setHRx] = React.useState(2)
-  const [freqHz, setFreqHz] = React.useState<number>(868_000_000)
+  // Pull the operating frequency from the device itself — no user picker.
+  // Fall back silently to the EU default if the device hasn't reported yet
+  // (or the call errored), so the modal still works offline-ish.
+  const { data: selfInfo } = useSelfInfo()
+  const radioFreqMHz = selfInfo?.radio_freq
+  const freqHz =
+    typeof radioFreqMHz === "number" && Number.isFinite(radioFreqMHz)
+      ? Math.round(radioFreqMHz * 1e6)
+      : DEFAULT_FREQ_HZ
+  const hasDeviceFreq = typeof radioFreqMHz === "number" && Number.isFinite(radioFreqMHz)
   const mutation = useLosCompute()
 
   // Reset transient state when the modal closes so re-opening is clean.
@@ -250,6 +257,11 @@ export function LineOfSightModal({
             Sample terrain between the two points, calculate Fresnel zone
             clearance, and verdict link viability.
           </DialogDescription>
+          {hasDeviceFreq && (
+            <p className="text-xs text-muted-foreground">
+              Frequency: {radioFreqMHz!.toFixed(1)} MHz (auto)
+            </p>
+          )}
         </DialogHeader>
 
         {/*
@@ -296,22 +308,6 @@ export function LineOfSightModal({
                 onChange={(e) => setHRx(Number(e.target.value))}
               />
             </div>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="los-freq">Frequency</Label>
-            <select
-              id="los-freq"
-              value={freqHz}
-              onChange={(e) => setFreqHz(Number(e.target.value))}
-              className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-            >
-              {FREQ_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
           </div>
 
           <div>

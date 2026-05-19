@@ -106,8 +106,10 @@ describe("DevicePage tabs", () => {
     render(wrap(<DevicePage />))
     const infoTab = screen.getByRole("tab", { name: /^info$/i })
     expect(infoTab).toHaveAttribute("aria-selected", "true")
-    // Info content (identity card) is visible
-    expect(screen.getByText(/identity/i)).toBeInTheDocument()
+    // Info content (collapsed Device card) is visible. Assert on the mocked
+    // device name rather than a section title — that survives further UI
+    // restructures.
+    expect(screen.getByText("Test Device")).toBeInTheDocument()
   })
 
   it("clicking the RX Log tab reveals the rx-log content", async () => {

@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
 vi.mock("@/lib/api", () => ({
-  api: { post: vi.fn() },
+  // `get` is needed because LineOfSightModal now calls useSelfInfo() to
+  // auto-detect the operating frequency. Returning `{}` lets the modal fall
+  // back to its EU default (868 MHz) silently.
+  api: { post: vi.fn(), get: vi.fn().mockResolvedValue({}) },
 }))
 
 vi.mock("sonner", () => ({
