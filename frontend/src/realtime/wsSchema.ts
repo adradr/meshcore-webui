@@ -60,3 +60,27 @@ export function parseWSMessage(raw: unknown): WSMessage | null {
   }
   return r.data
 }
+
+/**
+ * Loose wire envelope schema mirroring the backend `WireEvent` dataclass.
+ *
+ * Used for topic-based routing where we only need the envelope (type/topic)
+ * and do not want to enforce the per-type payload shape (that is the job of
+ * `WSMessageSchema` and downstream consumers).
+ *
+ * The `topic` field defaults to `"system"` to match backend behaviour for
+ * unknown event types (see `topic_for_event_type` in
+ * `backend/app/services/meshcore_client.py`).
+ */
+export const WireEventSchema = z.object({
+  type: z.string(),
+  payload: z.unknown(),
+  attributes: z.record(z.string(), z.unknown()).optional().default({}),
+  topic: z.string().optional().default("system"),
+})
+
+export type WireEvent = z.infer<typeof WireEventSchema>
+
+export function parseWireEvent(raw: unknown): WireEvent {
+  return WireEventSchema.parse(raw)
+}
