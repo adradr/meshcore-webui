@@ -195,6 +195,52 @@ async def test_post_message_requires_target(client):
 
 
 @pytest.mark.asyncio
+async def test_list_threads_returns_one_per_conversation(client, db):
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    # Three DMs to abc123 (last at +5min), two DMs to def456 (last at +30min),
+    # two channel msgs on channel 2 (last at +10min).
+    rows = [
+        Message(msg_type="dm", contact_pub_key="abc123", direction="in",
+                text="abc-0", timestamp=base),
+        Message(msg_type="dm", contact_pub_key="abc123", direction="out",
+                text="abc-latest", timestamp=base + dt.timedelta(minutes=5)),
+        Message(msg_type="dm", contact_pub_key="def456", direction="in",
+                text="def-0", timestamp=base + dt.timedelta(minutes=15)),
+        Message(msg_type="dm", contact_pub_key="def456", direction="in",
+                text="def-latest", timestamp=base + dt.timedelta(minutes=30)),
+        Message(msg_type="chan", channel_idx=2, direction="in",
+                text="chan-0", timestamp=base + dt.timedelta(minutes=2)),
+        Message(msg_type="chan", channel_idx=2, direction="in",
+                text="chan-latest", timestamp=base + dt.timedelta(minutes=10)),
+    ]
+    for r in rows:
+        db.add(r)
+    await db.commit()
+
+    r = await client.get("/api/messages/threads")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 3
+    # DESC by last_timestamp: def456 (+30m), chan 2 (+10m), abc123 (+5m)
+    assert body[0]["contact_pub_key"] == "def456"
+    assert body[0]["last_text"] == "def-latest"
+    assert body[0]["last_direction"] == "in"
+    assert body[1]["msg_type"] == "chan"
+    assert body[1]["channel_idx"] == 2
+    assert body[1]["last_text"] == "chan-latest"
+    assert body[2]["contact_pub_key"] == "abc123"
+    assert body[2]["last_text"] == "abc-latest"
+    assert body[2]["last_direction"] == "out"
+
+
+@pytest.mark.asyncio
+async def test_list_threads_empty(client):
+    r = await client.get("/api/messages/threads")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+@pytest.mark.asyncio
 async def test_delete_message_removes_row(client, db):
     rows = await _insert_messages(db, 3)
     target_id = rows[1].id

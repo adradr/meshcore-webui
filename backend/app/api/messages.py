@@ -2,8 +2,8 @@ from __future__ import annotations
 import datetime as dt
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from sqlalchemy import and_, delete, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from sqlalchemy import and_, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Message
@@ -96,6 +96,51 @@ async def send_message(
     await db.commit()
     await db.refresh(row)
     return row
+
+
+@router.get("/threads")
+async def list_threads(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[dict]:
+    """Most-recent message per conversation thread (DM contact or channel)."""
+    sql = text("""
+      SELECT m1.* FROM messages m1
+      INNER JOIN (
+        SELECT
+          msg_type,
+          COALESCE(contact_pub_key, '') AS pk,
+          COALESCE(channel_idx, -1) AS ci,
+          MAX(timestamp) AS max_ts
+        FROM messages
+        GROUP BY msg_type, pk, ci
+      ) m2
+      ON m1.msg_type = m2.msg_type
+         AND COALESCE(m1.contact_pub_key, '') = m2.pk
+         AND COALESCE(m1.channel_idx, -1) = m2.ci
+         AND m1.timestamp = m2.max_ts
+      ORDER BY m1.timestamp DESC
+      LIMIT :limit
+    """)
+    rows = (await db.execute(sql, {"limit": limit})).mappings().all()
+    out: list[dict] = []
+    for r in rows:
+        ts = r["timestamp"]
+        if ts is None:
+            ts_iso = None
+        elif isinstance(ts, dt.datetime):
+            ts_iso = ts.isoformat()
+        else:
+            ts_iso = str(ts)
+        out.append({
+            "msg_type": r["msg_type"],
+            "contact_pub_key": r["contact_pub_key"],
+            "channel_idx": r["channel_idx"],
+            "last_text": r["text"],
+            "last_timestamp": ts_iso,
+            "last_direction": r["direction"],
+        })
+    return out
 
 
 @router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
