@@ -28,7 +28,11 @@ def _make_client_override(send_trace_impl):
 
 
 @pytest.mark.asyncio
-async def test_trace_path_returns_hops():
+async def test_trace_path_returns_hops(client):
+    """Even without any seeded contacts, the resolver query must succeed —
+    so this test relies on the ``client`` fixture (which applies the schema
+    via ``Base.metadata.create_all``). Without it the ``contacts`` table
+    doesn't exist and the resolver raises OperationalError."""
     fake = _make_client_override(
         AsyncMock(
             return_value=TracePathResult(
@@ -41,27 +45,25 @@ async def test_trace_path_returns_hops():
     )
     app.dependency_overrides[get_meshcore_client] = lambda: fake
     try:
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
-            r = await ac.post(f"/api/trace/{'aa' * 32}")
-            assert r.status_code == 200, r.text
-            body = r.json()
-            assert body["tag"] == 42
-            assert body["flags"] == 0
-            assert body["path_len"] == 1
-            assert body["requested_target_pubkey"] == "aa" * 32
-            assert len(body["hops"]) == 2
-            # With no contacts seeded, the resolver leaves all enriched fields
-            # at their default ``None`` / ``[]`` values.
-            assert body["hops"][0] == {
-                "hash": "ab",
-                "snr": 3.5,
-                "name": None,
-                "pub_key": None,
-                "lat": None,
-                "lon": None,
-                "candidates": [],
-            }
+        r = await client.post(f"/api/trace/{'aa' * 32}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["tag"] == 42
+        assert body["flags"] == 0
+        assert body["path_len"] == 1
+        assert body["requested_target_pubkey"] == "aa" * 32
+        assert len(body["hops"]) == 2
+        # With no contacts seeded, the resolver leaves all enriched fields
+        # at their default ``None`` / ``[]`` values.
+        assert body["hops"][0] == {
+            "hash": "ab",
+            "snr": 3.5,
+            "name": None,
+            "pub_key": None,
+            "lat": None,
+            "lon": None,
+            "candidates": [],
+        }
     finally:
         app.dependency_overrides.pop(get_meshcore_client, None)
 
