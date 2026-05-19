@@ -1,13 +1,20 @@
-import { createContext, useContext, useMemo } from "react"
+import { createContext, useCallback, useContext, useMemo, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import { useWebSocket, type WSStatus } from "./useWebSocket"
-import { parseWSMessage } from "./wsSchema"
+import { parseWireEvent, parseWSMessage } from "./wsSchema"
 
-interface Ctx {
+export type TopicHandler = (payload: unknown) => void
+
+export interface WebSocketContextValue {
   status: WSStatus
   send: (msg: { type: string; payload: unknown }) => void
   lastMessage: unknown
+  /**
+   * Subscribe to wire events on a given topic. Returns an unsubscribe fn.
+   * Prefer the {@link useWsTopic} hook for component-level subscriptions.
+   */
+  subscribe: (topic: string, handler: TopicHandler) => () => void
 }
 
 interface MessagesPage {
@@ -34,7 +41,9 @@ function prependToMessages(
   }
 }
 
-const WSContext = createContext<Ctx | null>(null)
+export const WebSocketContext = createContext<WebSocketContextValue | null>(
+  null,
+)
 
 export function WebSocketProvider({
   url,
@@ -44,9 +53,51 @@ export function WebSocketProvider({
   children: React.ReactNode
 }) {
   const qc = useQueryClient()
+  const subscribers = useRef(new Map<string, Set<TopicHandler>>())
+
+  const subscribe = useCallback(
+    (topic: string, handler: TopicHandler) => {
+      let set = subscribers.current.get(topic)
+      if (!set) {
+        set = new Set()
+        subscribers.current.set(topic, set)
+      }
+      set.add(handler)
+      return () => {
+        const current = subscribers.current.get(topic)
+        if (!current) return
+        current.delete(handler)
+        if (current.size === 0) subscribers.current.delete(topic)
+      }
+    },
+    [],
+  )
+
   const { status, send, lastMessage } = useWebSocket({
     url,
     onMessage: (raw) => {
+      // 1) Topic-based fan-out for new subscribers (Task 0.4).
+      // Run first and isolated so a bad subscriber cannot break the
+      // strict-typed dispatch below.
+      try {
+        const wire = parseWireEvent(raw)
+        const handlers = subscribers.current.get(wire.topic)
+        if (handlers && handlers.size > 0) {
+          for (const h of handlers) {
+            try {
+              h(wire.payload)
+            } catch (err) {
+              console.error("[ws] subscriber threw", err)
+            }
+          }
+        }
+      } catch (err) {
+        // Envelope didn't even parse — fall through to strict dispatch which
+        // will warn via parseWSMessage.
+        console.warn("[ws] wire envelope parse failed", err)
+      }
+
+      // 2) Strict typed dispatch for the legacy/typed message contract.
       const msg = parseWSMessage(raw)
       if (!msg) return
       switch (msg.type) {
@@ -93,15 +144,19 @@ export function WebSocketProvider({
     },
   })
 
-  const value = useMemo<Ctx>(
-    () => ({ status, send, lastMessage }),
-    [status, send, lastMessage],
+  const value = useMemo<WebSocketContextValue>(
+    () => ({ status, send, lastMessage, subscribe }),
+    [status, send, lastMessage, subscribe],
   )
-  return <WSContext.Provider value={value}>{children}</WSContext.Provider>
+  return (
+    <WebSocketContext.Provider value={value}>
+      {children}
+    </WebSocketContext.Provider>
+  )
 }
 
 export function useRealtime() {
-  const ctx = useContext(WSContext)
+  const ctx = useContext(WebSocketContext)
   if (!ctx) throw new Error("useRealtime requires WebSocketProvider")
   return ctx
 }
