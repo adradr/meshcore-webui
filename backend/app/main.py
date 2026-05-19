@@ -31,30 +31,64 @@ async def _ensure_schema() -> None:
     """Apply pending Alembic migrations on every startup.
 
     `Base.metadata.create_all` alone does NOT add columns to existing tables,
-    so it breaks every time the schema evolves (e.g. v1.5's message.pubkey_prefix).
-    Running `alembic upgrade head` makes the schema always match the model.
+    so the schema would silently drift every time a model evolves (e.g. v1.5's
+    `message.pubkey_prefix`). Running `alembic upgrade head` makes the live
+    schema always match the model.
 
-    Falls back to `create_all` if Alembic isn't configured (e.g. fresh dev).
+    Handles three cases:
+      1. Fresh DB (no tables)       → upgrade head creates everything
+      2. Migrated DB (with version) → upgrade head applies any pending revisions
+      3. LEGACY DB (tables created via Base.metadata.create_all but no
+         `alembic_version` row, e.g. anyone upgrading from v1.0–v1.4) →
+         stamp at the BASE revision so subsequent migrations run their
+         column-additions cleanly without colliding on CREATE TABLE.
     """
+    import asyncio
     from pathlib import Path
 
     from alembic import command
     from alembic.config import Config
+    from sqlalchemy import inspect as sa_inspect
 
     repo_root = Path(__file__).resolve().parent.parent
     ini = repo_root / "alembic.ini"
-    if ini.exists():
-        log.info("Running alembic upgrade head")
-        cfg = Config(str(ini))
-        # Alembic env.py reads sqlalchemy.url from app.core.config.settings
-        # (we set_main_option there), so no override needed here.
-        # `command.upgrade` is sync; run in a thread to avoid blocking the loop.
-        import asyncio
-        await asyncio.to_thread(command.upgrade, cfg, "head")
-    else:
+    if not ini.exists():
         log.warning("alembic.ini not found at %s — falling back to create_all", ini)
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        return
+
+    cfg = Config(str(ini))
+
+    def _detect_legacy(sync_conn) -> bool:
+        insp = sa_inspect(sync_conn)
+        tables = set(insp.get_table_names())
+        # Legacy = some app table exists (e.g. "messages") but no version table yet.
+        return "messages" in tables and "alembic_version" not in tables
+
+    async with engine.connect() as conn:
+        legacy = await conn.run_sync(_detect_legacy)
+
+    if legacy:
+        # Stamp at the very first revision so upgrade can replay the later
+        # migrations (add_column etc.) without re-running create_table.
+        from alembic.script import ScriptDirectory
+
+        script = ScriptDirectory.from_config(cfg)
+        # Bases are revisions with no parent (initial migrations).
+        bases = script.get_bases()
+        if not bases:
+            log.error("No alembic migrations found — cannot stamp legacy DB")
+        else:
+            base_rev = bases[0]
+            log.warning(
+                "Legacy DB detected (tables exist, no alembic_version). "
+                "Stamping at base revision %s before upgrade.", base_rev
+            )
+            await asyncio.to_thread(command.stamp, cfg, base_rev)
+
+    log.info("Running alembic upgrade head")
+    await asyncio.to_thread(command.upgrade, cfg, "head")
 
 
 @asynccontextmanager
