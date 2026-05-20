@@ -264,17 +264,40 @@ class MeshCoreClient:
             raise ConnectionError("MeshCore not connected")
         return self._mc
 
-    async def get_stats_radio(self):
-        """Poll device radio stats (noise floor, last RSSI/SNR, air time).
+    async def get_stats_radio(self) -> dict:
+        """Local radio stats: noise_floor (dBm), last_rssi (dBm),
+        last_snr (dB), tx_air_secs, rx_air_secs.
 
-        Returns the meshcore `Event` from `commands.get_stats_radio()`, or
-        `None` if the client isn't connected yet. Callers (e.g. NoisePoller)
-        are responsible for surfacing the payload to subscribers — this method
-        does NOT go through the event dispatcher.
+        Raises ConnectionError if not connected; RuntimeError("stats_radio
+        unavailable") on lib failure or EventType.ERROR. Used both by the
+        NoisePoller (which catches and skips the tick) and the diagnostic
+        orchestrator (which surfaces the failure as a NO_RESPONSE step).
         """
-        if self._mc is None:
-            return None
-        return await self._mc.commands.get_stats_radio()
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_stats_radio()
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("stats_radio unavailable")
+            return dict(ev.payload)
+
+    async def get_stats_core(self) -> dict:
+        """Local companion stats: battery_mv, uptime_secs, errors, queue_len."""
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_stats_core()
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("stats_core unavailable")
+            return dict(ev.payload)
+
+    async def get_stats_packets(self) -> dict:
+        """Local packet counters since boot: recv, sent, flood_tx/rx,
+        direct_tx/rx, plus optional recv_errors on firmware >=1.12.0."""
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_stats_packets()
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("stats_packets unavailable")
+            return dict(ev.payload)
 
     async def broadcast_wire_event(self, wire_event: WireEvent) -> None:
         """Push a synthesized WireEvent to all WS subscribers.

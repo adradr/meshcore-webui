@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -13,15 +13,14 @@ from app.services.noise_poller import NoisePoller
 async def test_poller_broadcasts_and_buffers():
     client = MeshCoreClient(host="x", port=5000)
     queue = client.subscribe()
-    fake_event = MagicMock()
-    fake_event.payload = {
+    # Unified client returns the Event.payload dict directly (or raises).
+    client.get_stats_radio = AsyncMock(return_value={
         "noise_floor": -120,
         "last_rssi": -90,
         "last_snr": 3.0,
         "tx_air_secs": 1.0,
         "rx_air_secs": 2.0,
-    }
-    client.get_stats_radio = AsyncMock(return_value=fake_event)
+    })
 
     poller = NoisePoller(client, interval_s=0.05, ring_capacity=10)
     await poller.start()
@@ -56,16 +55,17 @@ async def test_poller_survives_single_failure():
     async def flaky():
         call_count[0] += 1
         if call_count[0] == 2:
-            raise RuntimeError("simulated boom")
-        fake = MagicMock()
-        fake.payload = {
+            # Simulate a non-routine error (NOT ConnectionError /
+            # "stats_radio unavailable" — those are skip-silently). The
+            # outer loop must catch it and continue.
+            raise ValueError("simulated boom")
+        return {
             "noise_floor": -120,
             "last_rssi": 0,
             "last_snr": 0,
             "tx_air_secs": 0,
             "rx_air_secs": 0,
         }
-        return fake
 
     client.get_stats_radio = flaky
     poller = NoisePoller(client, interval_s=0.05)
@@ -84,7 +84,9 @@ async def test_poller_survives_single_failure():
 @pytest.mark.asyncio
 async def test_poller_stop_is_idempotent():
     client = MeshCoreClient(host="x", port=5000)
-    client.get_stats_radio = AsyncMock(return_value=None)
+    client.get_stats_radio = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected")
+    )
     poller = NoisePoller(client, interval_s=0.05)
     await poller.start()
     await poller.stop()
@@ -94,7 +96,9 @@ async def test_poller_stop_is_idempotent():
 @pytest.mark.asyncio
 async def test_poller_start_is_idempotent():
     client = MeshCoreClient(host="x", port=5000)
-    client.get_stats_radio = AsyncMock(return_value=None)
+    client.get_stats_radio = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected")
+    )
     poller = NoisePoller(client, interval_s=0.05)
     await poller.start()
     first_task = poller._task
@@ -106,15 +110,13 @@ async def test_poller_start_is_idempotent():
 @pytest.mark.asyncio
 async def test_poller_ring_buffer_trims():
     client = MeshCoreClient(host="x", port=5000)
-    fake = MagicMock()
-    fake.payload = {
+    client.get_stats_radio = AsyncMock(return_value={
         "noise_floor": -120,
         "last_rssi": 0,
         "last_snr": 0,
         "tx_air_secs": 0,
         "rx_air_secs": 0,
-    }
-    client.get_stats_radio = AsyncMock(return_value=fake)
+    })
     poller = NoisePoller(client, interval_s=0.01, ring_capacity=3)
     await poller.start()
     await asyncio.sleep(0.15)
@@ -124,10 +126,31 @@ async def test_poller_ring_buffer_trims():
 
 @pytest.mark.asyncio
 async def test_poller_skips_when_client_disconnected():
-    """When MeshCoreClient.get_stats_radio() returns None, no broadcast happens."""
+    """When get_stats_radio raises ConnectionError, no broadcast happens."""
     client = MeshCoreClient(host="x", port=5000)
     queue = client.subscribe()
-    client.get_stats_radio = AsyncMock(return_value=None)
+    client.get_stats_radio = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected")
+    )
+
+    poller = NoisePoller(client, interval_s=0.02)
+    await poller.start()
+    await asyncio.sleep(0.08)
+    await poller.stop()
+
+    assert poller.snapshot() == []
+    assert queue.empty()
+
+
+@pytest.mark.asyncio
+async def test_poller_skips_when_stats_unavailable():
+    """When get_stats_radio raises RuntimeError('stats_radio unavailable'),
+    the poller treats it as an expected transient failure and skips."""
+    client = MeshCoreClient(host="x", port=5000)
+    queue = client.subscribe()
+    client.get_stats_radio = AsyncMock(
+        side_effect=RuntimeError("stats_radio unavailable")
+    )
 
     poller = NoisePoller(client, interval_s=0.02)
     await poller.start()
@@ -164,7 +187,8 @@ async def test_meshcore_client_broadcast_wire_event_reaches_subscribers():
 
 
 @pytest.mark.asyncio
-async def test_meshcore_client_get_stats_radio_none_when_not_connected():
+async def test_meshcore_client_get_stats_radio_raises_on_not_connected():
     client = MeshCoreClient(host="x", port=5000)
     assert client._mc is None  # sanity
-    assert await client.get_stats_radio() is None
+    with pytest.raises(ConnectionError, match="not connected"):
+        await client.get_stats_radio()

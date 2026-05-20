@@ -505,3 +505,198 @@ class TestRxLogSanitization:
         wire = await asyncio.wait_for(queue.get(), timeout=1.0)
         # No magic — payload reaches subscribers as-is for non-rx-log events
         assert wire.payload == {"text": "hello"}
+
+
+class TestGetStatsRadio:
+    """Unified `get_stats_radio` — lock + raise + dict payload.
+
+    Replaces the old Event-returning shape. Used by both the NoisePoller
+    (which catches and skips) and the diagnostic orchestrator (which
+    surfaces failures as NO_RESPONSE steps).
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_payload_dict_on_success(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.STATS_RADIO
+        fake_ev.payload = {
+            "noise_floor": -118,
+            "last_rssi": -85,
+            "last_snr": 7.5,
+            "tx_air_secs": 1.25,
+            "rx_air_secs": 2.5,
+        }
+        fake_mc.commands.get_stats_radio = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        result = await client.get_stats_radio()
+        assert result == {
+            "noise_floor": -118,
+            "last_rssi": -85,
+            "last_snr": 7.5,
+            "tx_air_secs": 1.25,
+            "rx_air_secs": 2.5,
+        }
+        fake_mc.commands.get_stats_radio.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_error_event(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.ERROR
+        fake_ev.payload = {"error": "device busy"}
+        fake_mc.commands.get_stats_radio = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_radio unavailable"):
+            await client.get_stats_radio()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_none_event(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.get_stats_radio = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_radio unavailable"):
+            await client.get_stats_radio()
+
+    @pytest.mark.asyncio
+    async def test_raises_connection_error_when_not_connected(self):
+        client = MeshCoreClient(host="x", port=5000)
+        assert client._mc is None  # sanity
+        with pytest.raises(ConnectionError, match="not connected"):
+            await client.get_stats_radio()
+
+
+class TestGetStatsCore:
+    """Unified `get_stats_core` — battery, uptime, errors, queue_len."""
+
+    @pytest.mark.asyncio
+    async def test_returns_payload_dict_on_success(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.STATS_CORE
+        fake_ev.payload = {
+            "battery_mv": 3850,
+            "uptime_secs": 12345,
+            "errors": 0,
+            "queue_len": 3,
+        }
+        fake_mc.commands.get_stats_core = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        result = await client.get_stats_core()
+        assert result == {
+            "battery_mv": 3850,
+            "uptime_secs": 12345,
+            "errors": 0,
+            "queue_len": 3,
+        }
+        fake_mc.commands.get_stats_core.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_error_event(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.ERROR
+        fake_ev.payload = {"error": "device busy"}
+        fake_mc.commands.get_stats_core = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_core unavailable"):
+            await client.get_stats_core()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_none_event(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.get_stats_core = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_core unavailable"):
+            await client.get_stats_core()
+
+    @pytest.mark.asyncio
+    async def test_raises_connection_error_when_not_connected(self):
+        client = MeshCoreClient(host="x", port=5000)
+        with pytest.raises(ConnectionError, match="not connected"):
+            await client.get_stats_core()
+
+
+class TestGetStatsPackets:
+    """Unified `get_stats_packets` — per-boot packet counters."""
+
+    @pytest.mark.asyncio
+    async def test_returns_payload_dict_on_success(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.STATS_PACKETS
+        fake_ev.payload = {
+            "recv": 1024,
+            "sent": 512,
+            "flood_tx": 100,
+            "flood_rx": 200,
+            "direct_tx": 50,
+            "direct_rx": 75,
+            "recv_errors": 2,
+        }
+        fake_mc.commands.get_stats_packets = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        result = await client.get_stats_packets()
+        assert result["recv"] == 1024
+        assert result["sent"] == 512
+        assert result["flood_tx"] == 100
+        assert result["flood_rx"] == 200
+        assert result["direct_tx"] == 50
+        assert result["direct_rx"] == 75
+        assert result["recv_errors"] == 2
+        fake_mc.commands.get_stats_packets.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_error_event(self):
+        from meshcore import EventType
+
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_ev = MagicMock()
+        fake_ev.type = EventType.ERROR
+        fake_ev.payload = {"error": "device busy"}
+        fake_mc.commands.get_stats_packets = AsyncMock(return_value=fake_ev)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_packets unavailable"):
+            await client.get_stats_packets()
+
+    @pytest.mark.asyncio
+    async def test_raises_runtime_error_on_none_event(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.get_stats_packets = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="stats_packets unavailable"):
+            await client.get_stats_packets()
+
+    @pytest.mark.asyncio
+    async def test_raises_connection_error_when_not_connected(self):
+        client = MeshCoreClient(host="x", port=5000)
+        with pytest.raises(ConnectionError, match="not connected"):
+            await client.get_stats_packets()

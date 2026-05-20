@@ -94,10 +94,14 @@ class NoisePoller:
                 continue
 
     async def _poll_once(self) -> None:
-        ev = await self._client.get_stats_radio()
-        if ev is None:
+        try:
+            raw = await self._client.get_stats_radio()
+        except (ConnectionError, RuntimeError):
+            # Expected on disconnect or transient lib failure — skip this
+            # tick. The outer loop logs at WARNING for anything unexpected;
+            # these two are routine.
             return
-        payload = self._payload_from_event(ev)
+        payload = self._payload_from_event_payload(raw)
         if payload is None:
             return
         self._ring.append(payload)
@@ -106,12 +110,14 @@ class NoisePoller:
         )
 
     @staticmethod
-    def _payload_from_event(ev: Any) -> dict[str, Any] | None:
-        """Translate a STATS_RADIO event into the wire payload + timestamp."""
-        raw = getattr(ev, "payload", None) or {}
-        # The meshcore lib returns a plain dict, but be defensive in case
-        # it ever wraps with something else.
-        if not hasattr(raw, "get"):
+    def _payload_from_event_payload(raw: Any) -> dict[str, Any] | None:
+        """Translate a STATS_RADIO payload dict into the wire payload + timestamp.
+
+        The unified `MeshCoreClient.get_stats_radio` now returns the
+        meshcore `Event.payload` dict directly (or raises). Be defensive
+        in case the lib ever returns something without `.get`.
+        """
+        if not raw or not hasattr(raw, "get"):
             return None
         return {
             "noise_floor": raw.get("noise_floor"),
