@@ -102,7 +102,11 @@ async def diagnose_link(
             status_code=503, detail="MeshCore client not initialised",
         )
 
-    log.info("Diagnostic requested by UI for target pubkey=%s", pubkey)
+    # Normalise once so the response body and every WS broadcast attribute
+    # carry the same string. UI subscribers filter by attributes["pubkey"];
+    # a case mismatch would silently drop matching broadcasts.
+    pubkey_norm = pubkey.lower()
+    log.info("Diagnostic requested by UI for target pubkey=%s", pubkey_norm)
 
     orch = DiagnosticOrchestrator(client)
     started = datetime.now(timezone.utc)
@@ -117,7 +121,7 @@ async def diagnose_link(
             type="diagnostic.step",
             payload=step.model_dump(mode="json"),
             topic="diagnostic",
-            attributes={"pubkey": pubkey, "step": step.step},
+            attributes={"pubkey": pubkey_norm, "step": step.step},
         )
         await client.broadcast_wire_event(wire_event)
 
@@ -125,7 +129,7 @@ async def diagnose_link(
     verdict, verdict_detail = _placeholder_verdict(steps)
 
     return DiagnosticReport(
-        target_pubkey=pubkey.lower(),
+        target_pubkey=pubkey_norm,
         target_name=None,
         contact_type=None,
         started_at=started,

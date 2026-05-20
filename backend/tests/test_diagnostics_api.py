@@ -164,6 +164,27 @@ async def test_diagnose_link_broadcasts_step_events_to_ws_subscribers(client):
 
 
 @pytest.mark.asyncio
+async def test_diagnose_link_lowercases_pubkey_in_body_and_ws(client):
+    """Uppercase pubkey input must normalize to lowercase in BOTH the
+    response body AND every WS broadcast attribute. UI subscribers filter
+    on attributes['pubkey']; a case mismatch would silently drop events."""
+    fake = _make_fake_client(
+        radio={"rx_count": 1},
+        core={"uptime": 2},
+        packets={"tx": 3},
+    )
+    upper = "AA" * 32
+    with _meshcore_on_state(fake):
+        r = await client.post(f"/api/diagnostics/{upper}/link", json={})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["target_pubkey"] == "aa" * 32
+        events = [call.args[0] for call in fake.broadcast_wire_event.await_args_list]
+        for ev in events:
+            assert ev.attributes["pubkey"] == "aa" * 32
+
+
+@pytest.mark.asyncio
 async def test_diagnose_link_mixed_step_results_verdict_is_inconclusive(client):
     """Partial failure (ConnectionError on radio) -> verdict 'inconclusive'."""
     fake = _make_fake_client(
