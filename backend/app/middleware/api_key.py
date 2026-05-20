@@ -19,7 +19,13 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     #   public. Gating it created a chicken-and-egg problem for first-time
     #   push enrollment from any origin where the user hadn't yet pasted the
     #   API key in Settings.
-    EXEMPT_API_PATHS = ("/api/health", "/api/push/vapid-public-key")
+    # • /api/auth/info — the SPA hits this on boot to decide whether to show
+    #   the login gate; it has to be reachable *before* the user has set a key.
+    EXEMPT_API_PATHS = (
+        "/api/health",
+        "/api/push/vapid-public-key",
+        "/api/auth/info",
+    )
 
     async def dispatch(self, request: Request, call_next):
         if settings.api_key is None:

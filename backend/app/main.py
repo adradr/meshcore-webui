@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth import router as auth_router
 from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
 from app.api.conversations import router as conversations_router
@@ -204,6 +205,7 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    app.include_router(auth_router)
     app.include_router(push_router)
     app.include_router(ws_router)
     app.include_router(device_router)
