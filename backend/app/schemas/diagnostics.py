@@ -52,3 +52,17 @@ class DiagnosticReport(BaseModel):
     steps: list[StepResult]
     verdict: str
     verdict_detail: str
+
+
+class DiagnosticRunRequest(BaseModel):
+    """Request body for ``POST /api/diagnostics/{pubkey}/link``.
+
+    Phase 1 only supports local-stack probes; ``include_remote`` is wired
+    through but rejected with HTTP 501 until Phase 2 lands the remote
+    probe steps (advert, ping, trace, sample chat). Defaulting to
+    ``False`` keeps the contract honest: callers must opt in to the
+    Phase-2 behaviour, and the API tells them upfront when that behaviour
+    isn't available yet.
+    """
+
+    include_remote: bool = False
