@@ -5,6 +5,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
+import { notifyError } from "@/lib/notify"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { ChannelAvatar } from "@/components/channel-avatar"
 import { useContacts, type Contact } from "@/features/contacts/queries"
@@ -156,8 +157,7 @@ function ThreadsHeader() {
                   r.marked_read === 1 ? "" : "s"
                 } as read`,
               ),
-            onError: (e) =>
-              toast.error(e instanceof Error ? e.message : "Failed"),
+            onError: (e) => notifyError("Mark all read", e),
           })
         }}
         title="Mark all conversations as read"

@@ -5,6 +5,7 @@ import type { ReactNode } from "react"
 
 vi.mock("@/lib/api", () => ({
   api: { post: vi.fn() },
+  isApiError: (e: unknown): boolean => e instanceof Error && "status" in e,
 }))
 
 vi.mock("sonner", () => ({
@@ -90,7 +91,7 @@ describe("useLosCompute", () => {
     })
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(toast.error).toHaveBeenCalledWith(
-      expect.stringContaining("Line-of-sight calculation failed"),
+      expect.stringContaining("Line-of-sight calculation"),
     )
   })
 })

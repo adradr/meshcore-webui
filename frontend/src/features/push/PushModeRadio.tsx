@@ -1,6 +1,7 @@
 import { toast } from "sonner"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { notifyError } from "@/lib/notify"
 import {
   usePushMode,
   useSetPushMode,
@@ -22,8 +23,7 @@ export function PushModeRadio() {
   const onChange = (v: string) => {
     setPushMode.mutate(v as PushMode, {
       onSuccess: () => toast.success("Push filter saved"),
-      onError: (e) =>
-        toast.error(e instanceof Error ? e.message : "Failed"),
+      onError: (e) => notifyError("Push filter save", e),
     })
   }
 

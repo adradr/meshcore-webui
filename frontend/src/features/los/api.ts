@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { z } from "zod"
 import { api } from "@/lib/api"
+import { notifyError } from "@/lib/notify"
 
 export const LosPointSchema = z.object({
   lat: z.number(),
@@ -45,8 +45,7 @@ export function useLosCompute() {
       try {
         return await api.post<LosOut>("/api/los/compute", vars, LosOutSchema)
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        toast.error(`Line-of-sight calculation failed: ${msg}`)
+        notifyError("Line-of-sight calculation", e)
         throw e
       }
     },

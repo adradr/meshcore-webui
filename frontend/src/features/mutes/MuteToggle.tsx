@@ -8,6 +8,7 @@
 import { Bell, BellOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { notifyError } from "@/lib/notify"
 import { useIsMuted, useToggleMute, type MuteKind } from "./queries"
 
 interface Props {
@@ -56,8 +57,7 @@ export function MuteToggle({
                   ? `Unmuted ${name ?? kind}`
                   : `Muted ${name ?? kind} — push notifications off`,
               ),
-            onError: (err) =>
-              toast.error(err instanceof Error ? err.message : "Failed"),
+            onError: (err) => notifyError(muted ? "Unmute" : "Mute", err),
           },
         )
       }}

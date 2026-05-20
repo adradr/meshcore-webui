@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { useTheme } from "@/components/theme-provider"
+import { notifyError } from "@/lib/notify"
 import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
 import { MutedList } from "@/features/mutes/MutedList"
@@ -55,7 +56,7 @@ export function SettingsPage() {
         toast.success("Notifications on")
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed")
+      notifyError(pushOn ? "Turn off notifications" : "Turn on notifications", e)
     }
   }
 

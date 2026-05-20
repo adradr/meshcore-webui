@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { notifyError } from "@/lib/notify"
 
 interface SendArgs {
   contactPubKey?: string
@@ -70,7 +70,7 @@ export function useSendMessage() {
     },
     onError: (err, _v, ctx) => {
       if (ctx) qc.setQueryData(ctx.key, ctx.previous)
-      toast.error(err instanceof Error ? err.message : "Send failed")
+      notifyError("Send", err)
     },
     onSettled: (_d, _e, _v, ctx) => {
       if (ctx) qc.invalidateQueries({ queryKey: ctx.key })

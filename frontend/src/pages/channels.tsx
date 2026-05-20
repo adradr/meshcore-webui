@@ -2,6 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { Plus, Trash2 } from "lucide-react"
+import { notifyError } from "@/lib/notify"
 import {
   useAddChannel,
   useChannels,
@@ -44,8 +45,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
     }
     remove.mutate(channel.channel_idx, {
       onSuccess: () => toast.success(`Removed channel ${name}`),
-      onError: (err) =>
-        toast.error(err instanceof Error ? err.message : "Remove failed"),
+      onError: (err) => notifyError("Remove channel", err),
     })
   }
 
@@ -113,8 +113,7 @@ function AddChannelDialog() {
           setName("")
           setPsk("")
         },
-        onError: (err) =>
-          toast.error(err instanceof Error ? err.message : "Add failed"),
+        onError: (err) => notifyError("Add channel", err),
       },
     )
   }

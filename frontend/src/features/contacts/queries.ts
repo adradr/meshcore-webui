@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { notifyError } from "@/lib/notify"
 import { z } from "zod"
 
 const ContactSchema = z.looseObject({
@@ -47,12 +48,6 @@ export function useContact(pubkey: string | undefined) {
   return { contact, ...rest }
 }
 
-function showError(prefix: string, e: unknown): never {
-  const msg = e instanceof Error ? e.message : "Unknown error"
-  toast.error(`${prefix}: ${msg}`)
-  throw e
-}
-
 export function useImportContact() {
   const qc = useQueryClient()
   return useMutation({
@@ -63,7 +58,7 @@ export function useImportContact() {
       toast.success("Contact imported")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
-    onError: (e) => showError("Import failed", e),
+    onError: (e) => notifyError("Import", e),
   })
 }
 
@@ -76,7 +71,7 @@ export function useDeleteContact() {
       toast.success("Contact removed")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
-    onError: (e) => showError("Remove failed", e),
+    onError: (e) => notifyError("Remove", e),
   })
 }
 
@@ -84,7 +79,7 @@ export function useShareContact() {
   return useMutation({
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.get(`/api/contacts/${pubkey}/share`, ShareResponse),
-    onError: (e) => showError("Share failed", e),
+    onError: (e) => notifyError("Share", e),
   })
 }
 
@@ -118,7 +113,7 @@ export function useSetFlags() {
     },
     onError: (e, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(["contacts"], ctx.prev)
-      showError("Flags update failed", e)
+      notifyError("Flags update", e)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["contacts"] })
@@ -131,7 +126,7 @@ export function useRequestTelemetry() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/telemetry`, {}, TelemetryResponse),
     onSuccess: () => toast.success("Telemetry received"),
-    onError: (e) => showError("Telemetry failed", e),
+    onError: (e) => notifyError("Telemetry", e),
   })
 }
 
@@ -140,7 +135,7 @@ export function usePingContact() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/ping`, {}, PingResponse),
     onSuccess: () => toast.success("Ping received"),
-    onError: (e) => showError("Ping failed", e),
+    onError: (e) => notifyError("Ping", e),
   })
 }
 
@@ -149,7 +144,7 @@ export function useRequestACL() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/acl`, {}, AclResponse),
     onSuccess: () => toast.success("ACL received"),
-    onError: (e) => showError("ACL request failed", e),
+    onError: (e) => notifyError("ACL request", e),
   })
 }
 
@@ -162,7 +157,7 @@ export function useDiscoverPath() {
       toast.success("Path discovery sent")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
-    onError: (e) => showError("Path discover failed", e),
+    onError: (e) => notifyError("Path discover", e),
   })
 }
 
@@ -175,6 +170,6 @@ export function useResetPath() {
       toast.success("Path reset to flood")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
-    onError: (e) => showError("Path reset failed", e),
+    onError: (e) => notifyError("Path reset", e),
   })
 }

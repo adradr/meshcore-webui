@@ -1,5 +1,15 @@
 import { z } from "zod"
 
+export interface ApiError extends Error {
+  status?: number
+  statusText?: string
+  detail?: string
+}
+
+export function isApiError(e: unknown): e is ApiError {
+  return e instanceof Error && "status" in e
+}
+
 function getApiKey(): string | null {
   if (typeof localStorage === "undefined") return null
   return localStorage.getItem("apiKey")
@@ -18,10 +28,6 @@ async function request<T>(
 
   const res = await fetch(path, { ...opts, headers })
   if (!res.ok) {
-    // Surface the backend's detail message (typically FastAPI's `detail`)
-    // so error toasts everywhere in the app become actionable instead of
-    // showing a bare "502 Bad Gateway". This is the single point that
-    // unlocks meaningful errors for every mutation in the codebase.
     let detail = ""
     try {
       const body = await res.text()
@@ -37,13 +43,18 @@ async function request<T>(
         }
       }
     } catch {
-      // ignore body read errors — we'll fall back to the status line
+      // ignore
     }
+    // `message` keeps the full technical string for logs / fallbacks; the
+    // structured `status` and `detail` fields let `notifyError` produce a
+    // short user-friendly toast without re-parsing the message.
     const msg = detail
       ? `${res.status} ${res.statusText}: ${detail}`
       : `${res.status} ${res.statusText}`
-    const err = new Error(msg) as Error & { status?: number }
+    const err = new Error(msg) as ApiError
     err.status = res.status
+    err.detail = detail
+    err.statusText = res.statusText
     throw err
   }
   if (res.status === 204) return undefined as T

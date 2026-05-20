@@ -5,6 +5,7 @@ import type { ReactNode } from "react"
 
 vi.mock("@/lib/api", () => ({
   api: { post: vi.fn() },
+  isApiError: (e: unknown): boolean => e instanceof Error && "status" in e,
 }))
 
 vi.mock("sonner", () => ({
@@ -76,7 +77,7 @@ describe("useTracePath", () => {
     result.current.mutate("aa".repeat(32))
     await waitFor(() => expect(result.current.isError).toBe(true))
     expect(toast.error).toHaveBeenCalledWith(
-      expect.stringContaining("Trace failed"),
+      expect.stringContaining("Trace"),
     )
   })
 })

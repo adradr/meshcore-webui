@@ -1,6 +1,7 @@
 import { BellOff } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { notifyError } from "@/lib/notify"
 import { useMutes, useToggleMute } from "@/features/mutes/queries"
 import { useContacts } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
@@ -71,8 +72,7 @@ export function MutedList() {
                 { kind: m.kind, key: m.key, muted: false },
                 {
                   onSuccess: () => toast.success("Unmuted"),
-                  onError: (e) =>
-                    toast.error(e instanceof Error ? e.message : "Failed"),
+                  onError: (e) => notifyError("Unmute", e),
                 },
               )
             }

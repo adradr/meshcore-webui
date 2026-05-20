@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { z } from "zod"
 import { api } from "@/lib/api"
+import { notifyError } from "@/lib/notify"
 
 const DeviceInfoSchema = z.looseObject({
   "fw ver": z.number().optional(),
@@ -52,7 +53,6 @@ export function useSendAdvert() {
       api.post(`/api/device/advert?flood=${flood}`, {}),
     onSuccess: (_, flood) =>
       toast.success(flood ? "Flood advert sent" : "Advert sent"),
-    onError: (e) =>
-      toast.error(e instanceof Error ? e.message : "Advert failed"),
+    onError: (e) => notifyError("Advert", e),
   })
 }

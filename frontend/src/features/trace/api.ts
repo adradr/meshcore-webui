@@ -1,7 +1,7 @@
 import { useMutation } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { z } from "zod"
 import { api } from "@/lib/api"
+import { notifyError } from "@/lib/notify"
 import { useWsTopic } from "@/realtime/useWsTopic"
 
 export const TraceHopCandidateSchema = z.object({
@@ -43,8 +43,7 @@ export function useTracePath() {
           TraceOutSchema,
         )
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        toast.error(`Trace failed: ${msg}`)
+        notifyError("Trace", e)
         throw e
       }
     },
