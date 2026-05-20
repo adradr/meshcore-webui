@@ -97,7 +97,12 @@ export function Layout() {
                 <Icon className="h-5 w-5" />
                 {to === "/" && total > 0 && (
                   <span
-                    className="absolute -right-2 -top-1.5 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-semibold leading-none tabular-nums text-destructive-foreground"
+                    // iOS-native badge styling: solid red-500 + white text +
+                    // ring matching the nav bg for separation. Previously used
+                    // `bg-destructive text-destructive-foreground` but our
+                    // theme never defines `--destructive-foreground`, so the
+                    // text rendered as dark-gray-on-dark-red = invisible.
+                    className="absolute -right-2 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none tabular-nums text-white ring-2 ring-background"
                     aria-label={`${total} unread messages`}
                   >
                     {total > 99 ? "99+" : total}
