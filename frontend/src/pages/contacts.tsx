@@ -4,10 +4,19 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import { Plus, Search, Star } from "lucide-react"
 import {
   useContacts,
+  useContactsStats,
   useImportContact,
   useSetFlags,
   type Contact,
 } from "@/features/contacts/queries"
+import {
+  CONTACT_SORTS,
+  CONTACT_SORT_LABELS,
+  loadContactSort,
+  saveContactSort,
+  sortContacts,
+  type ContactSort,
+} from "@/features/contacts/sort"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,6 +31,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { PageShell } from "@/components/page-shell"
@@ -114,29 +130,39 @@ function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 
 export function ContactsPage() {
   const { data, isLoading, isError, error } = useContacts()
+  const { data: stats } = useContactsStats()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const parentRef = useRef<HTMLDivElement>(null)
   // Initial filter from ?q=... so chat sender clicks can deep-link a search
   const [filter, setFilter] = useState(() => searchParams.get("q") ?? "")
   const [importOpen, setImportOpen] = useState(false)
+  const [sort, setSortState] = useState<ContactSort>(loadContactSort)
   const flags = useSetFlags()
+
+  const setSort = (mode: ContactSort) => {
+    setSortState(mode)
+    saveContactSort(mode)
+  }
 
   const sorted: ContactRow[] = useMemo(() => {
     if (!data) return []
-    return Object.entries(data)
-      .map(([pubKey, c]: [string, Contact]) => ({
-        pubKey: c.public_key ?? pubKey,
-        name: c.adv_name ?? pubKey.slice(0, 8),
-        type: c.type ?? 0,
-        starred: Boolean((c.flags ?? 0) & STAR_FLAG),
-        lastAdvert: c.last_advert ?? null,
-      }))
-      .sort((a, b) => {
-        if (a.starred !== b.starred) return a.starred ? -1 : 1
-        return a.name.localeCompare(b.name)
-      })
-  }, [data])
+    const items = Object.entries(data).map(
+      ([pubKey, c]: [string, Contact]) => ({
+        pubkey: c.public_key ?? pubKey,
+        contact: c,
+        stats: stats?.[c.public_key ?? pubKey],
+      }),
+    )
+    const ordered = sortContacts(items, sort)
+    return ordered.map(({ pubkey, contact }) => ({
+      pubKey: pubkey,
+      name: contact.adv_name ?? pubkey.slice(0, 8),
+      type: contact.type ?? 0,
+      starred: Boolean((contact.flags ?? 0) & STAR_FLAG),
+      lastAdvert: contact.last_advert ?? null,
+    }))
+  }, [data, stats, sort])
 
   const filtered: ContactRow[] = useMemo(() => {
     const q = filter.trim().toLowerCase()
@@ -218,6 +244,21 @@ export function ContactsPage() {
             aria-label="Search contacts"
           />
         </div>
+        <Select value={sort} onValueChange={(v) => setSort(v as ContactSort)}>
+          <SelectTrigger
+            aria-label="Sort contacts"
+            className="h-9 w-[140px] shrink-0"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            {CONTACT_SORTS.map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                {CONTACT_SORT_LABELS[mode]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Badge variant="secondary" className="shrink-0 tabular-nums">
           {filtered.length} of {sorted.length}
         </Badge>

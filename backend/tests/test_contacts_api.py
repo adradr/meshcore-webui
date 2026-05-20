@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import datetime as dt
 from unittest.mock import AsyncMock
 
 import pytest
 
+from app.db.models import Message
 from app.main import app
 
 
@@ -340,3 +342,76 @@ async def test_discover_path_endpoint_returns_504_on_no_reply(client):
         assert r.status_code == 504
     finally:
         _uninstall_mock_client()
+
+
+# ----- v1.12 contacts stats endpoint -----
+
+
+@pytest.mark.asyncio
+async def test_contacts_stats_empty_when_no_messages(client):
+    """Fresh DB → endpoint returns {} (nothing to aggregate)."""
+    r = await client.get("/api/contacts/stats")
+    assert r.status_code == 200
+    assert r.json() == {}
+
+
+@pytest.mark.asyncio
+async def test_contacts_stats_aggregates_per_pubkey(client, db):
+    """Per-pubkey aggregation: count + min/max timestamps over messages.
+
+    Insert 3 messages for pubkey A (in/out/in at three distinct timestamps)
+    and 1 message for pubkey B (out). The endpoint must return the correct
+    msg_count and first/last timestamps for each pubkey.
+    """
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    pk_a = "a" * 64
+    pk_b = "b" * 64
+    a_first = base
+    a_mid = base + dt.timedelta(minutes=5)
+    a_last = base + dt.timedelta(minutes=20)
+    b_only = base + dt.timedelta(minutes=10)
+
+    db.add(Message(msg_type="dm", contact_pub_key=pk_a, direction="in",
+                   text="hello-a-1", timestamp=a_first))
+    db.add(Message(msg_type="dm", contact_pub_key=pk_a, direction="out",
+                   text="hello-a-2", timestamp=a_mid))
+    db.add(Message(msg_type="dm", contact_pub_key=pk_a, direction="in",
+                   text="hello-a-3", timestamp=a_last))
+    db.add(Message(msg_type="dm", contact_pub_key=pk_b, direction="out",
+                   text="hello-b", timestamp=b_only))
+    await db.commit()
+
+    r = await client.get("/api/contacts/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert set(body.keys()) == {pk_a, pk_b}
+
+    # SQLite drops tz info on roundtrip — compare naive datetimes.
+    def _naive(t: dt.datetime) -> dt.datetime:
+        return t.replace(tzinfo=None) if t.tzinfo is not None else t
+
+    a = body[pk_a]
+    assert a["msg_count"] == 3
+    assert _naive(dt.datetime.fromisoformat(a["first_msg_at"])) == _naive(a_first)
+    assert _naive(dt.datetime.fromisoformat(a["last_msg_at"])) == _naive(a_last)
+
+    b = body[pk_b]
+    assert b["msg_count"] == 1
+    assert _naive(dt.datetime.fromisoformat(b["first_msg_at"])) == _naive(b_only)
+    assert _naive(dt.datetime.fromisoformat(b["last_msg_at"])) == _naive(b_only)
+
+
+@pytest.mark.asyncio
+async def test_contacts_stats_excludes_channel_messages(client, db):
+    """Channel messages (contact_pub_key=NULL) must NOT appear in the map."""
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    db.add(Message(msg_type="chan", contact_pub_key=None, channel_idx=0,
+                   direction="in", text="channel-only", timestamp=base))
+    await db.commit()
+
+    r = await client.get("/api/contacts/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {}
+    assert None not in body
+    assert "null" not in body

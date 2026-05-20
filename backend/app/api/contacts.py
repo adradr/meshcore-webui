@@ -1,6 +1,12 @@
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Request, Response
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Message
+from app.db.session import get_db
 from app.schemas.contacts import ContactImportIn, FlagsIn
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
@@ -55,6 +61,38 @@ async def _call(coro):
 async def list_contacts(request: Request) -> dict:
     client = _require_client(request)
     return await _call(client.get_contacts())
+
+
+@router.get("/stats")
+async def contacts_stats(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Per-contact message statistics for sorting the contacts list.
+
+    Returns ``{pubkey_64: {first_msg_at, last_msg_at, msg_count}}``.
+    Computed from the local messages table (DMs only — channel
+    messages are not associated with a contact pubkey). Contacts
+    with zero messages are simply absent from the map; callers
+    handle that by falling back to ``last_advert`` for sort keys.
+    """
+    rows = (await db.execute(
+        select(
+            Message.contact_pub_key.label("pk"),
+            func.min(Message.timestamp).label("first_msg_at"),
+            func.max(Message.timestamp).label("last_msg_at"),
+            func.count(Message.id).label("msg_count"),
+        )
+        .where(Message.contact_pub_key.isnot(None))
+        .group_by(Message.contact_pub_key)
+    )).all()
+    return {
+        r.pk: {
+            "first_msg_at": r.first_msg_at.isoformat() if r.first_msg_at else None,
+            "last_msg_at": r.last_msg_at.isoformat() if r.last_msg_at else None,
+            "msg_count": int(r.msg_count),
+        }
+        for r in rows
+    }
 
 
 @router.post("/import", status_code=201)

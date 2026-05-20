@@ -18,6 +18,16 @@ const ContactSchema = z.looseObject({
 })
 
 const ContactsMap = z.record(z.string(), ContactSchema)
+
+const ContactStatsRowSchema = z.object({
+  first_msg_at: z.string().nullable(),
+  last_msg_at: z.string().nullable(),
+  msg_count: z.number().int().nonnegative(),
+})
+const ContactsStatsMap = z.record(z.string(), ContactStatsRowSchema)
+export type ContactStatsRow = z.infer<typeof ContactStatsRowSchema>
+export type ContactsStatsMap = z.infer<typeof ContactsStatsMap>
+
 const ImportResponse = z.looseObject({
   contact: ContactSchema.optional(),
 }).or(ContactSchema)
@@ -35,6 +45,14 @@ export function useContacts() {
     queryKey: ["contacts"],
     queryFn: () => api.get("/api/contacts", ContactsMap),
     staleTime: 60_000,
+  })
+}
+
+export function useContactsStats() {
+  return useQuery({
+    queryKey: ["contacts", "stats"],
+    queryFn: () => api.get("/api/contacts/stats", ContactsStatsMap),
+    staleTime: 30_000,
   })
 }
 
