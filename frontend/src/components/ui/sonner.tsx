@@ -28,11 +28,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <Loader2Icon className="size-4 animate-spin" />
         ),
       }}
-      // `offset` is a sonner-level inset from the position edge. Add the
-      // device's safe-area-inset-top (iPhone Dynamic Island / notch) so
-      // top-positioned toasts clear the island on standalone PWAs. Falls
-      // back to a sane 16px gap on browsers that don't expose the inset.
+      // Push top toasts below the iPhone Dynamic Island / notch. Sonner
+      // splits this into two props since v1.5:
+      //   - `offset`       → desktop / wide viewports
+      //   - `mobileOffset` → narrow viewports (default <600px)
+      // Both must be set or mobile silently uses sonner's default 16px,
+      // which is below the island on Dynamic Island devices.
       offset={{ top: "calc(env(safe-area-inset-top, 0px) + 16px)" }}
+      mobileOffset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }}
       style={
         {
           "--normal-bg": "var(--popover)",
