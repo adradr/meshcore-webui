@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -103,8 +104,32 @@ async def _ensure_schema() -> None:
     await asyncio.to_thread(command.upgrade, cfg, "head")
 
 
+def _log_effective_config() -> None:
+    """Print effective config + listen URL on boot so 'why isn't it
+    talking to my radio?' / 'where is the UI?' are visible in
+    `docker logs` without `docker exec env` archaeology."""
+    listen_host = os.environ.get("UVICORN_HOST", "0.0.0.0")
+    listen_port = os.environ.get("UVICORN_PORT", "8080")
+    db_url = settings.database_url
+    # Don't print the API key; just whether it's required.
+    key_state = "REQUIRED" if settings.api_key else "DISABLED (open access)"
+    log.info("====== MeshCore WebUI ======")
+    log.info("  listen  : http://%s:%s/", listen_host, listen_port)
+    log.info("  radio   : %s:%d (TCP companion)",
+             settings.meshcore_host, settings.meshcore_port)
+    log.info("  database: %s",
+             db_url if "@" not in db_url else db_url.split("@", 1)[0] + "@…")
+    log.info("  static  : %s", settings.static_dir)
+    log.info("  api key : %s", key_state)
+    log.info("  rx-log persist: %s",
+             "ON" if settings.rx_log_persist else "off")
+    log.info("============================")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _log_effective_config()
+
     log.info("Ensuring database schema")
     await _ensure_schema()
 
