@@ -183,7 +183,7 @@ async def last_diagnostic(
     row = (await db.execute(
         select(DiagnosticRun)
         .where(DiagnosticRun.target_pubkey == pubkey_norm)
-        .order_by(DiagnosticRun.finished_at.desc())
+        .order_by(DiagnosticRun.finished_at.desc(), DiagnosticRun.id.desc())
         .limit(1)
     )).scalar_one_or_none()
     if row is None:
