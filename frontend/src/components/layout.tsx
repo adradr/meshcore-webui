@@ -49,7 +49,19 @@ export function Layout() {
     //   top    → Dynamic Island / notch (otherwise header sits under it on standalone PWA)
     //   bottom → fixed nav (4rem) + home-indicator inset
     <div
-      className="flex h-[100dvh] flex-col"
+      // Viewport-height strategy:
+      //   - `h-[100vh]` everywhere; in standalone PWA mode there's no
+      //     URL bar, so 100vh == full screen (correct from cold start).
+      //   - In mobile Safari (with URL bar), 100dvh is the right dynamic
+      //     value; override via @media (display-mode: browser).
+      // Why not just `h-[100dvh]`: iOS standalone PWA cold-start has a
+      // documented bug where `100dvh` resolves to the SMALL viewport (as if
+      // the URL bar were visible), leaving an empty band below the nav until
+      // a scroll forces a reflow. `100vh` doesn't trigger the bug because
+      // there's no URL-bar concept in standalone mode. Refs:
+      //   https://dev.to/nirazanbasnet/dont-use-100vh-for-mobile-responsive-3o97
+      //   https://www.frontend.fyi/tutorials/finally-a-fix-for-100vh-on-mobile
+      className="flex h-[100vh] flex-col [@media(display-mode:browser)]:h-[100dvh]"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">

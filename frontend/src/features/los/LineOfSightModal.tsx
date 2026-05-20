@@ -239,7 +239,10 @@ export function LineOfSightModal({
         keyboard.
       */}
       <DialogContent
-        className="top-4 max-h-[calc(100dvh-2rem)] translate-y-0 overflow-y-auto sm:top-1/2 sm:max-w-2xl sm:-translate-y-1/2"
+        // 100vh + browser-mode override mirrors layout.tsx — iOS PWA
+        // standalone resolves 100dvh wrong on cold start, leaving the modal
+        // bottom unreachable. 100vh is correct in standalone (no URL bar).
+        className="top-4 max-h-[calc(100vh-2rem)] translate-y-0 overflow-y-auto sm:top-1/2 sm:max-w-2xl sm:-translate-y-1/2 [@media(display-mode:browser)]:max-h-[calc(100dvh-2rem)]"
       >
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-x-1.5 gap-y-1 break-words">

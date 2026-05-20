@@ -96,13 +96,13 @@ export function NoisePanel() {
 
       <div className="min-h-0 flex-1">
         {isLoading ? (
-          <Skeleton className="h-[min(600px,calc(100dvh-14rem))] w-full" />
+          <Skeleton className="h-[min(600px,calc(100vh-14rem))] [@media(display-mode:browser)]:h-[min(600px,calc(100dvh-14rem))] w-full" />
         ) : isError ? (
           <div className="text-sm text-muted-foreground">
             Noise samples unavailable.
           </div>
         ) : (
-          <div className="h-[min(600px,calc(100dvh-14rem))] w-full">
+          <div className="h-[min(600px,calc(100vh-14rem))] [@media(display-mode:browser)]:h-[min(600px,calc(100dvh-14rem))] w-full">
             <NoiseChart
               data={{ t, y }}
               title="Noise floor (rolling)"
