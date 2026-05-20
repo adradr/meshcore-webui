@@ -34,6 +34,7 @@ import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
+import { LinkDiagnosticPanel } from "@/features/diagnostics/LinkDiagnosticPanel"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -617,6 +618,9 @@ export function ContactDetailPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Link diagnostic */}
+        {pubKey && <LinkDiagnosticPanel pubkey={pubKey} />}
 
         {/* Danger zone */}
         <Card className="border-destructive/30">
