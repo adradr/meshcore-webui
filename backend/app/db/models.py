@@ -140,3 +140,27 @@ class RxLogEntry(Base):
         nullable=False,
         index=True,
     )
+
+
+class DiagnosticRun(Base):
+    """One row per completed diagnostic. Stores the full DiagnosticReport
+    JSON for replay + diff-vs-last. The ``report_json`` is opaque to SQL;
+    queries are by (target_pubkey, finished_at).
+
+    ``Text`` (not ``JSON``) is used deliberately so behaviour is identical
+    on SQLite (the production DB) and any future Postgres — and so the
+    JSON payload is round-trip stable via Pydantic's
+    ``model_dump_json`` / ``model_validate_json``.
+    """
+
+    __tablename__ = "diagnostic_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    target_pubkey: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    finished_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True,
+    )
+    verdict: Mapped[str] = mapped_column(String(64), nullable=False)
+    report_json: Mapped[str] = mapped_column(Text, nullable=False)

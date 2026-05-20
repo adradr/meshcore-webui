@@ -22,7 +22,9 @@ from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from sqlalchemy import func, select
 
+from app.db.models import DiagnosticRun
 from app.main import app
 from app.services.meshcore_client import StatsUnavailable, WireEvent
 
@@ -223,3 +225,120 @@ async def test_diagnose_link_all_steps_fail_verdict_is_inconclusive(client):
         assert body["verdict"] == "inconclusive"
         assert "radio may not be connected" in body["verdict_detail"]
         assert all(s["status"] == "no_response" for s in body["steps"])
+
+
+# ---------------------------------------------------------------------------
+# Task 1.6 — persistence + GET /last
+# ---------------------------------------------------------------------------
+#
+# These tests exercise the row insertion that happens on every successful
+# POST and the new ``GET /api/diagnostics/{pubkey}/last`` endpoint. The
+# ``client`` fixture wires an in-memory SQLite engine with all of ``Base``'s
+# tables created — including ``diagnostic_runs`` — so we do NOT run
+# Alembic in tests. ``session_factory`` returns AsyncSession instances
+# bound to that same engine so we can inspect rows directly.
+
+
+@pytest.mark.asyncio
+async def test_diagnose_link_persists_run(client, session_factory):
+    """A successful POST must insert exactly one row whose target_pubkey
+    is lowercased and whose verdict matches the API response."""
+    fake = _make_fake_client(
+        radio={"rx_count": 1},
+        core={"uptime": 2},
+        packets={"tx": 3},
+    )
+    upper = "AB" * 32
+    with _meshcore_on_state(fake):
+        r = await client.post(f"/api/diagnostics/{upper}/link", json={})
+        assert r.status_code == 200, r.text
+        api_verdict = r.json()["verdict"]
+
+    async with session_factory() as session:
+        count = (await session.execute(
+            select(func.count()).select_from(DiagnosticRun)
+        )).scalar_one()
+        assert count == 1
+
+        row = (await session.execute(select(DiagnosticRun))).scalar_one()
+        assert row.target_pubkey == "ab" * 32
+        assert row.verdict == api_verdict
+        # The JSON payload must round-trip back to a valid DiagnosticReport.
+        from app.schemas.diagnostics import DiagnosticReport
+        report = DiagnosticReport.model_validate_json(row.report_json)
+        assert report.target_pubkey == "ab" * 32
+        assert report.verdict == api_verdict
+
+
+@pytest.mark.asyncio
+async def test_last_diagnostic_returns_404_when_empty(client):
+    """No rows for this pubkey -> 404."""
+    r = await client.get(f"/api/diagnostics/{'cd' * 32}/last")
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_last_diagnostic_returns_latest_after_one_run(client):
+    """After one POST the GET returns a body equal to the POST response."""
+    fake = _make_fake_client(
+        radio={"rx_count": 1},
+        core={"uptime": 2},
+        packets={"tx": 3},
+    )
+    pubkey = "ef" * 32
+    with _meshcore_on_state(fake):
+        post_resp = await client.post(f"/api/diagnostics/{pubkey}/link", json={})
+        assert post_resp.status_code == 200, post_resp.text
+
+    get_resp = await client.get(f"/api/diagnostics/{pubkey}/last")
+    assert get_resp.status_code == 200, get_resp.text
+    assert get_resp.json() == post_resp.json()
+
+
+@pytest.mark.asyncio
+async def test_last_diagnostic_returns_latest_when_multiple(client):
+    """Two sequential POSTs for the same pubkey -> GET returns the second."""
+    fake = _make_fake_client(
+        radio={"rx_count": 1},
+        core={"uptime": 2},
+        packets={"tx": 3},
+    )
+    pubkey = "11" * 32
+    with _meshcore_on_state(fake):
+        first = await client.post(f"/api/diagnostics/{pubkey}/link", json={})
+        assert first.status_code == 200, first.text
+        second = await client.post(f"/api/diagnostics/{pubkey}/link", json={})
+        assert second.status_code == 200, second.text
+
+    # The two reports differ at minimum in started_at/finished_at, so equality
+    # vs the second body is a strong "we got the latest" signal.
+    get_resp = await client.get(f"/api/diagnostics/{pubkey}/last")
+    assert get_resp.status_code == 200, get_resp.text
+    assert get_resp.json() == second.json()
+    # And explicitly differs from the first run.
+    assert get_resp.json()["finished_at"] != first.json()["finished_at"]
+
+
+@pytest.mark.asyncio
+async def test_last_diagnostic_404_for_other_pubkey(client):
+    """POST for pubkey A; GET /last for pubkey B -> 404."""
+    fake = _make_fake_client(
+        radio={"rx_count": 1},
+        core={"uptime": 2},
+        packets={"tx": 3},
+    )
+    pubkey_a = "22" * 32
+    pubkey_b = "33" * 32
+    with _meshcore_on_state(fake):
+        r = await client.post(f"/api/diagnostics/{pubkey_a}/link", json={})
+        assert r.status_code == 200, r.text
+
+    r = await client.get(f"/api/diagnostics/{pubkey_b}/last")
+    assert r.status_code == 404, r.text
+
+
+@pytest.mark.asyncio
+async def test_last_diagnostic_422_on_bad_pubkey(client):
+    """Pubkey must be 64 hex chars — validated at the Path layer."""
+    r = await client.get("/api/diagnostics/notpubkey/last")
+    assert r.status_code == 422, r.text

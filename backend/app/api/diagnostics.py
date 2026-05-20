@@ -26,9 +26,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import DiagnosticRun
+from app.db.session import get_db
 from app.schemas.diagnostics import (
     DiagnosticReport,
     DiagnosticRunRequest,
@@ -76,6 +81,7 @@ def _placeholder_verdict(steps: list[StepResult]) -> tuple[str, str]:
 async def diagnose_link(
     request: Request,
     body: DiagnosticRunRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
     pubkey: str = Path(
         ..., pattern=_PUBKEY_PATTERN, description="64-char hex pubkey",
     ),
@@ -128,7 +134,7 @@ async def diagnose_link(
     finished = datetime.now(timezone.utc)
     verdict, verdict_detail = _placeholder_verdict(steps)
 
-    return DiagnosticReport(
+    report = DiagnosticReport(
         target_pubkey=pubkey_norm,
         target_name=None,
         contact_type=None,
@@ -138,3 +144,48 @@ async def diagnose_link(
         verdict=verdict,
         verdict_detail=verdict_detail,
     )
+
+    # Persist the full report as JSON so Phase 3 can do diff-vs-last
+    # colouring and the frontend can render a "restored on reload"
+    # affordance without re-running probes. Inserted before returning so
+    # the response we hand the caller is the same one a subsequent GET
+    # /last will replay.
+    db.add(DiagnosticRun(
+        target_pubkey=report.target_pubkey,
+        started_at=report.started_at,
+        finished_at=report.finished_at,
+        verdict=report.verdict,
+        report_json=report.model_dump_json(),
+    ))
+    await db.commit()
+
+    return report
+
+
+@router.get("/{pubkey}/last", response_model=DiagnosticReport)
+async def last_diagnostic(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    pubkey: str = Path(
+        ..., pattern=_PUBKEY_PATTERN, description="64-char hex pubkey",
+    ),
+) -> DiagnosticReport:
+    """Return the most-recent diagnostic for ``pubkey`` (404 if none).
+
+    Lookup is case-insensitive — the stored rows are always lowercase
+    (the POST normalises before insert), so we lowercase the path
+    parameter to match. Ordered by ``finished_at DESC LIMIT 1`` so a
+    fresh run always wins even if the clock is non-monotonic between
+    runs (e.g. NTP adjustment) — the rows are ordered by completion
+    wall-clock, not by ``id``, because completion is the more
+    semantically meaningful "latest" pointer.
+    """
+    pubkey_norm = pubkey.lower()
+    row = (await db.execute(
+        select(DiagnosticRun)
+        .where(DiagnosticRun.target_pubkey == pubkey_norm)
+        .order_by(DiagnosticRun.finished_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(404, "No diagnostic recorded for this pubkey")
+    return DiagnosticReport.model_validate_json(row.report_json)
