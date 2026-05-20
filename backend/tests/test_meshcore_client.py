@@ -228,6 +228,40 @@ class TestRequestTimeouts:
             await client.send_trace(timeout=0.1)
 
 
+class TestReqNeighbours:
+    """`req_neighbours` wraps the meshcore lib and normalizes the response
+    into our envelope (renaming `pubkey` -> `pubkey_prefix`)."""
+
+    @pytest.mark.asyncio
+    async def test_req_neighbours_returns_normalized_list(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_neighbours_sync = AsyncMock(return_value={
+            "neighbours_count": 12,
+            "results_count": 2,
+            "neighbours": [
+                {"pubkey": "ab12cd34", "secs_ago": 42, "snr": 6.0},
+                {"pubkey": "11223344", "secs_ago": 360, "snr": -2.5},
+            ],
+        })
+        client._mc = fake_mc
+        out = await client.req_neighbours("ab" * 32)
+        assert out["neighbours_count"] == 12
+        assert out["results_count"] == 2
+        assert out["neighbours"][0]["pubkey_prefix"] == "ab12cd34"
+        assert out["neighbours"][0]["snr"] == 6.0
+        assert out["neighbours"][0]["secs_ago"] == 42
+
+    @pytest.mark.asyncio
+    async def test_req_neighbours_raises_on_timeout(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        fake_mc.commands.req_neighbours_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="no reply"):
+            await client.req_neighbours("ab" * 32)
+
+
 class TestTraceDataForwarding:
     """TRACE_DATA must be forwarded to WS subscribers on topic='trace' so
     the live-trace UI can display path hops as they arrive."""

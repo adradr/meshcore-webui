@@ -489,6 +489,50 @@ class MeshCoreClient:
             # req_acl_sync returns acl_data (list / payload), wrap for JSON.
             return {"acl": res}
 
+    async def req_neighbours(
+        self,
+        pubkey: str,
+        *,
+        count: int = 255,
+        offset: int = 0,
+        order_by: int = 0,
+        pubkey_prefix_length: int = 4,
+        timeout: float = 15.0,
+    ) -> dict:
+        """Ask a remote node for its neighbour list.
+
+        Returns ``{"neighbours_count", "results_count",
+                  "neighbours": [{"pubkey_prefix","secs_ago","snr"}]}``.
+        Empty list is a valid response (companions don't track neighbours).
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.req_neighbours_sync(
+                pubkey,
+                count=count,
+                offset=offset,
+                order_by=order_by,
+                pubkey_prefix_length=pubkey_prefix_length,
+                timeout=timeout,
+            )
+            if res is None:
+                raise RuntimeError(
+                    f"Neighbours: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    " — peer may be unreachable or asleep"
+                )
+            return {
+                "neighbours_count": int(res.get("neighbours_count", 0)),
+                "results_count": int(res.get("results_count", 0)),
+                "neighbours": [
+                    {
+                        "pubkey_prefix": n.get("pubkey", ""),
+                        "secs_ago": int(n.get("secs_ago", 0)),
+                        "snr": float(n.get("snr", 0.0)),
+                    }
+                    for n in res.get("neighbours", [])
+                ],
+            }
+
     async def disc_path(self, pubkey: str, timeout: float = 15.0) -> dict:
         """Discover the network path to a contact.
 
