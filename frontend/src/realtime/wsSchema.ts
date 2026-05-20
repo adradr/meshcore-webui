@@ -55,7 +55,22 @@ export type WSMessage = z.infer<typeof WSMessageSchema>
 export function parseWSMessage(raw: unknown): WSMessage | null {
   const r = WSMessageSchema.safeParse(raw)
   if (!r.success) {
-    console.warn("[ws] invalid", r.error.issues)
+    // The strict union only covers events the WebSocketProvider's
+    // switch handles. Everything else (rx_log_data, stats_radio,
+    // diagnostic.step, trace_data, …) is delivered via topic fan-out
+    // through `parseWireEvent`, so a discriminator miss here is
+    // expected — not a bug. We demote to debug so devtools is quiet.
+    const looksLikeUnknownType = r.error.issues.some(
+      (i) =>
+        i.code === "invalid_union" &&
+        // zod 4 surfaces the discriminator name on the issue
+        (i as { discriminator?: string }).discriminator === "type",
+    )
+    if (looksLikeUnknownType) {
+      console.debug("[ws] non-dispatch event (handled via topic)", raw)
+    } else {
+      console.warn("[ws] invalid", r.error.issues)
+    }
     return null
   }
   return r.data
