@@ -63,6 +63,15 @@ def _sanitize_rx_log_payload(payload: dict) -> dict:
     return out
 
 
+class StatsUnavailable(RuntimeError):
+    """Local-stats query failed because the radio didn't respond or
+    returned an error code. The diagnostic orchestrator surfaces this
+    as NO_RESPONSE; NoisePoller catches it and silently skips a tick.
+
+    Raised by get_stats_core / get_stats_radio / get_stats_packets.
+    """
+
+
 @dataclass(frozen=True)
 class WireEvent:
     type: str
@@ -277,7 +286,7 @@ class MeshCoreClient:
         async with self._lock:
             ev = await mc.commands.get_stats_radio()
             if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("stats_radio unavailable")
+                raise StatsUnavailable("stats_radio unavailable")
             return dict(ev.payload)
 
     async def get_stats_core(self) -> dict:
@@ -286,7 +295,7 @@ class MeshCoreClient:
         async with self._lock:
             ev = await mc.commands.get_stats_core()
             if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("stats_core unavailable")
+                raise StatsUnavailable("stats_core unavailable")
             return dict(ev.payload)
 
     async def get_stats_packets(self) -> dict:
@@ -296,7 +305,7 @@ class MeshCoreClient:
         async with self._lock:
             ev = await mc.commands.get_stats_packets()
             if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("stats_packets unavailable")
+                raise StatsUnavailable("stats_packets unavailable")
             return dict(ev.payload)
 
     async def broadcast_wire_event(self, wire_event: WireEvent) -> None:

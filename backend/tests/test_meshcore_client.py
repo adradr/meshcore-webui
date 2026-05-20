@@ -3,7 +3,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from app.services.meshcore_client import MeshCoreClient, TraceHop, TracePathResult
+from app.services.meshcore_client import (
+    MeshCoreClient,
+    StatsUnavailable,
+    TraceHop,
+    TracePathResult,
+)
 
 
 @pytest.mark.asyncio
@@ -555,7 +560,7 @@ class TestGetStatsRadio:
         fake_mc.commands.get_stats_radio = AsyncMock(return_value=fake_ev)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_radio unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_radio unavailable"):
             await client.get_stats_radio()
 
     @pytest.mark.asyncio
@@ -565,7 +570,7 @@ class TestGetStatsRadio:
         fake_mc.commands.get_stats_radio = AsyncMock(return_value=None)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_radio unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_radio unavailable"):
             await client.get_stats_radio()
 
     @pytest.mark.asyncio
@@ -617,7 +622,7 @@ class TestGetStatsCore:
         fake_mc.commands.get_stats_core = AsyncMock(return_value=fake_ev)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_core unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_core unavailable"):
             await client.get_stats_core()
 
     @pytest.mark.asyncio
@@ -627,7 +632,7 @@ class TestGetStatsCore:
         fake_mc.commands.get_stats_core = AsyncMock(return_value=None)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_core unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_core unavailable"):
             await client.get_stats_core()
 
     @pytest.mark.asyncio
@@ -661,13 +666,15 @@ class TestGetStatsPackets:
         client._mc = fake_mc
 
         result = await client.get_stats_packets()
-        assert result["recv"] == 1024
-        assert result["sent"] == 512
-        assert result["flood_tx"] == 100
-        assert result["flood_rx"] == 200
-        assert result["direct_tx"] == 50
-        assert result["direct_rx"] == 75
-        assert result["recv_errors"] == 2
+        assert result == {
+            "recv": 1024,
+            "sent": 512,
+            "flood_tx": 100,
+            "flood_rx": 200,
+            "direct_tx": 50,
+            "direct_rx": 75,
+            "recv_errors": 2,
+        }
         fake_mc.commands.get_stats_packets.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -682,7 +689,7 @@ class TestGetStatsPackets:
         fake_mc.commands.get_stats_packets = AsyncMock(return_value=fake_ev)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_packets unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_packets unavailable"):
             await client.get_stats_packets()
 
     @pytest.mark.asyncio
@@ -692,7 +699,7 @@ class TestGetStatsPackets:
         fake_mc.commands.get_stats_packets = AsyncMock(return_value=None)
         client._mc = fake_mc
 
-        with pytest.raises(RuntimeError, match="stats_packets unavailable"):
+        with pytest.raises(StatsUnavailable, match="stats_packets unavailable"):
             await client.get_stats_packets()
 
     @pytest.mark.asyncio

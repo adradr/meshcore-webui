@@ -23,7 +23,7 @@ import time
 from collections import deque
 from typing import Any
 
-from app.services.meshcore_client import MeshCoreClient, WireEvent
+from app.services.meshcore_client import MeshCoreClient, StatsUnavailable, WireEvent
 
 log = logging.getLogger(__name__)
 
@@ -96,10 +96,10 @@ class NoisePoller:
     async def _poll_once(self) -> None:
         try:
             raw = await self._client.get_stats_radio()
-        except (ConnectionError, RuntimeError):
-            # Expected on disconnect or transient lib failure — skip this
-            # tick. The outer loop logs at WARNING for anything unexpected;
-            # these two are routine.
+        except (ConnectionError, StatsUnavailable):
+            # Expected on disconnect or radio non-response — skip this tick.
+            # Any other RuntimeError bubbles to the outer warning log so we
+            # don't silently mask unrelated bugs.
             return
         payload = self._payload_from_event_payload(raw)
         if payload is None:
@@ -116,6 +116,10 @@ class NoisePoller:
         The unified `MeshCoreClient.get_stats_radio` now returns the
         meshcore `Event.payload` dict directly (or raises). Be defensive
         in case the lib ever returns something without `.get`.
+
+        Treats `None` and empty dict alike as "no usable sample" — both
+        skip the tick. (Old Event-returning version broadcast all-None
+        payloads on empty dicts; we intentionally drop them now.)
         """
         if not raw or not hasattr(raw, "get"):
             return None
