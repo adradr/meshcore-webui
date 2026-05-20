@@ -222,15 +222,20 @@ def create_app() -> FastAPI:
         if assets_dir.exists():
             app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
+        static_root = static_dir.resolve()
+        index_html = static_root / "index.html"
+
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str):
-            # Direct file in static dir (sw.js, manifest.webmanifest, icons/, favicon, etc.)
+            # uvicorn doesn't collapse `..` — must contain to static_root.
             if full_path:
-                target = static_dir / full_path
-                if target.is_file():
+                try:
+                    target = (static_root / full_path).resolve()
+                except (OSError, ValueError):
+                    return FileResponse(index_html)
+                if target.is_file() and target.is_relative_to(static_root):
                     return FileResponse(target)
-            # All other GET → index.html (SPA route)
-            return FileResponse(static_dir / "index.html")
+            return FileResponse(index_html)
 
     return app
 

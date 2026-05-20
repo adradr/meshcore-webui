@@ -234,5 +234,14 @@ export function useRealtime() {
 
 export function resolveWsUrl(): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-  return `${proto}//${window.location.host}/ws`
+  // Browsers can't set headers on `new WebSocket(...)`; pass via ?token=.
+  let token: string | null = null
+  try {
+    token =
+      typeof localStorage !== "undefined" ? localStorage.getItem("apiKey") : null
+  } catch {
+    token = null
+  }
+  const qs = token ? `?token=${encodeURIComponent(token)}` : ""
+  return `${proto}//${window.location.host}/ws${qs}`
 }
