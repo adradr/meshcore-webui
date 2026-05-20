@@ -7,7 +7,6 @@ import {
   Card,
   CardContent,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card"
 
 export function LoginPage() {
@@ -16,8 +15,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const submit = async () => {
     setError(null)
     setPending(true)
     try {
@@ -35,43 +33,62 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>MeshCore WebUI</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            This server requires an API key. Paste it below to continue.
-          </p>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={onSubmit} className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="api-key">API key</Label>
-              <Input
-                id="api-key"
-                type="password"
-                autoComplete="current-password"
-                autoFocus
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                disabled={pending}
-                placeholder="Paste the bearer token from your server's .env"
-              />
-            </div>
-            {error && (
-              <p role="alert" className="text-sm text-destructive">
-                {error}
-              </p>
-            )}
-            <Button
-              type="submit"
-              disabled={pending || value.trim() === ""}
-              className="w-full"
+      <div className="w-full max-w-md space-y-6">
+        {/* Brand header mirrors the top-bar wordmark used elsewhere in the
+            app, but blown up and centered for this single-purpose page. */}
+        <div className="flex flex-col items-center gap-3">
+          <img
+            src="/icons/pwa-192x192.png"
+            alt=""
+            aria-hidden="true"
+            className="h-16 w-16 rounded-2xl shadow-sm"
+          />
+          <h1 className="text-2xl font-semibold tracking-[0.2em]">MESHCORE</h1>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <p className="text-sm text-muted-foreground">
+              This server requires an API key. Paste it below to continue.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void submit()
+              }}
+              className="space-y-3"
             >
-              {pending ? "Checking…" : "Save & continue"}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+              <div className="space-y-1">
+                <Label htmlFor="api-key">API key</Label>
+                <Input
+                  id="api-key"
+                  type="password"
+                  autoComplete="current-password"
+                  autoFocus
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  disabled={pending}
+                  placeholder="Paste the bearer token from your server's .env"
+                />
+              </div>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <Button
+                type="submit"
+                disabled={pending || value.trim() === ""}
+                className="w-full"
+              >
+                {pending ? "Checking…" : "Save & continue"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   )
 }

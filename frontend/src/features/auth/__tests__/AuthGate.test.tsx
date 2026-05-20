@@ -64,7 +64,7 @@ describe("AuthGate", () => {
     expect(
       screen.getByRole("button", { name: /save & continue/i }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/meshcore webui/i)).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: /meshcore/i })).toBeInTheDocument()
   })
 
   it("renders nothing while loading (no flash)", () => {
