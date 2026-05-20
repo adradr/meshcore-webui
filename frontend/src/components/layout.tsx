@@ -50,10 +50,7 @@ export function Layout() {
     //   bottom → fixed nav (4rem) + home-indicator inset
     <div
       className="flex h-[100dvh] flex-col"
-      style={{
-        paddingTop: "env(safe-area-inset-top)",
-        paddingBottom: "calc(4rem + env(safe-area-inset-bottom))",
-      }}
+      style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
         <h1 className="text-base font-semibold tracking-wider">MESHCORE</h1>
@@ -64,16 +61,16 @@ export function Layout() {
         <Outlet />
       </main>
       {/*
-        Split outer wrapper (variable safe-area padding) from inner grid
-        (fixed h-16). iOS Safari mutates `env(safe-area-inset-bottom)` as the
-        URL bar collapses/expands; if the safe-area padding lived on the same
-        element as the grid, the icons would visibly jump because the grid
-        cells would resize. With the split, only the padding BELOW the
-        visible nav frame changes — icons stay rock-steady in their 4rem
-        cells.
+        Flex-child nav, NOT `position: fixed`. iOS standalone PWA has a known
+        bug where `fixed bottom-0` + `safe-area-inset-bottom` renders against
+        the "large viewport" on launch — so the nav lands above its final
+        spot until a scroll forces a reflow. Flow layout sidesteps the bug.
+        The split between outer wrapper (variable safe-area pb) and inner
+        h-16 grid keeps the icon row at a stable 4rem regardless of URL-bar
+        transitions in Safari.
       */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t bg-background pb-[env(safe-area-inset-bottom)]"
+        className="shrink-0 border-t bg-background pb-[env(safe-area-inset-bottom)]"
         aria-label="Primary"
       >
         <div className="grid h-16 grid-cols-6">
