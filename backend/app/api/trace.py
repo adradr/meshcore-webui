@@ -59,9 +59,13 @@ async def trace_path(
     except TimeoutError as e:
         # send_trace ack'd but TRACE_DATA never arrived — surface as gateway timeout.
         raise HTTPException(status_code=504, detail=str(e)) from e
-    except RuntimeError as e:
-        # Covers "not connected" and "did not ack" — radio link unavailable.
+    except ConnectionError as e:
+        # Radio link itself is down. Distinct subclass from RuntimeError —
+        # without an explicit branch we'd silently 500.
         raise HTTPException(status_code=503, detail=str(e)) from e
+    except RuntimeError as e:
+        # Radio connected but firmware didn't ack — gateway-style failure.
+        raise HTTPException(status_code=502, detail=str(e)) from e
 
     raw_hops = [{"hash": h.hash, "snr": h.snr} for h in result.hops]
     resolved = await resolve_hops(raw_hops, db)

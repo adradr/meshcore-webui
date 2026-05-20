@@ -273,6 +273,23 @@ class MeshCoreClient:
             raise ConnectionError("MeshCore not connected")
         return self._mc
 
+    def is_radio_connected(self) -> bool:
+        """Cheap, non-raising probe for UI status indicators.
+
+        Returns True if the underlying meshcore lib has an active TCP
+        companion connection. Does NOT trigger reconnect logic, does NOT
+        acquire the lock — safe to call from a polled status endpoint.
+        """
+        return self._mc is not None and bool(getattr(self._mc, "is_connected", False))
+
+    @property
+    def host(self) -> str:
+        return self._host
+
+    @property
+    def port(self) -> int:
+        return self._port
+
     async def get_stats_radio(self) -> dict:
         """Local radio stats: noise_floor (dBm), last_rssi (dBm),
         last_snr (dB), tx_air_secs, rx_air_secs.

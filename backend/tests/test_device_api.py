@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -106,3 +106,94 @@ async def test_post_device_advert_503_when_no_client(client):
         del app.state.meshcore_client
     r = await client.post("/api/device/advert")
     assert r.status_code == 503
+
+
+# --- /api/device/status (Task 1.9) ----------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_status_when_no_client_returns_disconnected(client):
+    """Status endpoint MUST NOT raise; it's the polled honest signal for
+    the UI's Connected/Disconnected pill. No client on app.state -> connected:false."""
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.get("/api/device/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"connected": False, "host": None, "port": None}
+
+
+@pytest.mark.asyncio
+async def test_get_status_when_client_disconnected(client):
+    fake = MagicMock()
+    fake.is_radio_connected = MagicMock(return_value=False)
+    fake.host = "192.168.4.1"
+    fake.port = 5000
+    app.state.meshcore_client = fake
+    try:
+        r = await client.get("/api/device/status")
+        assert r.status_code == 200
+        assert r.json() == {
+            "connected": False,
+            "host": "192.168.4.1",
+            "port": 5000,
+        }
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_status_when_client_connected(client):
+    fake = MagicMock()
+    fake.is_radio_connected = MagicMock(return_value=True)
+    fake.host = "192.168.4.1"
+    fake.port = 5000
+    app.state.meshcore_client = fake
+    try:
+        r = await client.get("/api/device/status")
+        assert r.status_code == 200
+        assert r.json()["connected"] is True
+    finally:
+        del app.state.meshcore_client
+
+
+# --- ConnectionError -> 503 for the existing endpoints --------------------
+
+@pytest.mark.asyncio
+async def test_get_device_info_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_device_info = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected"),
+    )
+    try:
+        r = await client.get("/api/device/info")
+        assert r.status_code == 503
+        assert "not connected" in r.json()["detail"]
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_self_info_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected"),
+    )
+    try:
+        r = await client.get("/api/device/self-info")
+        assert r.status_code == 503
+        assert "not connected" in r.json()["detail"]
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_post_advert_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.send_advert = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected"),
+    )
+    try:
+        r = await client.post("/api/device/advert")
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client

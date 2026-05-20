@@ -81,6 +81,8 @@ async def send_message(
         else:
             await client.send_chan_msg(payload.channel_idx, payload.text)
             msg_type = "chan"
+    except ConnectionError as e:
+        raise HTTPException(503, str(e))
     except RuntimeError as e:
         raise HTTPException(502, str(e))
 

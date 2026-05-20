@@ -1,35 +1,26 @@
 import { WifiOff } from "lucide-react"
-import { useSyncExternalStore } from "react"
-import { useQueryClient } from "@tanstack/react-query"
 import { useOnlineStatus } from "@/realtime/useOnlineStatus"
 import { useRealtime } from "@/realtime/WebSocketProvider"
+import { useDeviceStatus } from "@/features/device/queries"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-
-interface DeviceStatus {
-  connected: boolean
-}
 
 export function OfflineBanner() {
   const online = useOnlineStatus()
   const { status: wsStatus } = useRealtime()
-  const qc = useQueryClient()
-  // The backend emits `connected` / `disconnected` system events on its TCP
-  // link to the MeshCore radio — independent of the browser↔server WS.
-  // Subscribe to the query cache rather than firing a query, since this
-  // value is push-only (only the WS handler ever writes it).
-  const radioConnected = useSyncExternalStore(
-    (notify) =>
-      qc.getQueryCache().subscribe((e) => {
-        if (e.query.queryKey[0] === "device" && e.query.queryKey[1] === "status")
-          notify()
-      }),
-    () =>
-      (qc.getQueryData<DeviceStatus>(["device", "status"])?.connected ?? true),
-  )
-
+  // Polled /api/device/status — never raises, returns connected:false
+  // when the radio link is down. The previous implementation read from
+  // the react-query cache populated by WS push events, but if the
+  // backend never connects at all (e.g. radio offline at boot) no event
+  // is emitted and the cache stays undefined — defaulting to "connected"
+  // produced a misleading green badge. Polling fixes that.
+  const device = useDeviceStatus({ refetchIntervalMs: 5_000 })
+  const radioKnown = device.data !== undefined
+  const radioConnected = device.data?.connected === true
   const wsDown = wsStatus !== "open"
 
-  if (online && !wsDown && radioConnected) return null
+  // Treat "no first response yet" as no-banner to avoid a flash on first
+  // paint. Once the first poll lands, the real state takes over.
+  if (online && !wsDown && (!radioKnown || radioConnected)) return null
 
   // Priority: browser offline > WebUI link down > radio link down.
   // Showing the most upstream failure keeps the message accurate; downstream

@@ -191,8 +191,11 @@ async def test_trace_path_504_on_timeout():
 
 @pytest.mark.asyncio
 async def test_trace_path_503_when_client_not_ready():
+    # _require_mc actually raises ConnectionError when the radio link is
+    # down. The pre-1.9 code caught it as RuntimeError by accident; the
+    # mock now matches reality.
     fake = _make_client_override(
-        AsyncMock(side_effect=RuntimeError("MeshCore not connected"))
+        AsyncMock(side_effect=ConnectionError("MeshCore not connected"))
     )
     app.dependency_overrides[get_meshcore_client] = lambda: fake
     try:

@@ -24,6 +24,8 @@ async def list_channels(request: Request) -> list[dict]:
         raise HTTPException(503, "MeshCore client not initialized")
     try:
         return await client.get_channels()
+    except ConnectionError as e:
+        raise HTTPException(503, str(e))
     except RuntimeError as e:
         raise HTTPException(502, str(e))
 

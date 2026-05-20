@@ -4,6 +4,7 @@ import { Copy, Cpu, MapPin, Send, Waves } from "lucide-react"
 import { toast } from "sonner"
 import {
   useDeviceInfo,
+  useDeviceStatus,
   useSelfInfo,
   useSendAdvert,
 } from "@/features/device/queries"
@@ -85,16 +86,26 @@ function KeyValue({
 }
 
 function ConnectionBadge() {
-  const { status } = useRealtime()
-  const isConnected = status === "open"
-  return (
-    <Badge
-      variant={isConnected ? "default" : "destructive"}
-      className={isConnected ? "bg-green-600 hover:bg-green-600" : ""}
-    >
-      {isConnected ? "Connected" : status}
-    </Badge>
-  )
+  // Two independent links matter: browser↔server (WS) and server↔radio
+  // (TCP companion port). The user-facing 'Connected' badge MUST reflect
+  // the radio link — that's what they care about. The WS being open while
+  // the radio is down was the pre-1.9 source of misleading "Connected"
+  // when /api/device/info was 500ing.
+  const { status: wsStatus } = useRealtime()
+  const device = useDeviceStatus()
+  const radioConnected = device.data?.connected === true
+  const wsOpen = wsStatus === "open"
+  if (!wsOpen) {
+    return <Badge variant="destructive">WebUI offline</Badge>
+  }
+  if (radioConnected) {
+    return (
+      <Badge variant="default" className="bg-green-600 hover:bg-green-600">
+        Connected
+      </Badge>
+    )
+  }
+  return <Badge variant="destructive">Radio disconnected</Badge>
 }
 
 /**

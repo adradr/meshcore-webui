@@ -36,6 +36,11 @@ vi.mock("@/features/device/queries", () => ({
     isError: false,
   }),
   useSendAdvert: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeviceStatus: () => ({
+    data: { connected: true, host: "192.168.4.1", port: 5000 },
+    isLoading: false,
+    isError: false,
+  }),
 }))
 
 vi.mock("@/realtime/WebSocketProvider", async () => {
