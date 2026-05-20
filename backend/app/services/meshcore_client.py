@@ -504,6 +504,11 @@ class MeshCoreClient:
         Returns ``{"neighbours_count", "results_count",
                   "neighbours": [{"pubkey_prefix","secs_ago","snr"}]}``.
         Empty list is a valid response (companions don't track neighbours).
+
+        The (secs_ago, snr) pair describes the neighbour's most recent
+        zero-hop advertisement received by the queried node — NOT a live
+        link measurement. A large secs_ago means the neighbour hasn't been
+        heard from recently.
         """
         mc = await self._require_mc()
         async with self._lock:

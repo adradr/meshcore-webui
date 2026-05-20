@@ -251,6 +251,7 @@ class TestReqNeighbours:
         assert out["neighbours"][0]["pubkey_prefix"] == "ab12cd34"
         assert out["neighbours"][0]["snr"] == 6.0
         assert out["neighbours"][0]["secs_ago"] == 42
+        assert out["neighbours"][1]["pubkey_prefix"] == "11223344"
 
     @pytest.mark.asyncio
     async def test_req_neighbours_raises_on_timeout(self):
