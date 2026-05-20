@@ -1,10 +1,9 @@
 services:
   meshcore-webui:
-    image: meshcore-webui:dev
-    # Run `docker compose build` to use this. The runtime VAPID fallback at
-    # `GET /api/push/vapid-public-key` means baking the key into the bundle is
-    # optional — leave VITE_VAPID_PUBLIC_KEY empty unless you want a slightly
-    # faster first push subscription (one fewer HTTP round-trip on enable).
+    image: ghcr.io/adradr/meshcore-webui:latest
+    # `docker compose pull` fetches the CI-built image from GHCR. The `build:`
+    # block below is retained so `docker compose build` still works for local
+    # development (it tags the same image name and overrides the pulled one).
     build:
       context: .
       args:
