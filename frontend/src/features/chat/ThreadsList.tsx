@@ -182,19 +182,21 @@ export function ThreadsList() {
   const items = useMemo<EnrichedThread[]>(() => {
     const raw = threads.data ?? []
     // DM threads always pass; channel threads are kept iff the channel is
-    // currently configured on the device. When the channels query hasn't
-    // resolved yet (`data === undefined`) we treat the set as null and
-    // skip filtering — otherwise the initial paint flashes empty while
-    // the channels list is loading. A loaded-but-empty array IS truthy,
-    // so if the radio reports zero channels every channel thread is
-    // correctly dropped.
+    // currently configured on the device. While the channels query is
+    // still loading (`data === undefined`) we HIDE channel threads —
+    // the prior optimism (show them all, then collapse to the
+    // configured ones) produced a visible flash on every page load.
+    // useChannels has a 60s staleTime and is fetched as part of the
+    // chat sidebar, so the brief hide is imperceptible. A loaded-
+    // but-empty array IS truthy, so if the radio reports zero
+    // channels every channel thread is correctly dropped.
     const knownChannelIdxs: Set<number> | null = channels.data
       ? new Set(channels.data.map((c) => c.channel_idx))
       : null
     const enriched: EnrichedThread[] = raw
       .filter((t) => {
         if (t.msg_type !== "chan") return true
-        if (knownChannelIdxs === null) return true
+        if (knownChannelIdxs === null) return false
         const idx = t.channel_idx ?? -1
         return knownChannelIdxs.has(idx)
       })

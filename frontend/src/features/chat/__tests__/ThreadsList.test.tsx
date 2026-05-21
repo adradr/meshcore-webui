@@ -118,15 +118,23 @@ describe("ThreadsList — channel filter", () => {
     expect(screen.getByText("direct hello")).toBeInTheDocument()
   })
 
-  it("does not filter while the channels query is still loading", () => {
-    // While `channels.data === undefined` we must NOT drop channel
-    // threads, otherwise the initial paint flashes empty.
-    threadsState.data = [chan(2, "loading channel message")]
+  it("hides channel threads until channels list loads, but keeps DMs visible", () => {
+    // While `channels.data === undefined` we hide channel threads to
+    // avoid the load-flash where all channel threads briefly appear
+    // then collapse to the configured ones. DM threads still render
+    // eagerly — they don't depend on the channels list at all.
+    threadsState.data = [
+      chan(2, "loading channel message"),
+      dm("b".repeat(64), "direct still visible"),
+    ]
     channelsState.data = undefined
     channelsState.isLoading = true
 
     render(wrap(<ThreadsList />))
 
-    expect(screen.getByText("loading channel message")).toBeInTheDocument()
+    expect(
+      screen.queryByText("loading channel message"),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText("direct still visible")).toBeInTheDocument()
   })
 })
