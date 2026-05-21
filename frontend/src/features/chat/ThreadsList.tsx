@@ -181,34 +181,53 @@ export function ThreadsList() {
 
   const items = useMemo<EnrichedThread[]>(() => {
     const raw = threads.data ?? []
-    const enriched: EnrichedThread[] = raw.map((t) => {
-      if (t.msg_type === "dm") {
-        const pk = t.contact_pub_key ?? ""
-        const match = findContactByPrefix(pk, contacts.data)
-        const title =
-          match?.adv_name ?? (pk ? pk.slice(0, 12) : "Unknown contact")
-        const isStarred = ((match?.flags ?? 0) & 0x01) === 0x01
+    // DM threads always pass; channel threads are kept iff the channel is
+    // currently configured on the device. When the channels query hasn't
+    // resolved yet (`data === undefined`) we treat the set as null and
+    // skip filtering — otherwise the initial paint flashes empty while
+    // the channels list is loading. A loaded-but-empty array IS truthy,
+    // so if the radio reports zero channels every channel thread is
+    // correctly dropped.
+    const knownChannelIdxs: Set<number> | null = channels.data
+      ? new Set(channels.data.map((c) => c.channel_idx))
+      : null
+    const enriched: EnrichedThread[] = raw
+      .filter((t) => {
+        if (t.msg_type !== "chan") return true
+        if (knownChannelIdxs === null) return true
+        const idx = t.channel_idx ?? -1
+        return knownChannelIdxs.has(idx)
+      })
+      .map((t) => {
+        if (t.msg_type === "dm") {
+          const pk = t.contact_pub_key ?? ""
+          const match = findContactByPrefix(pk, contacts.data)
+          const title =
+            match?.adv_name ?? (pk ? pk.slice(0, 12) : "Unknown contact")
+          const isStarred = ((match?.flags ?? 0) & 0x01) === 0x01
+          return {
+            thread: t,
+            title,
+            href: `/chat/${pk}`,
+            pubkey: match?.public_key ?? (pk || null),
+            isStarred,
+            isFailed: false,
+          }
+        }
+        const idx = t.channel_idx ?? -1
+        const ch = channels.data?.find((c) => c.channel_idx === idx)
+        const title = ch?.channel_name
+          ? `# ${ch.channel_name}`
+          : `Channel #${idx}`
         return {
           thread: t,
           title,
-          href: `/chat/${pk}`,
-          pubkey: match?.public_key ?? (pk || null),
-          isStarred,
+          href: `/channel/${idx}`,
+          pubkey: null,
+          isStarred: false,
           isFailed: false,
         }
-      }
-      const idx = t.channel_idx ?? -1
-      const ch = channels.data?.find((c) => c.channel_idx === idx)
-      const title = ch?.channel_name ? `# ${ch.channel_name}` : `Channel #${idx}`
-      return {
-        thread: t,
-        title,
-        href: `/channel/${idx}`,
-        pubkey: null,
-        isStarred: false,
-        isFailed: false,
-      }
-    })
+      })
     enriched.sort((a, b) => {
       if (a.isStarred !== b.isStarred) return a.isStarred ? -1 : 1
       const at = a.thread.last_timestamp
