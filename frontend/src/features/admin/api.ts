@@ -3,70 +3,74 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
-export type LocalResetScope = "messages" | "all" | "push"
-export type DeviceResetMode = "soft" | "factory"
+export interface LocalResetSelector {
+  messages?: boolean
+  diagnostic_runs?: boolean
+  rx_log?: boolean
+  mutes?: boolean
+  settings?: boolean
+  push_subscribers?: boolean
+}
 
-export interface LocalResetResult {
-  scope: LocalResetScope
-  deleted_rows: number
+export interface DeviceResetSelector {
+  channels?: boolean
+  coords?: boolean
+  contacts?: boolean
 }
-export interface DeviceSoftResult {
-  mode: "soft"
-  cleared_channels: number
+
+export interface ResetRequest {
+  local?: LocalResetSelector
+  device?: DeviceResetSelector
+  confirm: string
 }
+
+export interface ResetResult {
+  local: {
+    messages: number | null
+    diagnostic_runs: number | null
+    rx_log: number | null
+    mutes: number | null
+    settings: number | null
+    push_subscribers: number | null
+  }
+  device: {
+    cleared_channels: number | null
+    coords_reset: boolean
+    removed_contacts: number | null
+  }
+}
+
+/** Count how many targets reported a non-null result. */
+function totalTargetsRun(r: ResetResult): number {
+  const localCount = Object.values(r.local).filter((v) => v !== null).length
+  const deviceCount =
+    (r.device.cleared_channels !== null ? 1 : 0) +
+    (r.device.coords_reset ? 1 : 0) +
+    (r.device.removed_contacts !== null ? 1 : 0)
+  return localCount + deviceCount
+}
+
+/**
+ * Unified reset. Caller picks any combination of local + device targets.
+ * Backend enforces "at least one selected" and the case-sensitive
+ * confirm token. On success we invalidate every react-query cache
+ * since a reset touches almost every data shape we display.
+ */
+export function useReset() {
+  const qc = useQueryClient()
+  return useMutation<ResetResult, Error, ResetRequest>({
+    mutationFn: (body) => api.post<ResetResult>("/api/admin/reset", body),
+    onSuccess: (r) => {
+      toast.success(`Reset complete — ${totalTargetsRun(r)} target(s) cleared`)
+      qc.invalidateQueries()
+    },
+    onError: (e) => notifyError("Reset", e),
+  })
+}
+
 export interface DeviceFactoryResult {
   mode: "factory"
   warning: string
-}
-
-/**
- * Wipe local SQLite tables. Three scopes:
- *  - "messages": just chat history
- *  - "all": messages + diagnostic_runs + rx_log + mutes + settings
- *    (push_subscriptions PRESERVED so browsers don't re-enroll)
- *  - "push": push_subscriptions only
- * Invalidates ALL react-query caches on success — cheaper than
- * enumerating every key the reset might affect.
- */
-export function useLocalReset() {
-  const qc = useQueryClient()
-  return useMutation<
-    LocalResetResult,
-    Error,
-    { scope: LocalResetScope; confirm: string }
-  >({
-    mutationFn: (body) =>
-      api.post<LocalResetResult>("/api/admin/reset/local", body),
-    onSuccess: (r) => {
-      toast.success(`Cleared ${r.deleted_rows} rows (${r.scope})`)
-      qc.invalidateQueries()
-    },
-    onError: (e) => notifyError("Reset local data", e),
-  })
-}
-
-/**
- * Soft device reset — clears non-public channels + GPS coords on the
- * radio's flash. Identity, contacts, radio params preserved.
- */
-export function useDeviceSoftReset() {
-  const qc = useQueryClient()
-  return useMutation<DeviceSoftResult, Error, { confirm: string }>({
-    mutationFn: (body) =>
-      api.post<DeviceSoftResult>("/api/device/reset", {
-        mode: "soft",
-        confirm: body.confirm,
-      }),
-    onSuccess: (r) => {
-      toast.success(
-        `Device soft-reset — cleared ${r.cleared_channels} channels`,
-      )
-      // Refresh self-info / channels caches so the UI reflects the cleared state.
-      qc.invalidateQueries({ queryKey: ["device"] })
-      qc.invalidateQueries({ queryKey: ["channels"] })
-    },
-    onError: (e) => notifyError("Soft reset device", e),
-  })
 }
 
 /**

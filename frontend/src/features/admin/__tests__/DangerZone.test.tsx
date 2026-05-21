@@ -1,13 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 
-const localMutate = vi.fn()
-const softMutate = vi.fn()
+const resetMutate = vi.fn()
 const factoryMutate = vi.fn()
 
 vi.mock("../api", () => ({
-  useLocalReset: () => ({ mutate: localMutate, isPending: false }),
-  useDeviceSoftReset: () => ({ mutate: softMutate, isPending: false }),
+  useReset: () => ({ mutate: resetMutate, isPending: false }),
   useDeviceFactoryReset: () => ({ mutate: factoryMutate, isPending: false }),
 }))
 
@@ -17,87 +15,126 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-/** Click the trigger button that opens an AlertDialog. The DangerZone has
- *  several "Reset…" buttons — qualify by exact-match name so we hit the
- *  right one. */
-function openDialog(triggerName: string | RegExp) {
-  fireEvent.click(screen.getByRole("button", { name: triggerName }))
+/** Click the main "Reset…" trigger (the unified dialog one, not factory). */
+function openResetDialog() {
+  // There's only one "Reset…" button — factory's says "Factory reset…".
+  fireEvent.click(screen.getByRole("button", { name: /^Reset…$/ }))
 }
 
-describe("DangerZone", () => {
-  it("clear chat history → click confirms with 'Clear chat history'", () => {
+function openFactoryDialog() {
+  fireEvent.click(screen.getByRole("button", { name: /^Factory reset…$/ }))
+}
+
+describe("DangerZone — unified reset dialog", () => {
+  it("clicking 'Reset…' opens the unified dialog with all checkboxes unchecked and the action disabled (0 selected)", () => {
     render(<DangerZone />)
-    openDialog(/^Clear…$/)
-    const action = screen.getByRole("button", {
-      name: /^Clear chat history$/,
-    })
-    fireEvent.click(action)
-    expect(localMutate).toHaveBeenCalledWith({
-      scope: "messages",
-      confirm: "Clear chat history",
-    })
+    openResetDialog()
+
+    // 6 local + 3 device checkboxes, all unchecked.
+    const localKeys = [
+      "messages",
+      "diagnostic_runs",
+      "rx_log",
+      "mutes",
+      "settings",
+      "push_subscribers",
+    ]
+    for (const k of localKeys) {
+      const cb = screen.getByTestId(`reset-local-${k}`) as HTMLInputElement
+      expect(cb.checked).toBe(false)
+    }
+    const deviceKeys = ["channels", "coords", "contacts"]
+    for (const k of deviceKeys) {
+      const cb = screen.getByTestId(`reset-device-${k}`) as HTMLInputElement
+      expect(cb.checked).toBe(false)
+    }
+
+    // Counter says 0.
+    expect(screen.getByText(/0 targets selected/)).toBeInTheDocument()
+
+    // Action labelled "Reset 0 targets" and disabled.
+    const action = screen.getByRole("button", { name: /^Reset 0 targets$/ })
+    expect(action).toBeDisabled()
   })
 
-  it("reset all → action disabled until 'RESET' typed, then confirms", () => {
+  it("selecting one local target enables the action AFTER typing RESET — disabled when only one is true", () => {
     render(<DangerZone />)
-    // The "Reset all local data" row has trigger "Reset…" — there are several
-    // "Reset…" buttons, so walk up to the flex-row that contains the button.
-    const label = screen.getByText(/^Reset all local data$/)
-    const allRow = label.closest(".flex.items-center") as HTMLElement
-    fireEvent.click(within(allRow).getByRole("button", { name: /^Reset…$/ }))
+    openResetDialog()
 
-    const action = screen.getByRole("button", { name: /^Reset$/ })
+    // Initially: 0 selected, no typed string → disabled.
+    let action = screen.getByRole("button", { name: /^Reset 0 targets$/ })
     expect(action).toBeDisabled()
+
+    // Select 1 box — counter updates, but typed empty → still disabled.
+    fireEvent.click(screen.getByTestId("reset-local-messages"))
+    action = screen.getByRole("button", { name: /^Reset 1 target$/ })
+    expect(action).toBeDisabled()
+
+    // Type RESET on its own (no selection) → also disabled. Uncheck first.
+    fireEvent.click(screen.getByTestId("reset-local-messages"))
+    const input = screen.getByLabelText(/Confirm by typing RESET/)
+    fireEvent.change(input, { target: { value: "RESET" } })
+    action = screen.getByRole("button", { name: /^Reset 0 targets$/ })
+    expect(action).toBeDisabled()
+
+    // Both selected + typed → enabled.
+    fireEvent.click(screen.getByTestId("reset-local-messages"))
+    action = screen.getByRole("button", { name: /^Reset 1 target$/ })
+    expect(action).not.toBeDisabled()
+  })
+
+  it("selecting messages + channels and typing RESET → action click calls useReset.mutate with the exact body", () => {
+    render(<DangerZone />)
+    openResetDialog()
+
+    fireEvent.click(screen.getByTestId("reset-local-messages"))
+    fireEvent.click(screen.getByTestId("reset-device-channels"))
 
     const input = screen.getByLabelText(/Confirm by typing RESET/)
     fireEvent.change(input, { target: { value: "RESET" } })
+
+    const action = screen.getByRole("button", { name: /^Reset 2 targets$/ })
     expect(action).not.toBeDisabled()
     fireEvent.click(action)
-    expect(localMutate).toHaveBeenCalledWith({
-      scope: "all",
+
+    expect(resetMutate).toHaveBeenCalledTimes(1)
+    const [body] = resetMutate.mock.calls[0]
+    expect(body).toEqual({
+      local: { messages: true },
+      device: { channels: true },
       confirm: "RESET",
     })
   })
 
-  it("reset push subscribers → click confirms with 'Reset push subscribers'", () => {
+  it("dialog state resets on close (typed string + selections cleared)", () => {
     render(<DangerZone />)
-    // The row-level label here is the <div className="text-sm font-medium">.
-    // The card title also says "Reset push subscribers", so getAllByText and pick
-    // the row label (the one inside the flex row), not the dialog title.
-    const labels = screen.getAllByText(/^Reset push subscribers$/)
-    const rowLabel = labels.find(
-      (el) => el.className.includes("text-sm") && el.className.includes("font-medium"),
-    ) as HTMLElement
-    const pushRow = rowLabel.closest(".flex.items-center") as HTMLElement
-    fireEvent.click(within(pushRow).getByRole("button", { name: /^Reset…$/ }))
+    openResetDialog()
 
-    const action = screen.getByRole("button", {
-      name: /^Reset push subscribers$/,
-    })
-    fireEvent.click(action)
-    expect(localMutate).toHaveBeenCalledWith({
-      scope: "push",
-      confirm: "Reset push subscribers",
-    })
+    fireEvent.click(screen.getByTestId("reset-local-messages"))
+    expect(
+      (screen.getByTestId("reset-local-messages") as HTMLInputElement).checked,
+    ).toBe(true)
+
+    // Cancel closes the dialog.
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }))
+
+    // Reopen and verify the checkbox is unchecked again.
+    openResetDialog()
+    expect(
+      (screen.getByTestId("reset-local-messages") as HTMLInputElement).checked,
+    ).toBe(false)
+    // Typed input also cleared.
+    const input = screen.getByLabelText(
+      /Confirm by typing RESET/,
+    ) as HTMLInputElement
+    expect(input.value).toBe("")
   })
+})
 
-  it("soft reset → type 'RESET' → device soft reset called", () => {
+describe("DangerZone — factory reset", () => {
+  it("factory reset still works (typed FACTORY RESET + checkbox)", () => {
     render(<DangerZone />)
-    openDialog(/^Reset device…$/)
-
-    const action = screen.getByRole("button", { name: /^Soft reset$/ })
-    expect(action).toBeDisabled()
-
-    const input = screen.getByLabelText(/Confirm by typing RESET/)
-    fireEvent.change(input, { target: { value: "RESET" } })
-    expect(action).not.toBeDisabled()
-    fireEvent.click(action)
-    expect(softMutate).toHaveBeenCalledWith({ confirm: "RESET" })
-  })
-
-  it("factory reset → BOTH typed string AND checkbox required", () => {
-    render(<DangerZone />)
-    openDialog(/^Factory reset…$/)
+    openFactoryDialog()
 
     const action = screen.getByRole("button", { name: /^Factory reset$/ })
     expect(action).toBeDisabled()
@@ -107,18 +144,13 @@ describe("DangerZone", () => {
       /I understand my pubkey will change/,
     ) as HTMLInputElement
 
-    // Only typed → still disabled
+    // Only typed → still disabled.
     fireEvent.change(input, { target: { value: "FACTORY RESET" } })
     expect(action).toBeDisabled()
 
-    // Only checkbox (clear input first) → still disabled
-    fireEvent.change(input, { target: { value: "" } })
+    // Both → enabled.
     fireEvent.click(checkbox)
     expect(checkbox.checked).toBe(true)
-    expect(action).toBeDisabled()
-
-    // Both → enabled
-    fireEvent.change(input, { target: { value: "FACTORY RESET" } })
     expect(action).not.toBeDisabled()
     fireEvent.click(action)
     expect(factoryMutate).toHaveBeenCalledWith({ confirm: "FACTORY RESET" })
