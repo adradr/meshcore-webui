@@ -49,7 +49,13 @@ def _configure_logging() -> None:
     a single StreamHandler to the `app` logger so every `getLogger("app.x")`
     in the codebase flushes to stderr without paying the basicConfig
     global-state penalty.
+
+    At runtime we set `propagate=False` so records don't ALSO emit via
+    alembic.ini's root `console` handler (which would double every line).
+    Under pytest we leave propagation enabled so `caplog` (attached to
+    the root logger) can observe records normally.
     """
+    import sys
     app_logger = logging.getLogger("app")
     if not app_logger.handlers:
         handler = logging.StreamHandler()
@@ -58,9 +64,7 @@ def _configure_logging() -> None:
         ))
         app_logger.addHandler(handler)
         app_logger.setLevel(logging.INFO)
-        # Keep `propagate=True` so pytest's caplog handler (attached to
-        # root) still observes our records. Root's lastResort is WARNING
-        # in production, so no double-emit at INFO at runtime.
+        app_logger.propagate = "pytest" in sys.modules
 
 
 _configure_logging()
