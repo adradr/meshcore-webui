@@ -1,4 +1,5 @@
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
+import { Crosshair } from "lucide-react"
 import {
   MapContainer,
   Marker,
@@ -6,7 +7,7 @@ import {
   useMap,
   useMapEvents,
 } from "react-leaflet"
-import type { LeafletMouseEvent } from "leaflet"
+import L, { type LeafletMouseEvent } from "leaflet"
 import { fixDefaultIcon } from "@/lib/leaflet/fixDefaultIcon"
 
 /**
@@ -73,6 +74,64 @@ function RecenterWhenCoordsChange({
   return null
 }
 
+/** On-map "Locate me" overlay. Triggers geolocation, calls onPick to update
+ * the parent's lat/lon state (which also moves the marker via the standard
+ * controlled-prop path), and zooms the map in close so the chosen spot is
+ * actually visible. Stops click propagation so tapping the button does NOT
+ * also drop a marker at the underlying map coords. */
+function LocateMeButton({
+  onPick,
+}: {
+  onPick: (lat: number, lon: number) => void
+}) {
+  const map = useMap()
+  const [busy, setBusy] = useState(false)
+  const ref = useRef<HTMLButtonElement | null>(null)
+
+  // Leaflet listens for click/mousedown on the map container; if we don't
+  // stop propagation, hitting the button would also trigger PickerEvents.
+  useEffect(() => {
+    if (!ref.current) return
+    L.DomEvent.disableClickPropagation(ref.current)
+    L.DomEvent.disableScrollPropagation(ref.current)
+  }, [])
+
+  const locate = () => {
+    if (!("geolocation" in navigator)) return
+    setBusy(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const la = Number(pos.coords.latitude.toFixed(COORD_DECIMALS))
+        const lo = Number(pos.coords.longitude.toFixed(COORD_DECIMALS))
+        onPick(la, lo)
+        // setView pans AND zooms — without this, panning from the
+        // continental default centre to e.g. a city is invisible because
+        // the new spot is far off-screen at zoom 5.
+        map.setView([la, lo], DEFAULT_ZOOM_WITH_FIX, { animate: true })
+        setBusy(false)
+      },
+      () => {
+        setBusy(false)
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
+    )
+  }
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={locate}
+      disabled={busy}
+      aria-label="Locate me"
+      className="absolute right-2 top-2 z-[1000] inline-flex items-center gap-1 rounded-md border border-border bg-background/95 px-2 py-1 text-xs font-medium shadow-sm backdrop-blur hover:bg-accent disabled:opacity-50"
+    >
+      <Crosshair className="h-3.5 w-3.5" />
+      {busy ? "Locating…" : "Locate me"}
+    </button>
+  )
+}
+
 export function PositionPicker({ lat, lon, onPick }: PositionPickerProps) {
   // Patch Leaflet's default-icon URLs on first mount; idempotent thanks
   // to the module-level `patched` guard inside fixDefaultIcon.
@@ -86,7 +145,7 @@ export function PositionPicker({ lat, lon, onPick }: PositionPickerProps) {
 
   return (
     <div
-      className="overflow-hidden rounded-md border"
+      className="relative overflow-hidden rounded-md border"
       style={{ height: 240 }}
       data-testid="position-picker-map"
     >
@@ -103,6 +162,7 @@ export function PositionPicker({ lat, lon, onPick }: PositionPickerProps) {
         {haveCoords && <Marker position={[lat, lon]} />}
         <PickerEvents onPick={onPick} />
         <RecenterWhenCoordsChange lat={lat} lon={lon} />
+        <LocateMeButton onPick={onPick} />
       </MapContainer>
     </div>
   )

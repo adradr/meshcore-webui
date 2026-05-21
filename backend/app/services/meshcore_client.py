@@ -478,6 +478,13 @@ class MeshCoreClient:
     async def set_coords(self, lat: float, lon: float) -> None:
         """Persist device GPS coordinates to the firmware. The radio writes
         them to flash and includes them in subsequent advertisements.
+
+        The meshcore lib caches ``self_info`` after the initial appstart
+        handshake and does NOT update it when set_coords succeeds — so a
+        subsequent ``get_self_info`` would return the stale pre-save
+        ``adv_lat`` / ``adv_lon``. We re-issue appstart here to repopulate
+        the cache; the next GET /api/device/self-info then reflects the
+        fresh values that the device just persisted.
         """
         mc = await self._require_mc()
         async with self._lock:
@@ -486,6 +493,8 @@ class MeshCoreClient:
                 hasattr(res, "type") and res.type == EventType.ERROR
             ):
                 raise RuntimeError("Device rejected set_coords")
+            # Refresh self_info so the upcoming refetch sees the new coords.
+            await mc.commands.send_appstart()
 
     async def get_self_info(self) -> dict:
         mc = await self._require_mc()
