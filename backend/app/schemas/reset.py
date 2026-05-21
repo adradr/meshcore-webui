@@ -1,48 +1,64 @@
 from __future__ import annotations
-
-from enum import Enum
 from typing import Literal
+from pydantic import BaseModel, Field, model_validator
 
-from pydantic import BaseModel, Field
+
+class LocalResetSelector(BaseModel):
+    """Per-target flags for local SQLite tables. Default false so a
+    selector with no fields set is a no-op (caller must explicitly opt in)."""
+    messages: bool = False
+    diagnostic_runs: bool = False
+    rx_log: bool = False
+    mutes: bool = False
+    settings: bool = False
+    push_subscribers: bool = False
+
+    def any_selected(self) -> bool:
+        return any(
+            (self.messages, self.diagnostic_runs, self.rx_log,
+             self.mutes, self.settings, self.push_subscribers)
+        )
 
 
-class LocalResetScope(str, Enum):
-    """What slice of local server state to wipe.
+class DeviceResetSelector(BaseModel):
+    """Per-target flags for device flash. Each defaults to false."""
+    channels: bool = False     # clear non-Public channels
+    coords: bool = False       # set GPS coords to 0,0
+    contacts: bool = False     # iterate remove_contact across the device's contact list
 
-    - ``messages``: chat history only (``messages`` table).
-    - ``all``: every per-user table EXCEPT ``push_subscriptions`` — see
-      :func:`app.services.reset.reset_local_all` for the exact list.
-    - ``push``: web-push subscribers only; every browser must re-enroll.
+    def any_selected(self) -> bool:
+        return any((self.channels, self.coords, self.contacts))
+
+
+class ResetRequest(BaseModel):
+    """Unified reset request.
+
+    At least one local-selector or device-selector flag must be set
+    (Pydantic-validated post-construction; 422 otherwise).
+
+    `confirm` must equal "RESET" — case-sensitive, compared with
+    hmac.compare_digest in the endpoint. Same convention as the
+    factory-reset endpoint.
     """
-
-    MESSAGES = "messages"
-    ALL = "all"
-    PUSH = "push"
-
-
-class LocalResetRequest(BaseModel):
-    """POST body for ``/api/admin/reset/local``.
-
-    ``confirm`` is a free-form non-empty string supplied by the UI to
-    prove the click was deliberate (the API doesn't validate its content
-    — it's just an anti-fat-finger gate).
-    """
-
-    scope: LocalResetScope
+    local: LocalResetSelector = Field(default_factory=LocalResetSelector)
+    device: DeviceResetSelector = Field(default_factory=DeviceResetSelector)
     confirm: str = Field(..., min_length=1)
 
+    @model_validator(mode="after")
+    def _at_least_one_target(self) -> "ResetRequest":
+        if not (self.local.any_selected() or self.device.any_selected()):
+            raise ValueError("at least one local or device flag must be true")
+        return self
 
-DeviceResetMode = Literal["soft", "factory"]
+
+# Factory reset — its own request shape (intentionally distinct from the
+# toggle-based reset above; factory wipes the identity keypair and is
+# qualitatively different).
+DeviceResetMode = Literal["factory"]
 
 
 class DeviceResetRequest(BaseModel):
-    """POST body for the device-side reset endpoint.
-
-    Two modes mirror the radio firmware commands:
-
-    - ``soft``: reboot the node, keep persisted state.
-    - ``factory``: full firmware factory reset (clears keys + identity).
-    """
-
+    """Factory reset request. Only kept for the /api/device/reset
+    endpoint, which now exclusively handles the factory mode."""
     mode: DeviceResetMode
     confirm: str = Field(..., min_length=1)

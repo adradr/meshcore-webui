@@ -710,16 +710,16 @@ class TestGetStatsPackets:
             await client.get_stats_packets()
 
 
-class TestSoftReset:
-    """`soft_reset` clears non-public channel slots + zeros GPS coords.
+class TestDevicePartialReset:
+    """`device_partial_reset` is the granular replacement for `soft_reset`.
 
-    Idx 0 is the firmware-special Public channel and MUST NEVER be
-    cleared — doing so would leave the device unable to participate in
-    public traffic. Identity, contacts, and radio params are preserved.
+    Each flag (clear_channels, reset_coords, clear_contacts) is independent;
+    callers pick the combination they want. Identity + radio params always
+    preserved — use `factory_reset` for an identity wipe.
     """
 
     @pytest.mark.asyncio
-    async def test_soft_reset_clears_non_public_channels_and_coords(self):
+    async def test_clear_channels_only(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
         fake_mc.self_info = {"max_channels": 4}
@@ -745,65 +745,151 @@ class TestSoftReset:
         fake_mc.commands.set_channel = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
-        fake_mc.commands.set_coords = AsyncMock(
-            return_value=MagicMock(type=EventType.OK),
-        )
+        fake_mc.commands.set_coords = AsyncMock()
+        fake_mc.commands.remove_contact = AsyncMock()
         fake_mc.commands.send_appstart = AsyncMock()
         client._mc = fake_mc
 
-        result = await client.soft_reset()
+        result = await client.device_partial_reset(
+            clear_channels=True, reset_coords=False, clear_contacts=False,
+        )
 
-        assert result == {"cleared_channels": 2}
+        assert result == {
+            "cleared_channels": 2,
+            "coords_reset": False,
+            "removed_contacts": None,
+        }
         cleared = sorted(
             call.args[0] for call in fake_mc.commands.set_channel.await_args_list
         )
         assert cleared == [1, 3]
-        fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
+        fake_mc.commands.set_coords.assert_not_awaited()
+        fake_mc.commands.remove_contact.assert_not_awaited()
+        # appstart should fire because channels were touched.
         fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_soft_reset_falls_back_to_device_query_for_max_channels(self):
-        """Real-world bug: self_info on a live LilyGo doesn't always carry
-        `max_channels` — that field comes from CMD_SEND_DEVICE_QUERY, not
-        appstart. Without the fallback, range(1, 0) is empty and the
-        channel-clear loop silently no-ops — soft_reset 'succeeded' on the
-        user's device but left every channel intact. Lock this behavior in.
-        """
+    async def test_reset_coords_only(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
-        # self_info LACKS max_channels (real-device shape per the user's
-        # /api/device/self-info dump on 2026-05-21).
-        fake_mc.self_info = {"tx_power": 22, "radio_freq": 869.618}
+        fake_mc.self_info = {"max_channels": 4}
+        fake_mc.commands.set_channel = AsyncMock()
+        fake_mc.commands.set_coords = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.remove_contact = AsyncMock()
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
 
-        # send_device_query is the fallback — return max_channels=2 so the
-        # loop iterates exactly idx 1.
-        device_query_event = MagicMock()
-        device_query_event.payload = {"max_channels": 2}
-        fake_mc.commands.send_device_query = AsyncMock(return_value=device_query_event)
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=True, clear_contacts=False,
+        )
 
-        async def _channel_with_name():
+        assert result == {
+            "cleared_channels": None,
+            "coords_reset": True,
+            "removed_contacts": None,
+        }
+        fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
+        fake_mc.commands.set_channel.assert_not_awaited()
+        fake_mc.commands.remove_contact.assert_not_awaited()
+        # appstart should fire because coords were touched.
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_only(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
+        fake_mc.commands.remove_contact = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_channel = AsyncMock()
+        fake_mc.commands.set_coords = AsyncMock()
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result == {
+            "cleared_channels": None,
+            "coords_reset": False,
+            "removed_contacts": 3,
+        }
+        called_keys = sorted(
+            c.args[0] for c in fake_mc.commands.remove_contact.await_args_list
+        )
+        assert called_keys == ["k1", "k2", "k3"]
+        fake_mc.commands.set_channel.assert_not_awaited()
+        fake_mc.commands.set_coords.assert_not_awaited()
+        # appstart should NOT fire — contacts-only doesn't change self_info.
+        fake_mc.commands.send_appstart.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_all_three_flags(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 2}
+        fake_mc.contacts = {"k1": {}, "k2": {}}
+
+        async def _ch_with_name():
             ev = MagicMock(type=EventType.CHANNEL_INFO)
-            ev.payload = {"channel_name": "hungary"}
+            ev.payload = {"channel_name": "Friends"}
             return ev
-        fake_mc.commands.get_channel = MagicMock(return_value=_channel_with_name())
+        fake_mc.commands.get_channel = MagicMock(return_value=_ch_with_name())
         fake_mc.commands.set_channel = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
         fake_mc.commands.set_coords = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
+        fake_mc.commands.remove_contact = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
         fake_mc.commands.send_appstart = AsyncMock()
         client._mc = fake_mc
 
-        result = await client.soft_reset()
+        result = await client.device_partial_reset(
+            clear_channels=True, reset_coords=True, clear_contacts=True,
+        )
 
-        # The fallback ran, and the channel-clear loop actually executed.
-        fake_mc.commands.send_device_query.assert_awaited_once()
-        assert result == {"cleared_channels": 1}
-        fake_mc.commands.set_channel.assert_awaited_once_with(1, "", b"\x00" * 16)
+        assert result == {
+            "cleared_channels": 1,
+            "coords_reset": True,
+            "removed_contacts": 2,
+        }
+        fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
+        assert fake_mc.commands.remove_contact.await_count == 2
+        fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_soft_reset_raises_when_set_channel_rejected(self):
+    async def test_no_flags_set_returns_empty_result(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_channel = AsyncMock()
+        fake_mc.commands.set_coords = AsyncMock()
+        fake_mc.commands.remove_contact = AsyncMock()
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=False,
+        )
+
+        assert result == {
+            "cleared_channels": None,
+            "coords_reset": False,
+            "removed_contacts": None,
+        }
+        fake_mc.commands.set_channel.assert_not_awaited()
+        fake_mc.commands.set_coords.assert_not_awaited()
+        fake_mc.commands.remove_contact.assert_not_awaited()
+        fake_mc.commands.send_appstart.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_clear_channels_raises_when_set_channel_rejected(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
         fake_mc.self_info = {"max_channels": 2}
@@ -819,20 +905,94 @@ class TestSoftReset:
         client._mc = fake_mc
 
         with pytest.raises(RuntimeError, match="rejected clear_channel"):
-            await client.soft_reset()
+            await client.device_partial_reset(
+                clear_channels=True, reset_coords=False, clear_contacts=False,
+            )
 
     @pytest.mark.asyncio
-    async def test_soft_reset_raises_when_set_coords_rejected(self):
+    async def test_reset_coords_raises_when_rejected(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
-        fake_mc.self_info = {"max_channels": 1}  # only Public, no channels to clear
         fake_mc.commands.set_coords = AsyncMock(
             return_value=MagicMock(type=EventType.ERROR),
         )
         client._mc = fake_mc
 
         with pytest.raises(RuntimeError, match="rejected set_coords"):
-            await client.soft_reset()
+            await client.device_partial_reset(
+                clear_channels=False, reset_coords=True, clear_contacts=False,
+            )
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_tolerates_partial_failure(self):
+        """A single remove_contact failure must not abort the whole sweep —
+        we log + continue, and surface the successful count to the caller."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
+        fake_mc.commands.remove_contact = AsyncMock(side_effect=[
+            MagicMock(type=EventType.OK),
+            MagicMock(type=EventType.ERROR),
+            MagicMock(type=EventType.OK),
+        ])
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result["removed_contacts"] == 2
+        assert fake_mc.commands.remove_contact.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_empty_when_no_contacts(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {}
+        fake_mc.commands.remove_contact = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result["removed_contacts"] == 0
+        fake_mc.commands.remove_contact.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_clear_channels_falls_back_to_device_query_for_max_channels(self):
+        """Real-world: self_info on a live LilyGo doesn't always carry
+        `max_channels` — fall back to send_device_query so the loop iterates."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"tx_power": 22, "radio_freq": 869.618}
+
+        device_query_event = MagicMock()
+        device_query_event.payload = {"max_channels": 2}
+        fake_mc.commands.send_device_query = AsyncMock(
+            return_value=device_query_event,
+        )
+
+        async def _channel_with_name():
+            ev = MagicMock(type=EventType.CHANNEL_INFO)
+            ev.payload = {"channel_name": "hungary"}
+            return ev
+        fake_mc.commands.get_channel = MagicMock(
+            return_value=_channel_with_name(),
+        )
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=True, reset_coords=False, clear_contacts=False,
+        )
+
+        fake_mc.commands.send_device_query.assert_awaited_once()
+        assert result["cleared_channels"] == 1
+        fake_mc.commands.set_channel.assert_awaited_once_with(1, "", b"\x00" * 16)
 
 
 class TestFactoryReset:

@@ -259,40 +259,8 @@ async def test_set_position_422_on_out_of_range(client):
     assert r.status_code == 422
 
 
-# --- /api/device/reset (Task 2.3) -----------------------------------------
-
-@pytest.mark.asyncio
-async def test_device_reset_soft_calls_soft_reset(client):
-    app.state.meshcore_client = AsyncMock()
-    app.state.meshcore_client.soft_reset = AsyncMock(
-        return_value={"cleared_channels": 2},
-    )
-    try:
-        r = await client.post(
-            "/api/device/reset",
-            json={"mode": "soft", "confirm": "RESET"},
-        )
-        assert r.status_code == 200, r.text
-        assert r.json() == {"mode": "soft", "cleared_channels": 2}
-        app.state.meshcore_client.soft_reset.assert_awaited_once()
-    finally:
-        del app.state.meshcore_client
-
-
-@pytest.mark.asyncio
-async def test_device_reset_soft_422_on_wrong_confirm(client):
-    app.state.meshcore_client = AsyncMock()
-    app.state.meshcore_client.soft_reset = AsyncMock()
-    try:
-        r = await client.post(
-            "/api/device/reset",
-            json={"mode": "soft", "confirm": "reset"},  # case mismatch
-        )
-        assert r.status_code == 422
-        app.state.meshcore_client.soft_reset.assert_not_awaited()
-    finally:
-        del app.state.meshcore_client
-
+# --- /api/device/reset — factory only (granular clears moved to
+# /api/admin/reset) ---------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_device_reset_factory_with_correct_confirm_returns_202(client):
@@ -328,12 +296,27 @@ async def test_device_reset_factory_422_on_wrong_confirm(client):
 
 
 @pytest.mark.asyncio
+async def test_device_reset_422_on_non_factory_mode(client):
+    """The endpoint now only accepts mode='factory'. Anything else
+    (including the old 'soft') must be rejected by Pydantic."""
+    app.state.meshcore_client = AsyncMock()
+    try:
+        r = await client.post(
+            "/api/device/reset",
+            json={"mode": "soft", "confirm": "RESET"},
+        )
+        assert r.status_code == 422
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
 async def test_device_reset_503_when_no_client(client):
     if hasattr(app.state, "meshcore_client"):
         del app.state.meshcore_client
     r = await client.post(
         "/api/device/reset",
-        json={"mode": "soft", "confirm": "RESET"},
+        json={"mode": "factory", "confirm": "FACTORY RESET"},
     )
     assert r.status_code == 503
 
@@ -341,13 +324,13 @@ async def test_device_reset_503_when_no_client(client):
 @pytest.mark.asyncio
 async def test_device_reset_503_on_connection_error(client):
     app.state.meshcore_client = AsyncMock()
-    app.state.meshcore_client.soft_reset = AsyncMock(
+    app.state.meshcore_client.factory_reset = AsyncMock(
         side_effect=ConnectionError("not connected"),
     )
     try:
         r = await client.post(
             "/api/device/reset",
-            json={"mode": "soft", "confirm": "RESET"},
+            json={"mode": "factory", "confirm": "FACTORY RESET"},
         )
         assert r.status_code == 503
     finally:
@@ -357,13 +340,13 @@ async def test_device_reset_503_on_connection_error(client):
 @pytest.mark.asyncio
 async def test_device_reset_502_on_runtime_error(client):
     app.state.meshcore_client = AsyncMock()
-    app.state.meshcore_client.soft_reset = AsyncMock(
+    app.state.meshcore_client.factory_reset = AsyncMock(
         side_effect=RuntimeError("rejected"),
     )
     try:
         r = await client.post(
             "/api/device/reset",
-            json={"mode": "soft", "confirm": "RESET"},
+            json={"mode": "factory", "confirm": "FACTORY RESET"},
         )
         assert r.status_code == 502
     finally:

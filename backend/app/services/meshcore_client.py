@@ -503,55 +503,80 @@ class MeshCoreClient:
             # Refresh self_info so the upcoming refetch sees the new coords.
             await mc.commands.send_appstart()
 
-    async def soft_reset(self) -> dict:
-        """Clear non-public channels + reset GPS coords to 0,0.
-
-        Identity, contacts, and radio params are preserved. Idx 0
-        (Public channel) is firmware-special and is NEVER cleared —
-        doing so would leave the device unable to participate in
-        public traffic.
-        """
+    async def device_partial_reset(
+        self,
+        *,
+        clear_channels: bool,
+        reset_coords: bool,
+        clear_contacts: bool,
+    ) -> dict:
+        """Granular device-flash reset. Each flag is independent; pass
+        only the targets you want to clear. Identity + radio params always
+        preserved — for full identity wipe use ``factory_reset``."""
         mc = await self._require_mc()
+        result: dict = {
+            "cleared_channels": None,
+            "coords_reset": False,
+            "removed_contacts": None,
+        }
         async with self._lock:
-            # `mc.self_info` is populated at appstart but doesn't always
-            # carry `max_channels` (firmware exposes that via
-            # send_device_query instead). Fall back to a fresh
-            # device-query — same pattern as `get_channels` above.
-            # Without this, real devices silently no-op the channel
-            # clearing loop (`range(1, 0)` is empty) and the user sees
-            # nothing happen on soft reset.
-            max_ch = (mc.self_info or {}).get("max_channels", 0)
-            if not max_ch:
-                info = await mc.commands.send_device_query()
-                max_ch = (
-                    info.payload.get("max_channels", 0)
-                    if info is not None and info.payload is not None
-                    else 0
-                )
-            cleared = 0
-            for i in range(1, max_ch):
-                ev = await mc.commands.get_channel(i)
-                # None-guard: a partial-state device could return None here.
-                # Without this check, .type access raises AttributeError
-                # mid-loop and leaves the device with some channels cleared
-                # and others not — worse than just skipping the unknown slot.
-                if ev is None or ev.type != EventType.CHANNEL_INFO:
-                    continue
-                name = (ev.payload.get("channel_name") or "").strip()
-                if not name:
-                    continue
-                r = await mc.commands.set_channel(i, "", b"\x00" * 16)
-                if r is None or r.type == EventType.ERROR:
-                    raise RuntimeError(
-                        f"Device rejected clear_channel(idx={i})"
+            if clear_channels:
+                max_ch = (mc.self_info or {}).get("max_channels", 0)
+                if not max_ch:
+                    info = await mc.commands.send_device_query()
+                    max_ch = (
+                        info.payload.get("max_channels", 0)
+                        if info is not None and info.payload is not None
+                        else 0
                     )
-                cleared += 1
-            r = await mc.commands.set_coords(0, 0)
-            if r is None or r.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_coords(0, 0)")
-            await mc.commands.send_appstart()
-        log.warning("RESET ACTION=device_soft cleared_channels=%d", cleared)
-        return {"cleared_channels": cleared}
+                cleared = 0
+                for i in range(1, max_ch):
+                    ev = await mc.commands.get_channel(i)
+                    if ev is None or ev.type != EventType.CHANNEL_INFO:
+                        continue
+                    name = (ev.payload.get("channel_name") or "").strip()
+                    if not name:
+                        continue
+                    r = await mc.commands.set_channel(i, "", b"\x00" * 16)
+                    if r is None or r.type == EventType.ERROR:
+                        raise RuntimeError(
+                            f"Device rejected clear_channel(idx={i})"
+                        )
+                    cleared += 1
+                result["cleared_channels"] = cleared
+                log.warning("RESET ACTION=device_channels cleared=%d", cleared)
+            if reset_coords:
+                r = await mc.commands.set_coords(0, 0)
+                if r is None or r.type == EventType.ERROR:
+                    raise RuntimeError("Device rejected set_coords(0, 0)")
+                result["coords_reset"] = True
+                log.warning("RESET ACTION=device_coords completed=True")
+            if clear_contacts:
+                # Inline the contact-clearing logic here so the whole sweep
+                # stays under one `_lock` and one supervisor wake-up. Take
+                # a snapshot of keys BEFORE iterating — removing while
+                # iterating the live dict would risk a RuntimeError on some
+                # firmware/lib combos.
+                keys = list((mc.contacts or {}).keys())
+                removed = 0
+                for k in keys:
+                    r = await mc.commands.remove_contact(k)
+                    if r is None or r.type == EventType.ERROR:
+                        # Don't abort the whole sweep on a single failure;
+                        # log and continue — the user wanted a reset,
+                        # surface the count.
+                        log.warning(
+                            "clear_contacts: device rejected remove for %s", k,
+                        )
+                        continue
+                    removed += 1
+                result["removed_contacts"] = removed
+                log.warning("RESET ACTION=device_contacts removed=%d", removed)
+            # If we touched channels OR coords, refresh self_info so subsequent
+            # /api/device/self-info reflects the new state.
+            if clear_channels or reset_coords:
+                await mc.commands.send_appstart()
+        return result
 
     async def factory_reset(self) -> None:
         """Wipe ALL device state including the Ed25519 identity keypair.

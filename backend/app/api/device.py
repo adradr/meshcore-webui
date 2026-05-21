@@ -24,8 +24,7 @@ from app.schemas.reset import DeviceResetRequest
 
 router = APIRouter(prefix="/api/device", tags=["device"])
 
-# Typed-confirm tokens, case-sensitive. Match the UI prompts exactly.
-_SOFT_CONFIRM_TOKEN = "RESET"
+# Typed-confirm token, case-sensitive. Matches the UI prompt exactly.
 _FACTORY_CONFIRM_TOKEN = "FACTORY RESET"
 
 
@@ -116,46 +115,24 @@ async def set_position(body: PositionIn, request: Request) -> dict:
 
 @router.post("/reset")
 async def reset_device(body: DeviceResetRequest, request: Request):
-    """Device-side reset: soft or factory.
+    """Factory reset the device.
 
-    Both modes require a typed-confirmation token matching an exact,
-    case-sensitive string. Compared with ``hmac.compare_digest`` to
-    mirror the API-key auth idiom — not a secret, but treating it as
-    one keeps comparison behavior uniform across every gated
-    mutation in this app.
-
-    Soft reset (200): clears non-public channels + coords; preserves
-    identity, contacts, radio params.
-
-    Factory reset (202 Accepted): wipes ALL device state including
-    the Ed25519 identity keypair. The device reboots with a fresh
-    random key — every peer that knew this radio sees it as new.
+    Wipes ALL device state including the Ed25519 identity keypair.
+    The device reboots and reads a NEW random keypair. Granular
+    device-side clears (channels, coords, contacts) live in the
+    unified ``POST /api/admin/reset`` toggle endpoint instead.
     """
     client = getattr(request.app.state, "meshcore_client", None)
     if client is None:
         raise HTTPException(503, "MeshCore client not initialised")
-
-    if body.mode == "soft":
-        if not hmac.compare_digest(body.confirm, _SOFT_CONFIRM_TOKEN):
-            raise HTTPException(422, "confirm must be 'RESET'")
-        try:
-            result = await client.soft_reset()
-        except ConnectionError as e:
-            raise HTTPException(503, str(e))
-        except RuntimeError as e:
-            raise HTTPException(502, str(e))
-        return {"mode": "soft", **result}
-
-    # mode == "factory" (Pydantic Literal already validated the only other
-    # possible value)
     if not hmac.compare_digest(body.confirm, _FACTORY_CONFIRM_TOKEN):
         raise HTTPException(422, "confirm must be 'FACTORY RESET'")
     try:
         await client.factory_reset()
     except ConnectionError as e:
-        raise HTTPException(503, str(e))
+        raise HTTPException(503, str(e)) from e
     except RuntimeError as e:
-        raise HTTPException(502, str(e))
+        raise HTTPException(502, str(e)) from e
     return JSONResponse(
         status_code=202,
         content={
