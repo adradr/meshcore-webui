@@ -113,7 +113,7 @@ export function HeardRepeatsSheet({
                 size="sm"
                 onClick={() =>
                   discoverPath.mutate({
-                    pubkey: peer.public_key ?? contactPubKey,
+                    pubkey: peer.public_key ?? contactPubKey ?? "",
                   })
                 }
                 disabled={discoverPath.isPending}
