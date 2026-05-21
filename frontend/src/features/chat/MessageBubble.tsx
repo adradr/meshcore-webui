@@ -174,6 +174,7 @@ export function MessageBubble({
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         contactPubKey={message.contact_pub_key}
+        messagePath={message.path}
       />
       <MessageDetailsSheet
         message={detailsOpen ? message : null}

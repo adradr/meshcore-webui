@@ -15,6 +15,13 @@ class MessageOut(BaseModel):
     ack_state: str
     expected_ack_hex: str | None = None
     pubkey_prefix: str | None = None
+    # Per-message radio metadata captured from RX_LOG_DATA correlation.
+    # Populated for inbound messages when the radio reported the raw
+    # packet AND the meshcore lib had decrypt_channels enabled. Always
+    # null for outbound messages — those have an out_path on the contact.
+    path: str | None = None
+    snr: float | None = None
+    rssi: int | None = None
 
 
 class MessagesPage(BaseModel):

@@ -19,6 +19,27 @@ log = logging.getLogger(__name__)
 SelfNameProvider = Callable[[], str | None]
 
 
+def _safe_float(v) -> float | None:
+    """Coerce SNR-like values to float, dropping non-numeric input."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(v) -> int | None:
+    """Coerce RSSI-like values to int. RSSI is reported as a signed dBm
+    integer by the firmware; floats are tolerated and truncated."""
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _default_self_name_provider() -> str | None:
     """Fallback provider used when the bridge is constructed without one.
 
@@ -77,6 +98,9 @@ class MeshCoreBridge:
                 direction="in",
                 text=payload.get("text") or "",
                 pubkey_prefix=payload.get("pubkey_prefix"),
+                path=payload.get("path"),
+                snr=_safe_float(payload.get("SNR") or payload.get("snr")),
+                rssi=_safe_int(payload.get("RSSI") or payload.get("rssi")),
             )
             db.add(msg)
             await db.commit()
@@ -112,6 +136,14 @@ class MeshCoreBridge:
                 direction="in",
                 text=payload.get("text") or "",
                 pubkey_prefix=payload.get("pubkey_prefix"),
+                # The meshcore lib correlates the decoded CHANNEL_MSG_RECV
+                # with its raw RX_LOG_DATA entry when decrypt_channels is
+                # enabled. That correlation surfaces path/SNR/RSSI here —
+                # this is the data point that lets "Heard via repeaters"
+                # render for channel messages, matching the Flutter app.
+                path=payload.get("path"),
+                snr=_safe_float(payload.get("SNR") or payload.get("snr")),
+                rssi=_safe_int(payload.get("RSSI") or payload.get("rssi")),
             )
             db.add(msg)
             await db.commit()

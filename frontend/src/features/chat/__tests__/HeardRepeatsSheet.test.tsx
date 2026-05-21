@@ -28,8 +28,35 @@ function wrap(ui: React.ReactNode) {
   return <QueryClientProvider client={qc}>{ui}</QueryClientProvider>
 }
 
+// Hex-encoded repeater path: hop "ab" then "cd" (two known contacts in
+// the mock above). Two hops × 1 byte each = 4 hex chars total.
+const TWO_HOP_PATH = "abcd"
+
 describe("HeardRepeatsSheet", () => {
-  it("shows channel-friendly text when contactPubKey is null", () => {
+  it("renders hops from a per-message path on a channel message", () => {
+    render(
+      wrap(
+        <HeardRepeatsSheet
+          open={true}
+          onOpenChange={() => {}}
+          contactPubKey={null}
+          messagePath={TWO_HOP_PATH}
+        />,
+      ),
+    )
+    expect(
+      screen.getByText(/path this channel message took/i),
+    ).toBeInTheDocument()
+    // parseRepeaterPath only resolves contacts with type=2 (repeater).
+    // Our mocked Alpha/Charlie don't carry that type, so the fallback
+    // "Repeater <HASH>" rendering is what we expect — proves the path
+    // decoded into two hop rows, which is the load-bearing assertion.
+    expect(screen.getByText("Repeater AB")).toBeInTheDocument()
+    expect(screen.getByText("Repeater CD")).toBeInTheDocument()
+  })
+
+
+  it("shows 'no path recorded' for a channel message without a captured path", () => {
     render(
       wrap(
         <HeardRepeatsSheet
@@ -39,11 +66,12 @@ describe("HeardRepeatsSheet", () => {
         />,
       ),
     )
+    // Channel messages now CAN carry a per-message path (when the radio
+    // captured RX_LOG_DATA AND decrypt_channels is on). When they don't,
+    // surface that honestly instead of pretending channel paths are
+    // 'not applicable'.
     expect(
-      screen.getByText(/repeater path varies per relay/i),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText(/not applicable for channel messages/i),
+      screen.getByText(/no path recorded/i),
     ).toBeInTheDocument()
   })
 

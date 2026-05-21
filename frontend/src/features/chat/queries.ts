@@ -14,6 +14,14 @@ const MessageSchema = z.object({
   pubkey_prefix: z.string().nullable().optional(),
   expected_ack_hex: z.string().nullable().optional(),
   ack_received_at: z.string().nullable().optional(),
+  // Per-message radio metadata, populated for inbound messages when the
+  // backend correlated the decoded message with its RX_LOG_DATA entry.
+  // `path` is the hex-encoded list of repeater hashes the packet took to
+  // reach us — distinct from a contact's cached out_path (which is the
+  // path we'd USE for sending to them).
+  path: z.string().nullable().optional(),
+  snr: z.number().nullable().optional(),
+  rssi: z.number().nullable().optional(),
 })
 
 const MessagesPage = z.object({

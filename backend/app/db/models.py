@@ -33,6 +33,13 @@ class Message(Base):
     ack_received_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     expected_ack_hex: Mapped[str | None] = mapped_column(String(8), index=True)
     pubkey_prefix: Mapped[str | None] = mapped_column(String(16), index=True)
+    # Per-message radio metadata. Populated for inbound messages when the
+    # meshcore lib correlates the decoded message with its RX_LOG_DATA
+    # entry (requires decrypt_channels=True). Always null for outbound
+    # messages — those have an out_path on the contact instead.
+    path: Mapped[str | None] = mapped_column(String(128))
+    snr: Mapped[float | None] = mapped_column(Float)
+    rssi: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index("ix_messages_contact_ts", "contact_pub_key", "timestamp"),

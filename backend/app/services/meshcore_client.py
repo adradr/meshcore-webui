@@ -179,6 +179,13 @@ class MeshCoreClient:
         )
         if mc is None:
             raise ConnectionError(f"appstart failed at {self._host}:{self._port}")
+        # Enable channel-log decryption so the lib correlates inbound
+        # channel messages with their RX_LOG_DATA entries — that's what
+        # surfaces `path`, `RSSI`, `SNR` per channel message (matches
+        # the official Flutter app). Disabled by default in the lib;
+        # without this our channel messages would arrive without those
+        # fields and the "Heard via repeaters" panel could not render.
+        mc.set_decrypt_channel_logs(True)
         self._mc = mc
         self._disconnect_evt = asyncio.Event()
         for et in self._FORWARDED_EVENTS:
