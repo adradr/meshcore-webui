@@ -14,6 +14,7 @@ import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
 import { MutedList } from "@/features/mutes/MutedList"
 import { PushModeRadio } from "@/features/push/PushModeRadio"
+import { DangerZone } from "@/features/admin/DangerZone"
 
 const REPO_URL = "https://github.com/randomicon/meshcore-webui"
 
@@ -178,6 +179,8 @@ export function SettingsPage() {
             .
           </p>
         </section>
+
+        <DangerZone />
       </div>
     </PageShell>
   )
