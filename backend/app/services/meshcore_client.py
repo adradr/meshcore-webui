@@ -517,7 +517,11 @@ class MeshCoreClient:
             cleared = 0
             for i in range(1, max_ch):
                 ev = await mc.commands.get_channel(i)
-                if ev.type != EventType.CHANNEL_INFO:
+                # None-guard: a partial-state device could return None here.
+                # Without this check, .type access raises AttributeError
+                # mid-loop and leaves the device with some channels cleared
+                # and others not — worse than just skipping the unknown slot.
+                if ev is None or ev.type != EventType.CHANNEL_INFO:
                     continue
                 name = (ev.payload.get("channel_name") or "").strip()
                 if not name:
