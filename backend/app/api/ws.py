@@ -40,21 +40,54 @@ async def ws(websocket: WebSocket) -> None:
     client = getattr(websocket.app.state, "meshcore_client", None)
     queue: asyncio.Queue | None = client.subscribe() if client else None
 
+    # Shared signal: reader sets this on disconnect so writer can bail
+    # out before its next `send_json` (otherwise the writer would happily
+    # call `send_json` on a closed socket and uvicorn raises
+    # `RuntimeError: Unexpected ASGI message 'websocket.send'…`).
+    closed = asyncio.Event()
+
     async def reader() -> None:
-        while True:
-            try:
-                data = await websocket.receive_json()
-            except WebSocketDisconnect:
-                return
-            if data.get("type") == "ping":
-                await websocket.send_json({"type": "pong", "payload": {}})
+        try:
+            while True:
+                try:
+                    data = await websocket.receive_json()
+                except WebSocketDisconnect:
+                    return
+                if data.get("type") == "ping":
+                    try:
+                        await websocket.send_json(
+                            {"type": "pong", "payload": {}},
+                        )
+                    except (WebSocketDisconnect, RuntimeError):
+                        return
+        finally:
+            closed.set()
 
     async def writer() -> None:
         if queue is None:
+            await closed.wait()
             return
-        while True:
-            event = await queue.get()
-            await websocket.send_json(event.to_dict())
+        queue_get = asyncio.create_task(queue.get())
+        closed_wait = asyncio.create_task(closed.wait())
+        try:
+            while True:
+                done, _ = await asyncio.wait(
+                    (queue_get, closed_wait),
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if closed_wait in done:
+                    return
+                event = queue_get.result()
+                queue_get = asyncio.create_task(queue.get())
+                try:
+                    await websocket.send_json(event.to_dict())
+                except (WebSocketDisconnect, RuntimeError):
+                    # The socket closed in the gap between our last
+                    # `closed.wait()` check and this send.
+                    return
+        finally:
+            queue_get.cancel()
+            closed_wait.cancel()
 
     try:
         await asyncio.gather(reader(), writer())
