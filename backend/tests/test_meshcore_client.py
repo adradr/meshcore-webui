@@ -762,6 +762,47 @@ class TestSoftReset:
         fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_soft_reset_falls_back_to_device_query_for_max_channels(self):
+        """Real-world bug: self_info on a live LilyGo doesn't always carry
+        `max_channels` — that field comes from CMD_SEND_DEVICE_QUERY, not
+        appstart. Without the fallback, range(1, 0) is empty and the
+        channel-clear loop silently no-ops — soft_reset 'succeeded' on the
+        user's device but left every channel intact. Lock this behavior in.
+        """
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        # self_info LACKS max_channels (real-device shape per the user's
+        # /api/device/self-info dump on 2026-05-21).
+        fake_mc.self_info = {"tx_power": 22, "radio_freq": 869.618}
+
+        # send_device_query is the fallback — return max_channels=2 so the
+        # loop iterates exactly idx 1.
+        device_query_event = MagicMock()
+        device_query_event.payload = {"max_channels": 2}
+        fake_mc.commands.send_device_query = AsyncMock(return_value=device_query_event)
+
+        async def _channel_with_name():
+            ev = MagicMock(type=EventType.CHANNEL_INFO)
+            ev.payload = {"channel_name": "hungary"}
+            return ev
+        fake_mc.commands.get_channel = MagicMock(return_value=_channel_with_name())
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_coords = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.soft_reset()
+
+        # The fallback ran, and the channel-clear loop actually executed.
+        fake_mc.commands.send_device_query.assert_awaited_once()
+        assert result == {"cleared_channels": 1}
+        fake_mc.commands.set_channel.assert_awaited_once_with(1, "", b"\x00" * 16)
+
+    @pytest.mark.asyncio
     async def test_soft_reset_raises_when_set_channel_rejected(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)

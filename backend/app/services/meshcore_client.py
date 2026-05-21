@@ -513,7 +513,21 @@ class MeshCoreClient:
         """
         mc = await self._require_mc()
         async with self._lock:
+            # `mc.self_info` is populated at appstart but doesn't always
+            # carry `max_channels` (firmware exposes that via
+            # send_device_query instead). Fall back to a fresh
+            # device-query — same pattern as `get_channels` above.
+            # Without this, real devices silently no-op the channel
+            # clearing loop (`range(1, 0)` is empty) and the user sees
+            # nothing happen on soft reset.
             max_ch = (mc.self_info or {}).get("max_channels", 0)
+            if not max_ch:
+                info = await mc.commands.send_device_query()
+                max_ch = (
+                    info.payload.get("max_channels", 0)
+                    if info is not None and info.payload is not None
+                    else 0
+                )
             cleared = 0
             for i in range(1, max_ch):
                 ev = await mc.commands.get_channel(i)
