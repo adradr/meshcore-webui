@@ -519,13 +519,20 @@ class MeshCoreClient:
         clears. Paired with ``clear_contacts`` it's the cleanest way to
         actually keep contacts gone: the reboot flushes the device's RX
         queue and any in-flight adverts that would otherwise immediately
-        re-add the contacts we just removed."""
+        re-add the contacts we just removed.
+
+        When the device is rebooted we **block** until the supervisor
+        re-establishes the link (or `_RECONNECT_WAIT_S` elapses), so the
+        SPA's `/api/contacts` refetch that fires on `useReset` success
+        no longer races the reconnect window and returns stale 503s.
+        The result dict carries `reconnected: bool` for observability."""
         mc = await self._require_mc()
         result: dict = {
             "cleared_channels": None,
             "coords_reset": False,
             "removed_contacts": None,
             "rebooted": False,
+            "reconnected": False,
         }
         async with self._lock:
             if clear_channels:
@@ -628,7 +635,54 @@ class MeshCoreClient:
                     raise RuntimeError("Device rejected reboot")
                 result["rebooted"] = True
                 log.warning("RESET ACTION=device_reboot completed=True")
+        # We MUST release the lock before waiting for the reconnect —
+        # the supervisor's reconnect path calls `mc.ensure_contacts()`
+        # which may acquire other internal locks; holding ours would
+        # also serialize unrelated requests for up to _RECONNECT_WAIT_S.
+        if reboot_device:
+            result["reconnected"] = await self._wait_for_reconnect(
+                timeout=self._RECONNECT_WAIT_S,
+            )
         return result
+
+    # Bound on how long device_partial_reset blocks waiting for the
+    # supervisor to re-establish the TCP companion link after a reboot.
+    # Empirically the device is back in 2-5s; 15s is a generous ceiling
+    # that still keeps the SPA's spinner from feeling broken.
+    _RECONNECT_WAIT_S: float = 15.0
+    _RECONNECT_POLL_S: float = 0.2
+    # Grace period after `is_radio_connected()` flips back to True so
+    # the lib's post-reconnect `ensure_contacts()` has time to finish
+    # repopulating `mc.contacts` before the next REST call lands.
+    _RECONNECT_GRACE_S: float = 0.5
+
+    async def _wait_for_reconnect(self, *, timeout: float) -> bool:
+        """Wait until the radio drops *then* re-establishes the TCP link.
+
+        Returns True if the full disconnect → reconnect cycle is observed
+        within `timeout`, False if it times out. Polls `is_radio_connected`
+        rather than awaiting an event so it works whether the disconnect
+        has already happened by the time we start waiting (no missed-edge
+        race).
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        saw_disconnect = False
+        while loop.time() < deadline:
+            connected = self.is_radio_connected()
+            if not connected:
+                saw_disconnect = True
+            elif saw_disconnect:
+                # Reconnect observed — wait briefly so `ensure_contacts`
+                # can finish repopulating `mc.contacts`.
+                await asyncio.sleep(self._RECONNECT_GRACE_S)
+                return True
+            await asyncio.sleep(self._RECONNECT_POLL_S)
+        log.warning(
+            "wait_for_reconnect timed out after %.1fs (saw_disconnect=%s)",
+            timeout, saw_disconnect,
+        )
+        return False
 
     async def factory_reset(self) -> None:
         """Wipe ALL device state including the Ed25519 identity keypair.

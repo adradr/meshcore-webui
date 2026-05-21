@@ -48,6 +48,7 @@ describe("useReset", () => {
         coords_reset: true,
         removed_contacts: null,
         rebooted: false,
+        reconnected: false,
       },
     }
     ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response)
@@ -94,6 +95,57 @@ describe("useReset", () => {
     // friendlyMessage helper returns `detail || \`${prefix} rejected by device\``
     // for 422, so it surfaces the backend detail verbatim.
     expect(toast.error).toHaveBeenCalledWith("confirm must equal RESET")
+  })
+
+  it("on success: removes device-state queries and invalidates others", async () => {
+    const response: ResetResult = {
+      local: {
+        messages: 3, diagnostic_runs: null, rx_log: null,
+        mutes: null, settings: null, push_subscribers: null,
+      },
+      device: {
+        cleared_channels: null, coords_reset: false,
+        removed_contacts: 7, rebooted: true, reconnected: true,
+      },
+    }
+    ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response)
+
+    const qc = makeClient()
+    // Seed caches that should be cleared by the reset.
+    qc.setQueryData(["contacts"], { "k1": { adv_name: "Alice" } })
+    qc.setQueryData(["channels"], [{ idx: 1, name: "Friends" }])
+    qc.setQueryData(["device", "self-info"], { name: "node" })
+    qc.setQueryData(["threads"], [{ key: "k1" }])
+    // Seed a cache that should be invalidated (kept, just marked stale).
+    qc.setQueryData(["mutes"], { "k1": true })
+
+    const removeSpy = vi.spyOn(qc, "removeQueries")
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries")
+    const cancelSpy = vi.spyOn(qc, "cancelQueries")
+
+    const { result } = renderHook(() => useReset(), {
+      wrapper: makeWrapper(qc),
+    })
+    result.current.mutate({
+      local: { messages: true },
+      device: { contacts: true, reboot: true },
+      confirm: "RESET",
+    })
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(cancelSpy).toHaveBeenCalled()
+    // Device-state caches MUST be evicted entirely so the next mount
+    // shows a loading skeleton instead of stale rows.
+    expect(qc.getQueryData(["contacts"])).toBeUndefined()
+    expect(qc.getQueryData(["channels"])).toBeUndefined()
+    expect(qc.getQueryData(["device", "self-info"])).toBeUndefined()
+    expect(qc.getQueryData(["threads"])).toBeUndefined()
+    // Local-side caches survive (still in cache, marked stale).
+    expect(qc.getQueryData(["mutes"])).toEqual({ "k1": true })
+
+    expect(removeSpy).toHaveBeenCalled()
+    expect(invalidateSpy).toHaveBeenCalled()
   })
 })
 

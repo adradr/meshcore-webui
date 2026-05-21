@@ -28,6 +28,7 @@ async def test_reset_local_messages_only_empty_db(client):
         "coords_reset": False,
         "removed_contacts": None,
         "rebooted": False,
+        "reconnected": False,
     }
 
 
@@ -68,6 +69,7 @@ async def test_reset_device_coords_runs_via_partial_reset(client):
         "coords_reset": True,
         "removed_contacts": None,
         "rebooted": False,
+        "reconnected": False,
     })
     app.state.meshcore_client = fake
     try:
@@ -130,6 +132,7 @@ async def test_reset_combined_local_and_device(client):
         "coords_reset": False,
         "removed_contacts": 3,
         "rebooted": False,
+        "reconnected": False,
     })
     app.state.meshcore_client = fake
     try:
@@ -161,6 +164,7 @@ async def test_reset_device_reboot_only(client):
         "coords_reset": False,
         "removed_contacts": None,
         "rebooted": True,
+        "reconnected": True,
     })
     app.state.meshcore_client = fake
     try:

@@ -83,6 +83,7 @@ async def reset_unified(
     device_result: dict = {
         "cleared_channels": None, "coords_reset": False,
         "removed_contacts": None, "rebooted": False,
+        "reconnected": False,
     }
     if body.device.any_selected():
         client = getattr(request.app.state, "meshcore_client", None)

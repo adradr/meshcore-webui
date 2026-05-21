@@ -761,6 +761,7 @@ class TestDevicePartialReset:
             "coords_reset": False,
             "removed_contacts": None,
             "rebooted": False,
+            "reconnected": False,
         }
         cleared = sorted(
             call.args[0] for call in fake_mc.commands.set_channel.await_args_list
@@ -793,6 +794,7 @@ class TestDevicePartialReset:
             "coords_reset": True,
             "removed_contacts": None,
             "rebooted": False,
+            "reconnected": False,
         }
         fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
         fake_mc.commands.set_channel.assert_not_awaited()
@@ -829,6 +831,7 @@ class TestDevicePartialReset:
             "coords_reset": False,
             "removed_contacts": 3,
             "rebooted": False,
+            "reconnected": False,
         }
         called_keys = sorted(
             c.args[0] for c in fake_mc.commands.remove_contact.await_args_list
@@ -876,6 +879,7 @@ class TestDevicePartialReset:
             "coords_reset": True,
             "removed_contacts": 2,
             "rebooted": False,
+            "reconnected": False,
         }
         fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
         assert fake_mc.commands.remove_contact.await_count == 2
@@ -900,6 +904,7 @@ class TestDevicePartialReset:
             "coords_reset": False,
             "removed_contacts": None,
             "rebooted": False,
+            "reconnected": False,
         }
         fake_mc.commands.set_channel.assert_not_awaited()
         fake_mc.commands.set_coords.assert_not_awaited()
@@ -1019,7 +1024,7 @@ class TestDevicePartialReset:
         fake_mc.commands.set_channel.assert_awaited_once_with(1, "", b"\x00" * 16)
 
     @pytest.mark.asyncio
-    async def test_reboot_only(self):
+    async def test_reboot_only(self, monkeypatch):
         """`reboot_device=True` alone calls `commands.reboot()` and does
         NOT touch channels/coords/contacts. `send_appstart` is skipped
         because the supervisor reconnect path will re-appstart anyway."""
@@ -1033,6 +1038,10 @@ class TestDevicePartialReset:
             return_value=MagicMock(type=EventType.OK),
         )
         client._mc = fake_mc
+        # The reconnect wait is exercised in its own focused tests;
+        # here we just want to verify the reboot command path.
+        async def _instant_reconnect(**_kw): return True
+        monkeypatch.setattr(client, "_wait_for_reconnect", _instant_reconnect)
 
         result = await client.device_partial_reset(
             clear_channels=False, reset_coords=False,
@@ -1044,6 +1053,7 @@ class TestDevicePartialReset:
             "coords_reset": False,
             "removed_contacts": None,
             "rebooted": True,
+            "reconnected": True,
         }
         fake_mc.commands.reboot.assert_awaited_once()
         fake_mc.commands.send_appstart.assert_not_awaited()
@@ -1052,7 +1062,7 @@ class TestDevicePartialReset:
         fake_mc.commands.remove_contact.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_reboot_runs_last_and_replaces_appstart(self):
+    async def test_reboot_runs_last_and_replaces_appstart(self, monkeypatch):
         """When reboot is combined with another op (e.g. contacts), the
         reboot fires AFTER and we skip the post-clear send_appstart —
         the reboot itself drops the link and the supervisor reconnect
@@ -1076,6 +1086,8 @@ class TestDevicePartialReset:
             fake_mc.contacts = {}
         fake_mc.ensure_contacts = AsyncMock(side_effect=_resync)
         client._mc = fake_mc
+        async def _instant_reconnect(**_kw): return True
+        monkeypatch.setattr(client, "_wait_for_reconnect", _instant_reconnect)
 
         result = await client.device_partial_reset(
             clear_channels=False, reset_coords=True,
@@ -1103,6 +1115,84 @@ class TestDevicePartialReset:
                 clear_channels=False, reset_coords=False,
                 clear_contacts=False, reboot_device=True,
             )
+
+    @pytest.mark.asyncio
+    async def test_reboot_waits_for_supervisor_to_reconnect(self, monkeypatch):
+        """The reset MUST block until the supervisor re-establishes the
+        TCP link, otherwise the SPA's `/api/contacts` refetch on success
+        races the reconnect window and returns 503 / stale data."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.reboot = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+        # Speed up the polling loop so the test takes <1s.
+        monkeypatch.setattr(client, "_RECONNECT_POLL_S", 0.01)
+        monkeypatch.setattr(client, "_RECONNECT_GRACE_S", 0.0)
+
+        # Simulate the supervisor: after a brief delay, flip
+        # is_radio_connected from True → False → True. We do this by
+        # patching the underlying property the helper checks.
+        states = iter([True, False, False, True, True, True])
+        monkeypatch.setattr(
+            client, "is_radio_connected", lambda: next(states),
+        )
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False,
+            clear_contacts=False, reboot_device=True,
+        )
+
+        assert result["rebooted"] is True
+        assert result["reconnected"] is True
+
+    @pytest.mark.asyncio
+    async def test_reboot_reports_reconnected_false_on_timeout(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.reboot = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+        monkeypatch.setattr(client, "_RECONNECT_POLL_S", 0.01)
+        monkeypatch.setattr(client, "_RECONNECT_WAIT_S", 0.05)
+        # Connection drops and never comes back during the wait window.
+        monkeypatch.setattr(client, "is_radio_connected", lambda: False)
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False,
+            clear_contacts=False, reboot_device=True,
+        )
+
+        assert result["rebooted"] is True
+        assert result["reconnected"] is False
+
+    @pytest.mark.asyncio
+    async def test_no_reboot_skips_wait_for_reconnect(self, monkeypatch):
+        """Resets without reboot must not pay the reconnect-wait cost;
+        the lock is released immediately and `reconnected` stays False."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {}
+        fake_mc.commands.remove_contact = AsyncMock()
+        fake_mc.ensure_contacts = AsyncMock()
+        client._mc = fake_mc
+        # If the helper got called for a non-reboot reset, this would
+        # explode loudly — proving the helper is gated on `reboot_device`.
+        called = {"v": False}
+        async def _explode(**_kw):
+            called["v"] = True
+            return False
+        monkeypatch.setattr(client, "_wait_for_reconnect", _explode)
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False,
+            clear_contacts=True, reboot_device=False,
+        )
+
+        assert called["v"] is False
+        assert result["reconnected"] is False
 
 
 class TestFactoryReset:

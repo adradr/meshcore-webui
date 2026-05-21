@@ -39,8 +39,25 @@ export interface ResetResult {
     coords_reset: boolean
     removed_contacts: number | null
     rebooted: boolean
+    reconnected: boolean
   }
 }
+
+// Query keys whose cached data is rendered from the radio's live state.
+// After a reset these MUST be cleared (not just invalidated) so the
+// next mount renders a loading skeleton + fresh fetch instead of
+// briefly painting stale rows that the user has to Cmd+R away.
+const DEVICE_STATE_QUERY_KEYS: ReadonlyArray<readonly string[]> = [
+  ["contacts"],
+  ["contacts", "stats"],
+  ["channels"],
+  ["device"],
+  ["device", "status"],
+  ["device", "self-info"],
+  ["device", "position"],
+  ["threads"],
+  ["messages"],
+] as const
 
 /** Count how many targets reported a non-null result. */
 function totalTargetsRun(r: ResetResult): number {
@@ -65,6 +82,23 @@ export function useReset() {
     mutationFn: (body) => api.post<ResetResult>("/api/admin/reset", body),
     onSuccess: (r) => {
       toast.success(`Reset complete — ${totalTargetsRun(r)} target(s) cleared`)
+      // Cancel any in-flight reads that started against the pre-reset
+      // state so they don't overwrite the post-reset fetch.
+      qc.cancelQueries()
+      // Hard-evict device-state caches: with just `invalidateQueries`
+      // React Query returns the stale cached rows on mount + refetches
+      // in the background, so the user briefly sees the OLD contacts /
+      // channels / position until the refetch returns (or sees them
+      // forever if the refetch races a reboot reconnect and 503s).
+      // Removing the queries forces the consumer to render its loading
+      // skeleton, then the fresh empty list.
+      for (const key of DEVICE_STATE_QUERY_KEYS) {
+        qc.removeQueries({ queryKey: key })
+      }
+      // Local-side queries (mutes, settings, push, diagnostics, rx_log)
+      // are unaffected by the reboot window — `invalidateQueries` is
+      // the right tool: stale-while-revalidate is fine and avoids a
+      // jarring flash of skeletons for screens the user isn't looking at.
       qc.invalidateQueries()
     },
     onError: (e) => notifyError("Reset", e),
