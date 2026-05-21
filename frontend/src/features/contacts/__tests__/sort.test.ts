@@ -7,14 +7,19 @@ import {
   type SortInput,
 } from "../sort"
 
-// Three contacts wired up with mixed stat coverage:
-// - alice:   last_advert=300 (oldest), msg_count=10, first=2026-01-01, last=2026-05-10
-// - Bob:     last_advert=100 (newest is below), msg_count=5,  first=2026-03-01, last=2026-05-15
-// - charlie: last_advert=null,                    NO STATS (sorts to bottom)
+// Three contacts wired up with mixed stat coverage. Timestamps are real
+// post-2020 Unix seconds so they aren't clamped by the
+// MIN_PLAUSIBLE_LAST_ADVERT_S sanitization (anything pre-2020 is treated
+// as a "no data" sentinel — see sort.ts).
+//   alice:   last_advert=2026-05-10  msg_count=10  first=2026-01-01 last=2026-05-10
+//   Bob:     last_advert=2026-05-15  msg_count=5   first=2026-03-01 last=2026-05-15
+//   charlie: last_advert=null                       NO STATS (sorts to bottom)
+const ALICE_LAST = 1_778_976_000 // 2026-05-10 UTC
+const BOB_LAST = 1_779_408_000 //   2026-05-15 UTC
 const ITEMS: SortInput[] = [
   {
     pubkey: "alice-pk",
-    contact: { adv_name: "alice", last_advert: 300 },
+    contact: { adv_name: "alice", last_advert: ALICE_LAST },
     stats: {
       first_msg_at: "2026-01-01T00:00:00",
       last_msg_at: "2026-05-10T00:00:00",
@@ -23,7 +28,7 @@ const ITEMS: SortInput[] = [
   },
   {
     pubkey: "bob-pk",
-    contact: { adv_name: "Bob", last_advert: 500 },
+    contact: { adv_name: "Bob", last_advert: BOB_LAST },
     stats: {
       first_msg_at: "2026-03-01T00:00:00",
       last_msg_at: "2026-05-15T00:00:00",
@@ -60,12 +65,37 @@ describe("sortContacts", () => {
   })
 
   it("sorts by last_seen (last_advert) descending; null sorts to bottom", () => {
-    // bob (500) > alice (300) > charlie (null → 0)
+    // bob (2026-05-15) > alice (2026-05-10) > charlie (null → no data)
     expect(order(sortContacts(ITEMS, "last_seen"))).toEqual([
       "bob-pk",
       "alice-pk",
       "charlie-pk",
     ])
+  })
+
+  it("sanitizes negative / pre-2020 last_advert as 'no data' (sorts last)", () => {
+    // The radio firmware can emit:
+    //  - 0 / negative for adverts received before RTC sync
+    //  - small positives (seconds since boot) on never-synced devices
+    //  - -1 as a "never seen" sentinel on some builds
+    // All of these should sort to the bottom of last_seen rather than
+    // pretending the contact was heard ~1970-01-01.
+    const garbage: SortInput[] = [
+      { pubkey: "real", contact: { adv_name: "real", last_advert: BOB_LAST } },
+      { pubkey: "neg", contact: { adv_name: "neg", last_advert: -1 } },
+      { pubkey: "zero", contact: { adv_name: "zero", last_advert: 0 } },
+      { pubkey: "tiny", contact: { adv_name: "tiny", last_advert: 300 } },
+      { pubkey: "null", contact: { adv_name: "null", last_advert: null } },
+    ]
+    const sorted = sortContacts(garbage, "last_seen")
+    // 'real' must be first (the only sanitary timestamp).
+    expect(sorted[0].pubkey).toBe("real")
+    // All four garbage entries must follow — relative order between them
+    // is unspecified (they share the NO_DATA sentinel), so just assert
+    // membership of the tail.
+    expect(sorted.slice(1).map((s) => s.pubkey).sort()).toEqual(
+      ["neg", "null", "tiny", "zero"],
+    )
   })
 
   it("sorts by first_seen descending; missing stats sort to bottom", () => {

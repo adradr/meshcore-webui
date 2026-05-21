@@ -24,15 +24,41 @@ export interface SortInput {
 }
 
 /**
+ * Anything older than this Unix-seconds timestamp is treated as garbage —
+ * a contact heard before MeshCore even existed didn't actually happen.
+ * The radio firmware can emit:
+ *  - 0 / negative values when an advert was received before the RTC was
+ *    synced (firmware starts at epoch 0 on cold boot)
+ *  - small positive values (a few seconds / minutes since boot) on
+ *    devices that never NTP-synced
+ *  - -1 as a "never seen" sentinel on some builds
+ * We clamp ALL of these to "no data" so they sort to the bottom of any
+ * recency-based ordering instead of misleadingly showing as "ancient".
+ */
+const MIN_PLAUSIBLE_LAST_ADVERT_S = 1_577_836_800 // 2020-01-01 UTC
+
+/**
  * Sort key extractor for each mode. Returns a numeric value suitable for
  * descending sort (higher = "more recent" / "more frequent"). The "name"
  * mode is handled separately because it sorts strings ascending.
  *
- * Fallback strategy when a stat is missing:
- * - last_seen: fall back to 0 (push to bottom of recency sort)
- * - first_seen / last_contacted: fall back to 0 (push to bottom)
- * - most_frequent: msg_count defaults to 0
+ * "No data" sentinel: ``Number.NEGATIVE_INFINITY``, which sorts to the
+ * bottom in the desc comparator below. Beats `0` because 0 collides with
+ * real-but-tiny timestamps and obscures the intent.
  */
+const NO_DATA = Number.NEGATIVE_INFINITY
+
+function lastAdvertMs(v: number | null | undefined): number {
+  if (v == null || v < MIN_PLAUSIBLE_LAST_ADVERT_S) return NO_DATA
+  return v * 1000
+}
+
+function isoToMs(v: string | null | undefined): number {
+  if (!v) return NO_DATA
+  const t = Date.parse(v)
+  return Number.isFinite(t) ? t : NO_DATA
+}
+
 export function sortContacts(
   items: SortInput[],
   mode: ContactSort,
@@ -49,12 +75,11 @@ export function sortContacts(
   const key = (i: SortInput): number => {
     switch (mode) {
       case "last_seen":
-        // last_advert is Unix seconds; normalize to ms for consistency.
-        return (i.contact.last_advert ?? 0) * 1000
+        return lastAdvertMs(i.contact.last_advert)
       case "first_seen":
-        return i.stats?.first_msg_at ? Date.parse(i.stats.first_msg_at) : 0
+        return isoToMs(i.stats?.first_msg_at)
       case "last_contacted":
-        return i.stats?.last_msg_at ? Date.parse(i.stats.last_msg_at) : 0
+        return isoToMs(i.stats?.last_msg_at)
       case "most_frequent":
         return i.stats?.msg_count ?? 0
     }
