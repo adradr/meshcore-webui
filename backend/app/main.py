@@ -39,6 +39,31 @@ from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
 
+def _configure_logging() -> None:
+    """Make sure our `app.*` loggers (including `app.audit`) actually
+    reach the container's stdout.
+
+    uvicorn only configures its own `uvicorn.*` loggers; the root logger
+    keeps its default WARNING level + lastResort handler, which silently
+    drops everything our middleware and services emit at INFO. We attach
+    a single StreamHandler to the `app` logger so every `getLogger("app.x")`
+    in the codebase flushes to stderr without paying the basicConfig
+    global-state penalty.
+    """
+    app_logger = logging.getLogger("app")
+    if not app_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s",
+        ))
+        app_logger.addHandler(handler)
+        app_logger.setLevel(logging.INFO)
+        # Keep `propagate=True` so pytest's caplog handler (attached to
+        # root) still observes our records. Root's lastResort is WARNING
+        # in production, so no double-emit at INFO at runtime.
+
+
+_configure_logging()
 log = logging.getLogger(__name__)
 
 
