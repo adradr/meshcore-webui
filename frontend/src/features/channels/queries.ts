@@ -15,8 +15,10 @@ const ChannelList = z.array(ChannelSchema)
 
 export type Channel = z.infer<typeof ChannelSchema>
 
-// DB-only input shape used by POST/DELETE (those endpoints don't push to the
-// device in v1.1 — see backend channels.py for the comment).
+// Input shape for POST /api/channels. The backend pushes this directly
+// to the radio via mc.commands.set_channel; psk is an optional hex string
+// (16 bytes) — when omitted/empty the firmware auto-derives the PSK from
+// sha256(name)[0:16].
 export interface ChannelInput {
   idx: number
   name: string

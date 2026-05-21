@@ -37,8 +37,8 @@ function ChannelCard({ channel }: { channel: Channel }) {
     e.stopPropagation()
     if (
       !window.confirm(
-        `Remove channel "${name}" (idx ${channel.channel_idx}) from local DB? ` +
-          `Note: v1.1 does not push deletes to the device.`,
+        `Remove channel "${name}" (idx ${channel.channel_idx}) from the ` +
+          `device? This clears the slot in radio flash and cannot be undone.`,
       )
     ) {
       return
@@ -129,9 +129,9 @@ function AddChannelDialog() {
         <DialogHeader>
           <DialogTitle>Add channel</DialogTitle>
           <DialogDescription>
-            Define a new MeshCore channel by index and name. PSK is optional.
-            Note: v1.1 only writes to the local DB and does not push to the
-            device.
+            Define a new MeshCore channel by index and name. PSK is an
+            optional 16-byte hex key (32 hex chars). When omitted, the
+            firmware derives the PSK automatically from the channel name.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-3">
@@ -152,18 +152,18 @@ function AddChannelDialog() {
               id="channel-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              maxLength={64}
+              maxLength={32}
               required
             />
           </div>
           <div className="space-y-1">
-            <Label htmlFor="channel-psk">PSK (optional)</Label>
+            <Label htmlFor="channel-psk">PSK (optional, 32 hex chars)</Label>
             <Input
               id="channel-psk"
               value={psk}
               onChange={(e) => setPsk(e.target.value)}
-              maxLength={128}
-              placeholder="leave blank for none"
+              maxLength={32}
+              placeholder="leave blank to auto-derive from name"
             />
           </div>
           <DialogFooter>

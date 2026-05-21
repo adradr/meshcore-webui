@@ -380,6 +380,66 @@ class MeshCoreClient:
         await mc.ensure_contacts(follow=True)
         return mc.contacts
 
+    async def set_channel(
+        self,
+        channel_idx: int,
+        channel_name: str,
+        channel_secret: bytes | None = None,
+    ) -> None:
+        """Set or clear a channel slot on the device.
+
+        Slots are zero-indexed up to ``max_channels`` (typically 40). To
+        clear a slot (remove a channel), pass an empty name and 16 zero
+        bytes as the secret — the firmware has no separate delete
+        primitive. The underlying lib auto-derives the PSK from
+        ``sha256(name)[0:16]`` when the name starts with ``#`` or
+        ``channel_secret`` is ``None``; otherwise the secret must be
+        exactly 16 bytes (``ValueError`` from the lib if not).
+
+        Raises ``ConnectionError`` if not connected; ``RuntimeError`` if
+        the device returns ``EventType.ERROR``.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_channel(
+                channel_idx, channel_name, channel_secret,
+            )
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError(
+                    f"Device rejected set_channel(idx={channel_idx}, "
+                    f"name={channel_name!r})"
+                )
+
+    async def delete_channel(self, channel_idx: int) -> None:
+        """Clear a channel slot on the device.
+
+        The MeshCore firmware has no separate delete command; clearing
+        a slot is done by writing an empty name + 16 zero bytes via
+        ``set_channel``.
+        """
+        await self.set_channel(channel_idx, "", b"\x00" * 16)
+
+    async def get_channel(self, channel_idx: int) -> dict | None:
+        """Fetch a single channel slot's info from the device.
+
+        Returns ``None`` if the slot is empty (firmware sends
+        CHANNEL_INFO with an empty name) or the response isn't
+        CHANNEL_INFO. Used by the POST /api/channels handler to return
+        the device-confirmed channel after a write.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            r = await mc.commands.get_channel(channel_idx)
+            if r.type != EventType.CHANNEL_INFO:
+                return None
+            name = (r.payload.get("channel_name") or "").strip()
+            if not name:
+                return None
+            return {
+                k: v.hex() if isinstance(v, bytes) else v
+                for k, v in r.payload.items()
+            }
+
     async def get_channels(self) -> list[dict]:
         mc = await self._require_mc()
         max_ch = mc.self_info.get("max_channels", 0) if mc.self_info else 0
