@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
 from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
@@ -244,6 +245,7 @@ def create_app() -> FastAPI:
     app.include_router(noise_router)
     app.include_router(mutes_router)
     app.include_router(diagnostics_router)
+    app.include_router(admin_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():
