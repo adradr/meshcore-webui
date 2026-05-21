@@ -503,6 +503,38 @@ class MeshCoreClient:
             # Refresh self_info so the upcoming refetch sees the new coords.
             await mc.commands.send_appstart()
 
+    async def soft_reset(self) -> dict:
+        """Clear non-public channels + reset GPS coords to 0,0.
+
+        Identity, contacts, and radio params are preserved. Idx 0
+        (Public channel) is firmware-special and is NEVER cleared —
+        doing so would leave the device unable to participate in
+        public traffic.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            max_ch = (mc.self_info or {}).get("max_channels", 0)
+            cleared = 0
+            for i in range(1, max_ch):
+                ev = await mc.commands.get_channel(i)
+                if ev.type != EventType.CHANNEL_INFO:
+                    continue
+                name = (ev.payload.get("channel_name") or "").strip()
+                if not name:
+                    continue
+                r = await mc.commands.set_channel(i, "", b"\x00" * 16)
+                if r is None or r.type == EventType.ERROR:
+                    raise RuntimeError(
+                        f"Device rejected clear_channel(idx={i})"
+                    )
+                cleared += 1
+            r = await mc.commands.set_coords(0, 0)
+            if r is None or r.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_coords(0, 0)")
+            await mc.commands.send_appstart()
+        log.warning("RESET ACTION=device_soft cleared_channels=%d", cleared)
+        return {"cleared_channels": cleared}
+
     async def get_self_info(self) -> dict:
         mc = await self._require_mc()
         if not mc.self_info:

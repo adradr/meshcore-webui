@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from meshcore import EventType
 from app.services.meshcore_client import (
     MeshCoreClient,
     StatsUnavailable,
@@ -707,3 +708,87 @@ class TestGetStatsPackets:
         client = MeshCoreClient(host="x", port=5000)
         with pytest.raises(ConnectionError, match="not connected"):
             await client.get_stats_packets()
+
+
+class TestSoftReset:
+    """`soft_reset` clears non-public channel slots + zeros GPS coords.
+
+    Idx 0 is the firmware-special Public channel and MUST NEVER be
+    cleared — doing so would leave the device unable to participate in
+    public traffic. Identity, contacts, and radio params are preserved.
+    """
+
+    @pytest.mark.asyncio
+    async def test_soft_reset_clears_non_public_channels_and_coords(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 4}
+
+        # idx 0 = Public (skipped entirely by the loop's range(1, max_ch))
+        # idx 1 = configured -> cleared
+        # idx 2 = empty slot -> skipped
+        # idx 3 = configured -> cleared
+        def fake_get_channel(i):
+            ev = MagicMock(type=EventType.CHANNEL_INFO)
+            ev.payload = {
+                "channel_idx": i,
+                "channel_name": (
+                    "Friends" if i == 1
+                    else ("" if i == 2 else "Family")
+                ),
+            }
+
+            async def _ret():
+                return ev
+            return _ret()
+        fake_mc.commands.get_channel = MagicMock(side_effect=fake_get_channel)
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_coords = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+
+        result = await client.soft_reset()
+
+        assert result == {"cleared_channels": 2}
+        cleared = sorted(
+            call.args[0] for call in fake_mc.commands.set_channel.await_args_list
+        )
+        assert cleared == [1, 3]
+        fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_soft_reset_raises_when_set_channel_rejected(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 2}
+
+        async def _ch_with_name():
+            ev = MagicMock(type=EventType.CHANNEL_INFO)
+            ev.payload = {"channel_name": "Friends"}
+            return ev
+        fake_mc.commands.get_channel = MagicMock(return_value=_ch_with_name())
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="rejected clear_channel"):
+            await client.soft_reset()
+
+    @pytest.mark.asyncio
+    async def test_soft_reset_raises_when_set_coords_rejected(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 1}  # only Public, no channels to clear
+        fake_mc.commands.set_coords = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="rejected set_coords"):
+            await client.soft_reset()
