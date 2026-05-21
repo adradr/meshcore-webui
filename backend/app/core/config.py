@@ -29,8 +29,14 @@ class Settings(BaseSettings):
     )
     vapid_subject: str = Field(default="mailto:admin@example.com", alias="VAPID_SUBJECT")
 
-    # Optional API key (bearer token)
-    api_key: str | None = Field(default=None, alias="MESHCORE_WEBUI_API_KEY")
+    # Optional API key (bearer token).
+    # `min_length=1` rejects an empty-string env var (`MESHCORE_WEBUI_API_KEY=`)
+    # which would otherwise make `f"Bearer {api_key}"` equal the literal string
+    # `"Bearer "` and let anyone authenticate with that 7-byte header. Either
+    # set a real secret or leave the variable unset entirely.
+    api_key: str | None = Field(
+        default=None, alias="MESHCORE_WEBUI_API_KEY", min_length=1,
+    )
 
     # Static frontend dir (used in Docker)
     static_dir: Path = Field(default=Path("./static"), alias="STATIC_DIR")

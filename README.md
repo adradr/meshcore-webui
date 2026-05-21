@@ -351,6 +351,34 @@ Then send `Authorization: Bearer <key>` on every request. The frontend Settings 
 
 For real user-facing auth (SSO, login pages, etc.), put **Authelia** or **Cloudflare Access** in front of the container. Cookie-based auth survives iOS Add-to-Home-Screen cleanly; HTTP Basic does not.
 
+### Public-internet hardening checklist
+
+If you're exposing this service beyond a trusted LAN, walk through this list:
+
+1. **Set `MESHCORE_WEBUI_API_KEY` to a strong random secret.** Generate with `openssl rand -hex 32`. An empty value is rejected at startup — leave the variable absent for open-access mode, never set it to an empty string.
+2. **Strip WebSocket `?token=…` query strings from your reverse-proxy access logs.** Browsers can't attach `Authorization` headers to `new WebSocket()` so the SPA sends the key in the URL. Caddy logs the upgrade URL by default, which preserves the token in plaintext.
+
+   Caddy snippet:
+   ```caddy
+   meshcore.example.com {
+     reverse_proxy meshcore-webui:8080
+     log {
+       output file /var/log/caddy/access.log
+       format json {
+         # Drop the query string from logged URIs so ?token=… is never written.
+         message_key uri
+       }
+     }
+   }
+   ```
+   Nginx: `log_format` without `$query_string`, or `set $loggable_uri $uri;` then log `$loggable_uri`.
+
+3. **The app already sets** `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin` on every response. If your proxy strips them, add them back at the proxy layer.
+
+4. **Every authenticated request is audited** at `app.audit` INFO level. The bearer token is replaced with an 8-char SHA-256 fingerprint — the raw value never lands in `docker logs`. Grep `app.audit` for `status=401` to spot brute-force attempts; grep `key=` to delineate sessions across key rotations.
+
+5. **Factory reset (`POST /api/device/reset`) destroys the radio's identity keypair.** It is gated behind a typed-confirm token AND the API key. If you don't need it from the public origin, block the route at the proxy.
+
 ---
 
 ## Development

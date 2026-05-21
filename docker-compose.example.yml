@@ -10,7 +10,13 @@ services:
       MESHCORE_HOST: 192.168.4.1
       MESHCORE_PORT: "5000"
       VAPID_SUBJECT: mailto:you@example.com
-      # MESHCORE_WEBUI_API_KEY: "your-long-random-string"
+      # REQUIRED if exposing this service to anything beyond a trusted LAN.
+      # When unset, every /api/* endpoint is open to anyone who can reach the
+      # port — including the destructive admin reset and factory-wipe routes.
+      # Generate a long random secret: `openssl rand -hex 32`
+      # Note: do NOT set this to an empty string — the backend rejects empty
+      # values at startup. Either set a real secret, or leave the line absent.
+      MESHCORE_WEBUI_API_KEY: "REPLACE_ME_WITH_openssl_rand_hex_32"
     volumes:
       - ./data:/data
       - ./secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro

@@ -30,6 +30,7 @@ from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient
@@ -256,10 +257,13 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="MeshCore WebUI", version="0.1.0", lifespan=lifespan)
     # Order matters: Starlette wraps middleware in reverse — the LAST
-    # add_middleware call is the OUTERMOST layer, so audit goes after
-    # auth so it sees the final 401 status from APIKeyMiddleware.
+    # add_middleware call is the OUTERMOST layer. We want security
+    # headers applied to every response (including 401 from auth), so
+    # SecurityHeaders is outermost; audit observes the final status
+    # code from APIKeyMiddleware which is innermost.
     app.add_middleware(APIKeyMiddleware)
     app.add_middleware(RequestAuditMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     @app.get("/api/health")
     async def health() -> dict[str, str]:
