@@ -44,6 +44,13 @@ class TestDeviceResetSelector:
         assert DeviceResetSelector(channels=True).any_selected() is True
         assert DeviceResetSelector(coords=True).any_selected() is True
         assert DeviceResetSelector(contacts=True).any_selected() is True
+        assert DeviceResetSelector(reboot=True).any_selected() is True
+
+    def test_reboot_alone_is_a_valid_selection(self):
+        # Reboot-only is useful as a clean-RX-queue toggle independent
+        # of any clearing — not a no-op.
+        assert DeviceResetSelector(reboot=True).any_selected() is True
+        assert DeviceResetSelector().reboot is False
 
 
 class TestResetRequest:

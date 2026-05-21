@@ -509,15 +509,23 @@ class MeshCoreClient:
         clear_channels: bool,
         reset_coords: bool,
         clear_contacts: bool,
+        reboot_device: bool = False,
     ) -> dict:
         """Granular device-flash reset. Each flag is independent; pass
         only the targets you want to clear. Identity + radio params always
-        preserved — for full identity wipe use ``factory_reset``."""
+        preserved — for full identity wipe use ``factory_reset``.
+
+        ``reboot_device`` runs LAST in the sequence — after any selected
+        clears. Paired with ``clear_contacts`` it's the cleanest way to
+        actually keep contacts gone: the reboot flushes the device's RX
+        queue and any in-flight adverts that would otherwise immediately
+        re-add the contacts we just removed."""
         mc = await self._require_mc()
         result: dict = {
             "cleared_channels": None,
             "coords_reset": False,
             "removed_contacts": None,
+            "rebooted": False,
         }
         async with self._lock:
             if clear_channels:
@@ -605,9 +613,21 @@ class MeshCoreClient:
                     size_before, size_after, removed,
                 )
             # If we touched channels OR coords, refresh self_info so subsequent
-            # /api/device/self-info reflects the new state.
-            if clear_channels or reset_coords:
+            # /api/device/self-info reflects the new state. Skip when
+            # rebooting — the supervisor will reconnect and re-appstart.
+            if (clear_channels or reset_coords) and not reboot_device:
                 await mc.commands.send_appstart()
+            if reboot_device:
+                # ALWAYS last in the sequence. The TCP companion socket
+                # drops as the radio reboots; our supervisor reconnects
+                # within ~1-2s. We don't wait for a confirmation event
+                # because the reboot doesn't generate one — the next
+                # CONNECTED event comes from the reconnect.
+                r = await mc.commands.reboot()
+                if r is None or r.type == EventType.ERROR:
+                    raise RuntimeError("Device rejected reboot")
+                result["rebooted"] = True
+                log.warning("RESET ACTION=device_reboot completed=True")
         return result
 
     async def factory_reset(self) -> None:

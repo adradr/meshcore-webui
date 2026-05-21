@@ -81,7 +81,8 @@ async def reset_unified(
         await db.commit()
 
     device_result: dict = {
-        "cleared_channels": None, "coords_reset": False, "removed_contacts": None,
+        "cleared_channels": None, "coords_reset": False,
+        "removed_contacts": None, "rebooted": False,
     }
     if body.device.any_selected():
         client = getattr(request.app.state, "meshcore_client", None)
@@ -92,6 +93,7 @@ async def reset_unified(
                 clear_channels=body.device.channels,
                 reset_coords=body.device.coords,
                 clear_contacts=body.device.contacts,
+                reboot_device=body.device.reboot,
             )
         except ConnectionError as e:
             raise HTTPException(503, str(e)) from e

@@ -713,9 +713,11 @@ class TestGetStatsPackets:
 class TestDevicePartialReset:
     """`device_partial_reset` is the granular replacement for `soft_reset`.
 
-    Each flag (clear_channels, reset_coords, clear_contacts) is independent;
-    callers pick the combination they want. Identity + radio params always
-    preserved — use `factory_reset` for an identity wipe.
+    Each flag (clear_channels, reset_coords, clear_contacts, reboot_device)
+    is independent; callers pick the combination they want. Identity +
+    radio params always preserved — use `factory_reset` for an identity
+    wipe. `reboot_device` is always last in the sequence so it flushes
+    the RX queue after any other selected ops.
     """
 
     @pytest.mark.asyncio
@@ -758,6 +760,7 @@ class TestDevicePartialReset:
             "cleared_channels": 2,
             "coords_reset": False,
             "removed_contacts": None,
+            "rebooted": False,
         }
         cleared = sorted(
             call.args[0] for call in fake_mc.commands.set_channel.await_args_list
@@ -789,6 +792,7 @@ class TestDevicePartialReset:
             "cleared_channels": None,
             "coords_reset": True,
             "removed_contacts": None,
+            "rebooted": False,
         }
         fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
         fake_mc.commands.set_channel.assert_not_awaited()
@@ -824,6 +828,7 @@ class TestDevicePartialReset:
             "cleared_channels": None,
             "coords_reset": False,
             "removed_contacts": 3,
+            "rebooted": False,
         }
         called_keys = sorted(
             c.args[0] for c in fake_mc.commands.remove_contact.await_args_list
@@ -870,6 +875,7 @@ class TestDevicePartialReset:
             "cleared_channels": 1,
             "coords_reset": True,
             "removed_contacts": 2,
+            "rebooted": False,
         }
         fake_mc.commands.set_coords.assert_awaited_once_with(0, 0)
         assert fake_mc.commands.remove_contact.await_count == 2
@@ -893,6 +899,7 @@ class TestDevicePartialReset:
             "cleared_channels": None,
             "coords_reset": False,
             "removed_contacts": None,
+            "rebooted": False,
         }
         fake_mc.commands.set_channel.assert_not_awaited()
         fake_mc.commands.set_coords.assert_not_awaited()
@@ -1010,6 +1017,92 @@ class TestDevicePartialReset:
         fake_mc.commands.send_device_query.assert_awaited_once()
         assert result["cleared_channels"] == 1
         fake_mc.commands.set_channel.assert_awaited_once_with(1, "", b"\x00" * 16)
+
+    @pytest.mark.asyncio
+    async def test_reboot_only(self):
+        """`reboot_device=True` alone calls `commands.reboot()` and does
+        NOT touch channels/coords/contacts. `send_appstart` is skipped
+        because the supervisor reconnect path will re-appstart anyway."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_channel = AsyncMock()
+        fake_mc.commands.set_coords = AsyncMock()
+        fake_mc.commands.remove_contact = AsyncMock()
+        fake_mc.commands.send_appstart = AsyncMock()
+        fake_mc.commands.reboot = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False,
+            clear_contacts=False, reboot_device=True,
+        )
+
+        assert result == {
+            "cleared_channels": None,
+            "coords_reset": False,
+            "removed_contacts": None,
+            "rebooted": True,
+        }
+        fake_mc.commands.reboot.assert_awaited_once()
+        fake_mc.commands.send_appstart.assert_not_awaited()
+        fake_mc.commands.set_channel.assert_not_awaited()
+        fake_mc.commands.set_coords.assert_not_awaited()
+        fake_mc.commands.remove_contact.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_reboot_runs_last_and_replaces_appstart(self):
+        """When reboot is combined with another op (e.g. contacts), the
+        reboot fires AFTER and we skip the post-clear send_appstart —
+        the reboot itself drops the link and the supervisor reconnect
+        will re-appstart."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 2}
+        fake_mc.contacts = {"k1": {}}
+        fake_mc.commands.remove_contact = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_coords = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_channel = AsyncMock()
+        fake_mc.commands.send_appstart = AsyncMock()
+        fake_mc.commands.reboot = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        async def _resync(**_kw) -> None:
+            fake_mc.contacts = {}
+        fake_mc.ensure_contacts = AsyncMock(side_effect=_resync)
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=True,
+            clear_contacts=True, reboot_device=True,
+        )
+
+        assert result["rebooted"] is True
+        assert result["coords_reset"] is True
+        assert result["removed_contacts"] == 1
+        # Skipped because reboot is happening — reconnect will re-appstart.
+        fake_mc.commands.send_appstart.assert_not_awaited()
+        fake_mc.commands.reboot.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_reboot_raises_when_rejected(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.reboot = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="rejected reboot"):
+            await client.device_partial_reset(
+                clear_channels=False, reset_coords=False,
+                clear_contacts=False, reboot_device=True,
+            )
 
 
 class TestFactoryReset:

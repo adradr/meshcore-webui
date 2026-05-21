@@ -80,7 +80,12 @@ const DEVICE_TARGETS: {
   {
     key: "contacts",
     label: "Contacts",
-    help: "Removes every contact. NOTE: contacts re-populate from incoming adverts within seconds on an active mesh. Power-cycle the radio after the reset for an empty start.",
+    help: "Removes every contact. NOTE: contacts re-populate from incoming adverts within seconds on an active mesh. Pair with Reboot device for an empty start.",
+  },
+  {
+    key: "reboot",
+    label: "Reboot device",
+    help: "Soft-reboots the radio after any other selected operations. Flushes the RX queue — pair with Contacts to prevent in-flight adverts from immediately re-populating what you just deleted. Link drops for ~1-2s while the radio comes back.",
   },
 ]
 

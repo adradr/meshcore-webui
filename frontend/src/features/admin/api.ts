@@ -16,6 +16,7 @@ export interface DeviceResetSelector {
   channels?: boolean
   coords?: boolean
   contacts?: boolean
+  reboot?: boolean
 }
 
 export interface ResetRequest {
@@ -37,6 +38,7 @@ export interface ResetResult {
     cleared_channels: number | null
     coords_reset: boolean
     removed_contacts: number | null
+    rebooted: boolean
   }
 }
 
@@ -46,7 +48,8 @@ function totalTargetsRun(r: ResetResult): number {
   const deviceCount =
     (r.device.cleared_channels !== null ? 1 : 0) +
     (r.device.coords_reset ? 1 : 0) +
-    (r.device.removed_contacts !== null ? 1 : 0)
+    (r.device.removed_contacts !== null ? 1 : 0) +
+    (r.device.rebooted ? 1 : 0)
   return localCount + deviceCount
 }
 

@@ -27,6 +27,7 @@ async def test_reset_local_messages_only_empty_db(client):
         "cleared_channels": None,
         "coords_reset": False,
         "removed_contacts": None,
+        "rebooted": False,
     }
 
 
@@ -66,6 +67,7 @@ async def test_reset_device_coords_runs_via_partial_reset(client):
         "cleared_channels": None,
         "coords_reset": True,
         "removed_contacts": None,
+        "rebooted": False,
     })
     app.state.meshcore_client = fake
     try:
@@ -79,7 +81,8 @@ async def test_reset_device_coords_runs_via_partial_reset(client):
         assert body["device"]["cleared_channels"] is None
         assert body["device"]["removed_contacts"] is None
         fake.device_partial_reset.assert_awaited_once_with(
-            clear_channels=False, reset_coords=True, clear_contacts=False,
+            clear_channels=False, reset_coords=True,
+            clear_contacts=False, reboot_device=False,
         )
     finally:
         del app.state.meshcore_client
@@ -126,6 +129,7 @@ async def test_reset_combined_local_and_device(client):
         "cleared_channels": None,
         "coords_reset": False,
         "removed_contacts": 3,
+        "rebooted": False,
     })
     app.state.meshcore_client = fake
     try:
@@ -142,7 +146,34 @@ async def test_reset_combined_local_and_device(client):
         assert body["local"]["messages"] == 0
         assert body["device"]["removed_contacts"] == 3
         fake.device_partial_reset.assert_awaited_once_with(
-            clear_channels=False, reset_coords=False, clear_contacts=True,
+            clear_channels=False, reset_coords=False,
+            clear_contacts=True, reboot_device=False,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_reset_device_reboot_only(client):
+    fake = AsyncMock()
+    fake.device_partial_reset = AsyncMock(return_value={
+        "cleared_channels": None,
+        "coords_reset": False,
+        "removed_contacts": None,
+        "rebooted": True,
+    })
+    app.state.meshcore_client = fake
+    try:
+        r = await client.post(
+            "/api/admin/reset",
+            json={"device": {"reboot": True}, "confirm": "RESET"},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["device"]["rebooted"] is True
+        fake.device_partial_reset.assert_awaited_once_with(
+            clear_channels=False, reset_coords=False,
+            clear_contacts=False, reboot_device=True,
         )
     finally:
         del app.state.meshcore_client

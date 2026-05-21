@@ -25,9 +25,10 @@ class DeviceResetSelector(BaseModel):
     channels: bool = False     # clear non-Public channels
     coords: bool = False       # set GPS coords to 0,0
     contacts: bool = False     # iterate remove_contact across the device's contact list
+    reboot: bool = False       # soft-reboot the radio AFTER any other selected ops
 
     def any_selected(self) -> bool:
-        return any((self.channels, self.coords, self.contacts))
+        return any((self.channels, self.coords, self.contacts, self.reboot))
 
 
 class ResetRequest(BaseModel):

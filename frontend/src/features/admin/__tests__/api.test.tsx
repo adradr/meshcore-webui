@@ -47,6 +47,7 @@ describe("useReset", () => {
         cleared_channels: 2,
         coords_reset: true,
         removed_contacts: null,
+        rebooted: false,
       },
     }
     ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response)
