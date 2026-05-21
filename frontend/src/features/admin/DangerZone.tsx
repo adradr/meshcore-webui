@@ -80,7 +80,7 @@ const DEVICE_TARGETS: {
   {
     key: "contacts",
     label: "Contacts",
-    help: "Removes every contact; the radio rebuilds them from incoming adverts.",
+    help: "Removes every contact. NOTE: contacts re-populate from incoming adverts within seconds on an active mesh. Power-cycle the radio after the reset for an empty start.",
   },
 ]
 

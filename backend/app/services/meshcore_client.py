@@ -553,25 +553,57 @@ class MeshCoreClient:
                 log.warning("RESET ACTION=device_coords completed=True")
             if clear_contacts:
                 # Inline the contact-clearing logic here so the whole sweep
-                # stays under one `_lock` and one supervisor wake-up. Take
-                # a snapshot of keys BEFORE iterating — removing while
-                # iterating the live dict would risk a RuntimeError on some
-                # firmware/lib combos.
-                keys = list((mc.contacts or {}).keys())
-                removed = 0
-                for k in keys:
-                    r = await mc.commands.remove_contact(k)
+                # stays under one `_lock` and one supervisor wake-up.
+                #
+                # Two real-world quirks of the firmware command queue:
+                #   1. Rapid back-to-back remove_contact calls saturate the
+                #      device's queue and most start returning None (timeout).
+                #      We sleep a short tick between calls to keep the
+                #      device's processor happy.
+                #   2. Each successful remove_contact triggers a
+                #      CONTACT_DELETED push event which the lib processes by
+                #      popping the entry from mc.contacts. Iterating over
+                #      .keys() while that happens is fragile — snapshot
+                #      first.
+                #
+                # We also re-derive the removed count by diffing the
+                # contact dict before/after, because the lib's per-call
+                # OK/ERROR signal is noisy at scale (the user saw 5/258
+                # OK responses even when more were actually removed).
+                keys_before = list((mc.contacts or {}).keys())
+                size_before = len(keys_before)
+                for k in keys_before:
+                    try:
+                        r = await mc.commands.remove_contact(k)
+                    except Exception as e:  # noqa: BLE001 — best-effort sweep
+                        log.warning("clear_contacts: %s raised %s", k, e)
+                        r = None
                     if r is None or r.type == EventType.ERROR:
-                        # Don't abort the whole sweep on a single failure;
-                        # log and continue — the user wanted a reset,
-                        # surface the count.
                         log.warning(
                             "clear_contacts: device rejected remove for %s", k,
                         )
-                        continue
-                    removed += 1
+                    # Brief breather so the firmware command queue can
+                    # drain before the next remove. Even ~50ms makes a
+                    # large bulk delete go from "5 of 258 OK" to "most or
+                    # all OK".
+                    await asyncio.sleep(0.05)
+                # Re-sync the lib's cache with the device's real state.
+                # CONTACT_DELETED pushes auto-update mc.contacts as they
+                # arrive, but the WS event we forward is best-effort —
+                # explicitly asking the lib to re-walk the device gets
+                # us a truthful post-state count without trusting per-
+                # call OKs (which were unreliable at scale).
+                try:
+                    await mc.ensure_contacts(follow=False)
+                except Exception:
+                    log.exception("clear_contacts: ensure_contacts after sweep")
+                size_after = len(mc.contacts or {})
+                removed = max(0, size_before - size_after)
                 result["removed_contacts"] = removed
-                log.warning("RESET ACTION=device_contacts removed=%d", removed)
+                log.warning(
+                    "RESET ACTION=device_contacts before=%d after=%d removed=%d",
+                    size_before, size_after, removed,
+                )
             # If we touched channels OR coords, refresh self_info so subsequent
             # /api/device/self-info reflects the new state.
             if clear_channels or reset_coords:
