@@ -38,3 +38,4 @@ secrets/
 .docker-cache/
 
 docs/
+CLAUDE.md
