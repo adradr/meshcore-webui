@@ -14,10 +14,19 @@ when the radio is up but the firmware refused, or returns 503 when the
 radio link itself isn't established.
 """
 from __future__ import annotations
+import hmac
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from app.schemas.reset import DeviceResetRequest
+
 router = APIRouter(prefix="/api/device", tags=["device"])
+
+# Typed-confirm tokens, case-sensitive. Match the UI prompts exactly.
+_SOFT_CONFIRM_TOKEN = "RESET"
+_FACTORY_CONFIRM_TOKEN = "FACTORY RESET"
 
 
 class PositionIn(BaseModel):
@@ -103,3 +112,58 @@ async def set_position(body: PositionIn, request: Request) -> dict:
     except RuntimeError as e:
         raise HTTPException(502, str(e))
     return {"lat": body.lat, "lon": body.lon}
+
+
+@router.post("/reset")
+async def reset_device(body: DeviceResetRequest, request: Request):
+    """Device-side reset: soft or factory.
+
+    Both modes require a typed-confirmation token matching an exact,
+    case-sensitive string. Compared with ``hmac.compare_digest`` to
+    mirror the API-key auth idiom — not a secret, but treating it as
+    one keeps comparison behavior uniform across every gated
+    mutation in this app.
+
+    Soft reset (200): clears non-public channels + coords; preserves
+    identity, contacts, radio params.
+
+    Factory reset (202 Accepted): wipes ALL device state including
+    the Ed25519 identity keypair. The device reboots with a fresh
+    random key — every peer that knew this radio sees it as new.
+    """
+    client = getattr(request.app.state, "meshcore_client", None)
+    if client is None:
+        raise HTTPException(503, "MeshCore client not initialised")
+
+    if body.mode == "soft":
+        if not hmac.compare_digest(body.confirm, _SOFT_CONFIRM_TOKEN):
+            raise HTTPException(422, "confirm must be 'RESET'")
+        try:
+            result = await client.soft_reset()
+        except ConnectionError as e:
+            raise HTTPException(503, str(e))
+        except RuntimeError as e:
+            raise HTTPException(502, str(e))
+        return {"mode": "soft", **result}
+
+    # mode == "factory" (Pydantic Literal already validated the only other
+    # possible value)
+    if not hmac.compare_digest(body.confirm, _FACTORY_CONFIRM_TOKEN):
+        raise HTTPException(422, "confirm must be 'FACTORY RESET'")
+    try:
+        await client.factory_reset()
+    except ConnectionError as e:
+        raise HTTPException(503, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return JSONResponse(
+        status_code=202,
+        content={
+            "mode": "factory",
+            "warning": (
+                "Device is rebooting. The Ed25519 identity keypair has "
+                "been destroyed — this radio will appear as a new node "
+                "to every peer that previously knew it."
+            ),
+        },
+    )
