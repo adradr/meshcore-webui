@@ -36,6 +36,7 @@ vi.mock("@/features/device/queries", () => ({
     isError: false,
   }),
   useSendAdvert: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetPosition: () => ({ mutate: vi.fn(), isPending: false }),
   useDeviceStatus: () => ({
     data: { connected: true, host: "192.168.4.1", port: 5000 },
     isLoading: false,

@@ -15,8 +15,14 @@ radio link itself isn't established.
 """
 from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/device", tags=["device"])
+
+
+class PositionIn(BaseModel):
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
 
 
 @router.get("/status")
@@ -76,3 +82,24 @@ async def send_advert(request: Request, flood: bool = False) -> dict:
     except RuntimeError as e:
         raise HTTPException(502, str(e))
     return {"sent": True, "flood": flood}
+
+
+@router.post("/position")
+async def set_position(body: PositionIn, request: Request) -> dict:
+    """Persist GPS coordinates on the device's flash.
+
+    The firmware stores the coords and includes them in subsequent
+    advertisements. Status mapping follows the rest of /api/device/*:
+    200 on success, 422 (from Pydantic) on out-of-range, 502 if the
+    radio is up but rejected the command, 503 if not connected.
+    """
+    client = getattr(request.app.state, "meshcore_client", None)
+    if client is None:
+        raise HTTPException(503, "MeshCore client not initialised")
+    try:
+        await client.set_coords(body.lat, body.lon)
+    except ConnectionError as e:
+        raise HTTPException(503, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return {"lat": body.lat, "lon": body.lon}

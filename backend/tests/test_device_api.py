@@ -197,3 +197,63 @@ async def test_post_advert_503_on_connection_error(client):
         assert r.status_code == 503
     finally:
         del app.state.meshcore_client
+
+
+# --- /api/device/position (Task 1.13) -------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_position_success(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_coords = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/device/position", json={"lat": 47.5, "lon": 19.05}
+        )
+        assert r.status_code == 200
+        assert r.json() == {"lat": 47.5, "lon": 19.05}
+        app.state.meshcore_client.set_coords.assert_awaited_once_with(
+            47.5, 19.05
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_position_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_coords = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/position", json={"lat": 47.5, "lon": 19.05}
+        )
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_position_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_coords = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/position", json={"lat": 47.5, "lon": 19.05}
+        )
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_position_422_on_out_of_range(client):
+    # Pydantic rejects before the handler runs — no mock needed.
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post(
+        "/api/device/position", json={"lat": 100, "lon": 0}
+    )
+    assert r.status_code == 422

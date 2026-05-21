@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { z } from "zod"
 import { api } from "@/lib/api"
@@ -118,5 +118,27 @@ export function useSendAdvert() {
     onSuccess: (_, flood) =>
       toast.success(flood ? "Flood advert sent" : "Advert sent"),
     onError: (e) => notifyError("Advert", e),
+  })
+}
+
+/**
+ * Persist GPS coordinates to the device's flash. The firmware writes
+ * them and includes the value in subsequent advertisements. We invalidate
+ * the self-info cache on success so `PositionCard` shows the new value
+ * without a manual reload.
+ */
+export function useSetPosition() {
+  const qc = useQueryClient()
+  return useMutation<
+    { lat: number; lon: number },
+    Error,
+    { lat: number; lon: number }
+  >({
+    mutationFn: (body) => api.post("/api/device/position", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["device", "self-info"] })
+      toast.success("Position saved to device")
+    },
+    onError: (e) => notifyError("Save position", e),
   })
 }

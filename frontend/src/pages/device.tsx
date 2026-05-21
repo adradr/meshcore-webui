@@ -1,12 +1,13 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { Copy, Cpu, MapPin, Send, Waves } from "lucide-react"
+import { Copy, Cpu, Crosshair, MapPin, Send, Waves } from "lucide-react"
 import { toast } from "sonner"
 import {
   useDeviceInfo,
   useDeviceStatus,
   useSelfInfo,
   useSendAdvert,
+  useSetPosition,
 } from "@/features/device/queries"
 import { RxLogPanel } from "@/features/rx_log/RxLogPanel"
 import { NoisePanel } from "@/features/noise/NoisePanel"
@@ -19,6 +20,8 @@ import {
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -217,18 +220,196 @@ function DeviceInfoCard() {
   )
 }
 
+/**
+ * Editable lat/lon card. Two modes:
+ *  - view  → current position from self-info (or "no position set")
+ *  - edit  → two numeric inputs, "use my location" prefill, Save / Cancel.
+ *
+ * Save calls POST /api/device/position which persists to flash and the
+ * value re-appears in subsequent advertisements. The mutation invalidates
+ * the self-info query so the view-mode card refreshes automatically.
+ */
 function PositionCard() {
   const { data: self, isLoading } = useSelfInfo()
+  const setPosition = useSetPosition()
   const hasPosition = self?.adv_lat != null && self?.adv_lon != null
+
+  const [editing, setEditing] = useState(false)
+  const [latText, setLatText] = useState("")
+  const [lonText, setLonText] = useState("")
+  const [geoBusy, setGeoBusy] = useState(false)
+
+  // Seed inputs from self-info whenever we open the editor or self-info
+  // refreshes. Done in an effect to handle the (common) case where the
+  // card mounts before self-info has resolved.
+  useEffect(() => {
+    if (!editing) return
+    if (latText === "" && self?.adv_lat != null) {
+      setLatText(self.adv_lat.toString())
+    }
+    if (lonText === "" && self?.adv_lon != null) {
+      setLonText(self.adv_lon.toString())
+    }
+    // We intentionally only re-seed empty fields so user edits are not
+    // overwritten by a self-info refetch mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, self?.adv_lat, self?.adv_lon])
+
+  const startEdit = () => {
+    setLatText(self?.adv_lat != null ? self.adv_lat.toString() : "")
+    setLonText(self?.adv_lon != null ? self.adv_lon.toString() : "")
+    setEditing(true)
+  }
+
+  const cancelEdit = () => {
+    setEditing(false)
+    setLatText("")
+    setLonText("")
+  }
+
+  const parsed = (() => {
+    const lat = Number.parseFloat(latText)
+    const lon = Number.parseFloat(lonText)
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null
+    if (lat < -90 || lat > 90) return null
+    if (lon < -180 || lon > 180) return null
+    return { lat, lon }
+  })()
+
+  const useMyLocation = () => {
+    if (!("geolocation" in navigator)) {
+      toast.error("Geolocation not supported in this browser")
+      return
+    }
+    setGeoBusy(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatText(pos.coords.latitude.toFixed(6))
+        setLonText(pos.coords.longitude.toFixed(6))
+        setGeoBusy(false)
+      },
+      (err) => {
+        setGeoBusy(false)
+        toast.error(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied"
+            : "Could not get current location",
+        )
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 0 },
+    )
+  }
+
+  const onSave = () => {
+    if (!parsed) return
+    setPosition.mutate(parsed, {
+      onSuccess: () => {
+        setEditing(false)
+        setLatText("")
+        setLonText("")
+      },
+    })
+  }
+
+  const saving = setPosition.isPending
+
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center gap-2 space-y-0">
-        <MapPin className="h-4 w-4 text-muted-foreground" />
-        <CardTitle className="text-base">Position</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+        <div className="flex items-center gap-2">
+          <MapPin className="h-4 w-4 text-muted-foreground" />
+          <CardTitle className="text-base">Position</CardTitle>
+        </div>
+        {!editing && !isLoading && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={startEdit}
+            aria-label="Edit position"
+          >
+            Edit
+          </Button>
+        )}
       </CardHeader>
-      <CardContent className="space-y-1">
+      <CardContent className="space-y-2">
         {isLoading ? (
           <Skeleton className="h-16 w-full" />
+        ) : editing ? (
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="position-lat" className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Latitude
+                </Label>
+                <Input
+                  id="position-lat"
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min={-90}
+                  max={90}
+                  placeholder="-90 to 90"
+                  value={latText}
+                  onChange={(e) => setLatText(e.target.value)}
+                  disabled={saving}
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label htmlFor="position-lon" className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Longitude
+                </Label>
+                <Input
+                  id="position-lon"
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min={-180}
+                  max={180}
+                  placeholder="-180 to 180"
+                  value={lonText}
+                  onChange={(e) => setLonText(e.target.value)}
+                  disabled={saving}
+                />
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={useMyLocation}
+                disabled={saving || geoBusy}
+              >
+                <Crosshair className="mr-1 h-4 w-4" />
+                {geoBusy ? "Locating…" : "Use my location"}
+              </Button>
+              <div className="ml-auto flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={onSave}
+                  disabled={saving || parsed === null}
+                >
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </div>
+            {latText !== "" && lonText !== "" && parsed === null && (
+              <p className="text-xs text-destructive">
+                Latitude must be -90..90 and longitude -180..180.
+              </p>
+            )}
+          </div>
         ) : hasPosition ? (
           <>
             <KeyValue label="Latitude">{self?.adv_lat?.toFixed(5)}</KeyValue>

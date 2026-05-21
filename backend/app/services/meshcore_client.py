@@ -415,6 +415,18 @@ class MeshCoreClient:
         async with self._lock:
             await mc.commands.send_advert(flood=flood)
 
+    async def set_coords(self, lat: float, lon: float) -> None:
+        """Persist device GPS coordinates to the firmware. The radio writes
+        them to flash and includes them in subsequent advertisements.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            res = await mc.commands.set_coords(lat, lon)
+            if res is None or (
+                hasattr(res, "type") and res.type == EventType.ERROR
+            ):
+                raise RuntimeError("Device rejected set_coords")
+
     async def get_self_info(self) -> dict:
         mc = await self._require_mc()
         if not mc.self_info:
