@@ -792,3 +792,37 @@ class TestSoftReset:
 
         with pytest.raises(RuntimeError, match="rejected set_coords"):
             await client.soft_reset()
+
+
+class TestFactoryReset:
+    """`factory_reset` wraps the meshcore lib's two-step request+confirm
+    pattern. Wipes ALL device state including the Ed25519 identity keypair.
+    """
+
+    @pytest.mark.asyncio
+    async def test_factory_reset_calls_request_then_confirm(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.request_factory_reset = AsyncMock(return_value="TOKEN123")
+        fake_mc.commands.confirm_factory_reset = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.factory_reset()
+
+        fake_mc.commands.request_factory_reset.assert_awaited_once()
+        fake_mc.commands.confirm_factory_reset.assert_awaited_once_with("TOKEN123")
+
+    @pytest.mark.asyncio
+    async def test_factory_reset_raises_when_device_rejects(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.request_factory_reset = AsyncMock(return_value="T")
+        fake_mc.commands.confirm_factory_reset = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="rejected factory_reset"):
+            await client.factory_reset()

@@ -535,6 +535,27 @@ class MeshCoreClient:
         log.warning("RESET ACTION=device_soft cleared_channels=%d", cleared)
         return {"cleared_channels": cleared}
 
+    async def factory_reset(self) -> None:
+        """Wipe ALL device state including the Ed25519 identity keypair.
+
+        After this completes the device reboots and reads a NEW random
+        keypair. Every peer that previously knew this radio will see it
+        as a new node. Channels, coords, name, telemetry settings — all
+        gone.
+
+        Uses the two-step lib pattern (request_factory_reset returns a
+        Python-side safety token, confirm_factory_reset applies it).
+        Firmware itself has no token verification — the gate is purely
+        local hygiene.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            token = await mc.commands.request_factory_reset()
+            ev = await mc.commands.confirm_factory_reset(token)
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected factory_reset")
+        log.warning("RESET ACTION=device_factory completed=True")
+
     async def get_self_info(self) -> dict:
         mc = await self._require_mc()
         if not mc.self_info:
