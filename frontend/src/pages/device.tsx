@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/tabs"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
+import { PositionPicker } from "@/components/map/PositionPicker"
 
 const VALID_TABS = ["info", "rx-log", "noise"] as const
 type DeviceTab = (typeof VALID_TABS)[number]
@@ -337,6 +338,14 @@ function PositionCard() {
           <Skeleton className="h-16 w-full" />
         ) : editing ? (
           <div className="flex flex-col gap-3">
+            <PositionPicker
+              lat={parsed?.lat ?? null}
+              lon={parsed?.lon ?? null}
+              onPick={(la, lo) => {
+                setLatText(la.toString())
+                setLonText(lo.toString())
+              }}
+            />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <Label htmlFor="position-lat" className="text-xs uppercase tracking-wide text-muted-foreground">

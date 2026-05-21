@@ -64,6 +64,25 @@ vi.mock("@/features/noise/api", () => ({
 // Avoid uPlot DOM work in jsdom.
 vi.mock("uplot-react", () => ({ default: () => null }))
 
+// react-leaflet pulls in DOM APIs (getBoundingClientRect, ResizeObserver,
+// etc.) that jsdom doesn't fully support. Stub MapContainer + helpers so
+// PositionCard's edit mode mounts cleanly. We don't unit-test the map
+// interaction itself — that needs a real DOM.
+vi.mock("react-leaflet", () => ({
+  MapContainer: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="leaflet-map">{children}</div>
+  ),
+  TileLayer: () => null,
+  Marker: () => null,
+  useMap: () => ({
+    panTo: () => {},
+    setView: () => {},
+    getCenter: () => ({ lat: 0, lng: 0 }),
+    getZoom: () => 1,
+  }),
+  useMapEvents: () => ({}),
+}))
+
 // Mock the lower-level api so RxLogPanel (mounted via Tabs forceMount) does
 // not try to hit a real endpoint.
 vi.mock("@/lib/api", () => ({ api: { get: vi.fn().mockResolvedValue({
@@ -162,6 +181,26 @@ describe("DevicePage tabs", () => {
       "aria-selected",
       "true",
     )
+  })
+
+  it("shows the position picker map when entering PositionCard edit mode", () => {
+    ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+    })
+    render(wrap(<DevicePage />))
+    // No map until the user opens the editor.
+    expect(screen.queryByTestId("leaflet-map")).not.toBeInTheDocument()
+
+    const editBtn = screen.getByRole("button", { name: /edit position/i })
+    fireEvent.click(editBtn)
+
+    // The mocked MapContainer renders a sentinel div; lat/lon inputs
+    // appear alongside it.
+    expect(screen.getByTestId("leaflet-map")).toBeInTheDocument()
+    expect(screen.getByLabelText(/latitude/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/longitude/i)).toBeInTheDocument()
   })
 
   it("ignores unknown ?tab values and falls back to Info", () => {
