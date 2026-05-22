@@ -1,32 +1,20 @@
-import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { Plus, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 import { notifyError } from "@/lib/notify"
 import {
-  useAddChannel,
   useChannels,
   useRemoveChannel,
   type Channel,
 } from "@/features/channels/queries"
+import { AddChannelSheet } from "@/features/channels/AddChannelSheet"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { ChannelAvatar } from "@/components/channel-avatar"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 
 function ChannelCard({ channel }: { channel: Channel }) {
   const navigate = useNavigate()
@@ -85,104 +73,12 @@ function ChannelCard({ channel }: { channel: Channel }) {
   )
 }
 
-function AddChannelDialog() {
-  const [open, setOpen] = useState(false)
-  const [idx, setIdx] = useState("")
-  const [name, setName] = useState("")
-  const [psk, setPsk] = useState("")
-  const add = useAddChannel()
-
-  const submit = (e: React.SyntheticEvent) => {
-    e.preventDefault()
-    const idxNum = parseInt(idx, 10)
-    if (Number.isNaN(idxNum) || idxNum < 0) {
-      toast.error("idx must be a non-negative integer")
-      return
-    }
-    if (!name.trim()) {
-      toast.error("Name is required")
-      return
-    }
-    add.mutate(
-      { idx: idxNum, name: name.trim(), psk: psk.trim() || null },
-      {
-        onSuccess: () => {
-          toast.success(`Added channel ${name}`)
-          setOpen(false)
-          setIdx("")
-          setName("")
-          setPsk("")
-        },
-        onError: (err) => notifyError("Add channel", err),
-      },
-    )
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="mr-1 h-4 w-4" /> Add channel
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add channel</DialogTitle>
-          <DialogDescription>
-            Define a new MeshCore channel by index and name. PSK is an
-            optional 16-byte hex key (32 hex chars). When omitted, the
-            firmware derives the PSK automatically from the channel name.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="channel-idx">Index</Label>
-            <Input
-              id="channel-idx"
-              type="number"
-              min={0}
-              value={idx}
-              onChange={(e) => setIdx(e.target.value)}
-              required
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="channel-name">Name</Label>
-            <Input
-              id="channel-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={32}
-              required
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="channel-psk">PSK (optional, 32 hex chars)</Label>
-            <Input
-              id="channel-psk"
-              value={psk}
-              onChange={(e) => setPsk(e.target.value)}
-              maxLength={32}
-              placeholder="leave blank to auto-derive from name"
-            />
-          </div>
-          <DialogFooter>
-            <Button type="submit" disabled={add.isPending}>
-              {add.isPending ? "Adding…" : "Add"}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
 export function ChannelsPage() {
   const { data, isLoading, isError, error } = useChannels()
 
   return (
     <PageShell
-      header={<PageHeader title="Channels" actions={<AddChannelDialog />} />}
+      header={<PageHeader title="Channels" actions={<AddChannelSheet />} />}
     >
       {isLoading ? (
         <div className="space-y-2">
