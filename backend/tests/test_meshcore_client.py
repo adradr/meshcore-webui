@@ -128,28 +128,46 @@ class TestSendTrace:
 
 
 class TestRequestTimeouts:
-    """Confirm req_* methods use the new 15s default and produce actionable errors.
+    """req_* methods pass `timeout=0` to the meshcore lib so the firmware's
+    `suggested_timeout` (which scales with flood / multi-hop complexity)
+    is honoured, AND wrap the call in `asyncio.wait_for(max_wait)` as an
+    outer cap so a stuck firmware cannot hang the request indefinitely.
 
-    Bugfix 2: opaque "X failed or timed out" RuntimeErrors translated to 502
-    after 30s waits made every RF-unreachable contact look like a backend bug.
-    New defaults: 15s timeout, error messages include pubkey prefix + hint.
+    Bugfix history:
+      - Bugfix 2 introduced a hardcoded 15s timeout to fail fast for
+        unreachable peers. That over-cut floods that would have replied
+        at 18-30s and made our ping/trace/discover fail for peers the
+        official MeshCore app could reach on the same radio.
+      - Bugfix 3 (this layer): pass `timeout=0` to the lib, enforce a
+        60s outer ceiling via `asyncio.wait_for`. Same fail-fast story
+        for unreachable peers, but legitimate slow floods now succeed.
     """
 
+    @staticmethod
+    def _lib_timeout(call):
+        """Extract the `timeout=...` arg passed to the mocked lib call —
+        accepting either kwarg or positional form so the tests stay
+        agnostic to the lib's internal call shape."""
+        t = call.kwargs.get("timeout")
+        if t is None:
+            for a in call.args:
+                if isinstance(a, (int, float)) and not isinstance(a, bool):
+                    t = a
+                    break
+        return t
+
     @pytest.mark.asyncio
-    async def test_req_telemetry_timeout_default_is_15s(self):
+    async def test_req_telemetry_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_telemetry_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_telemetry("ab" * 32)
         fake_mc.commands.req_telemetry_sync.assert_called_once()
-        call = fake_mc.commands.req_telemetry_sync.call_args
-        # Accept either kwarg or positional timeout.
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_telemetry_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
     async def test_req_telemetry_error_mentions_pubkey_prefix(self):
@@ -162,53 +180,63 @@ class TestRequestTimeouts:
             await client.req_telemetry(pk)
 
     @pytest.mark.asyncio
-    async def test_req_status_timeout_default_is_15s(self):
+    async def test_req_status_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_status_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_status("ab" * 32)
-        call = fake_mc.commands.req_status_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_status_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_req_acl_timeout_default_is_15s(self):
+    async def test_req_acl_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_acl_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_acl("ab" * 32)
-        call = fake_mc.commands.req_acl_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_acl_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_disc_path_uses_15s_timeout(self):
+    async def test_disc_path_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.disc_path("aa" * 32)
-        call = fake_mc.commands.send_path_discovery_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            # disc_path may pass timeout positionally.
-            for a in call.args[1:]:
-                if isinstance(a, float):
-                    timeout = a
-                    break
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.send_path_discovery_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_send_trace_default_is_15s(self):
+    async def test_outer_max_wait_cap_fires_when_lib_hangs(self):
+        """If the firmware suggests a runaway timeout (or the lib
+        otherwise stalls), the wrapper's outer `asyncio.wait_for` cap
+        MUST fire — this is the safety net that the bugfix-2 hardcoded
+        15s used to provide. Use a tiny `max_wait` so the test stays
+        fast, and have the lib block on an Event that never gets set."""
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        blocker = asyncio.Event()  # never set
+
+        async def _hang(*_a, **_kw):
+            await blocker.wait()
+            return {"status": "should never arrive"}
+
+        fake_mc.commands.req_status_sync = _hang
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 0.1s"):
+            await client.req_status("ab" * 32, max_wait=0.1)
+
+    @pytest.mark.asyncio
+    async def test_send_trace_default_is_60s(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         ack = MagicMock()
@@ -217,7 +245,7 @@ class TestRequestTimeouts:
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(TimeoutError, match="within 15s"):
+        with pytest.raises(TimeoutError, match="within 60s"):
             await client.send_trace()
 
     @pytest.mark.asyncio

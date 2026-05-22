@@ -870,41 +870,94 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def req_telemetry(self, pubkey: str, timeout: float = 15.0) -> dict:
+    # Outer safety cap on a single binary-request round trip. The lib's
+    # `suggested_timeout` from the firmware ack scales with mesh
+    # complexity (flood routes through many repeaters can need 30–45s);
+    # we cap at 60s so a misbehaving firmware can't stall a request
+    # forever. See `_req_with_firmware_timeout` for the wrapper that
+    # honours firmware's suggestion while enforcing this ceiling.
+    _REQ_MAX_WAIT_S: float = 60.0
+
+    async def _req_with_firmware_timeout(
+        self,
+        op_name: str,
+        pubkey: str,
+        call,
+        *,
+        max_wait: float | None = None,
+    ):
+        """Run a `mc.commands.req_*_sync(...)` style call passing
+        `timeout=0` so the lib honours the firmware's `suggested_timeout`,
+        and wrap it in an outer `asyncio.wait_for` so a stuck firmware
+        cannot exceed `max_wait` (default `_REQ_MAX_WAIT_S`).
+
+        Returns whatever the lib call returns (`None` on no-reply / error)
+        OR raises `RuntimeError` if the outer cap fires — both surface
+        as "no reply within Xs" to the caller.
+        """
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
+        try:
+            return await asyncio.wait_for(call(), timeout=cap)
+        except asyncio.TimeoutError:
+            log.warning(
+                "%s wrapper outer-cap fired at %.1fs for %s…",
+                op_name, cap, pubkey[:8],
+            )
+            return None
+
+    async def req_telemetry(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         """Request telemetry from a contact; returns LPP dict or raises on timeout.
 
-        Default timeout is 15s — long enough for a 2–3 hop reply round-trip
-        but short enough that an unreachable peer fails fast instead of leaving
-        the UI hanging on a 30s spinner. See bugfix 2.
+        Passes `timeout=0` to the lib so the firmware's `suggested_timeout`
+        is honoured — that value scales with flood/multi-hop complexity.
+        An outer `max_wait` cap (default 60s) guarantees the wrapper
+        cannot stall longer than that even if the firmware misbehaves.
+        See bugfix 3 — previously we passed a hardcoded 15s which cut
+        off legitimate flood replies on peers with no known path.
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_telemetry_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_telemetry", pubkey,
+                lambda: mc.commands.req_telemetry_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"Telemetry: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Telemetry: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return dict(res) if hasattr(res, "items") else {"data": res}
 
-    async def req_status(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def req_status(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_status_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_status", pubkey,
+                lambda: mc.commands.req_status_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"Status: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Status: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return self._serialize(dict(res))
 
-    async def req_acl(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def req_acl(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_acl_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_acl", pubkey,
+                lambda: mc.commands.req_acl_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"ACL: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"ACL: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             # req_acl_sync returns acl_data (list / payload), wrap for JSON.
@@ -918,7 +971,7 @@ class MeshCoreClient:
         offset: int = 0,
         order_by: int = 0,
         pubkey_prefix_length: int = 4,
-        timeout: float = 15.0,
+        max_wait: float | None = None,
     ) -> dict:
         """Ask a remote node for its neighbour list.
 
@@ -930,20 +983,28 @@ class MeshCoreClient:
         zero-hop advertisement received by the queried node — NOT a live
         link measurement. A large secs_ago means the neighbour hasn't been
         heard from recently.
+
+        Honours the firmware's `suggested_timeout` via `_req_with_firmware_timeout`;
+        capped at `max_wait` (default 60s).
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_neighbours_sync(
-                pubkey,
-                count=count,
-                offset=offset,
-                order_by=order_by,
-                pubkey_prefix_length=pubkey_prefix_length,
-                timeout=timeout,
+            res = await self._req_with_firmware_timeout(
+                "req_neighbours", pubkey,
+                lambda: mc.commands.req_neighbours_sync(
+                    pubkey,
+                    count=count,
+                    offset=offset,
+                    order_by=order_by,
+                    pubkey_prefix_length=pubkey_prefix_length,
+                    timeout=0,
+                ),
+                max_wait=cap,
             )
             if res is None:
                 raise RuntimeError(
-                    f"Neighbours: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Neighbours: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return {
@@ -959,19 +1020,26 @@ class MeshCoreClient:
                 ],
             }
 
-    async def disc_path(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def disc_path(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         """Discover the network path to a contact.
 
-        The meshcore lib's `send_path_discovery_sync` derives its own timeout
-        from the firmware's `suggested_timeout` when `timeout=0`. We pass an
-        explicit 15s ceiling so the UI fails fast for unreachable peers.
+        The meshcore lib's `send_path_discovery_sync` derives its own
+        timeout from the firmware's `suggested_timeout` when `timeout=0`.
+        We pass `timeout=0` to honour that suggestion (it scales with
+        flood / multi-hop complexity) and enforce an outer `max_wait`
+        cap (default 60s) so a stuck firmware can't hang the request.
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            r = await mc.commands.send_path_discovery_sync(pubkey, timeout=timeout)
+            r = await self._req_with_firmware_timeout(
+                "disc_path", pubkey,
+                lambda: mc.commands.send_path_discovery_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if r is None:
                 raise RuntimeError(
-                    f"Path discovery: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Path discovery: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or not running advertised firmware"
                 )
             if hasattr(r, "is_error") and r.is_error():
@@ -986,12 +1054,17 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def send_trace(self, *, timeout: float = 15.0) -> TracePathResult:
+    async def send_trace(self, *, timeout: float = 60.0) -> TracePathResult:
         """Send a trace packet and wait for the TRACE_DATA response.
 
         Trace is a one-shot broadcast — there's no explicit destination.
         Each hop along the path reports back the SNR at which IT received
         the previous transmission, plus the first byte of its own pubkey.
+
+        Default wait raised to 60s (bugfix 3): a flood-trace through a
+        dense mesh routinely takes 30–45s to come back as repeaters
+        respect their duty-cycle floors. The previous 15s default
+        timed out a large fraction of legitimate traces.
 
         Returns a TracePathResult describing the path travelled. Raises
         RuntimeError if not connected or the device didn't ack the send,

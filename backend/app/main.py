@@ -55,9 +55,16 @@ def _configure_logging() -> None:
     alembic.ini's root `console` handler (which would double every line).
     Under pytest we leave propagation enabled so `caplog` (attached to
     the root logger) can observe records normally.
+
+    Optional env knob `MESHCORE_LIB_LOG_LEVEL` lets operators bump the
+    meshcore-py library's own `meshcore` logger (default WARNING) up
+    to DEBUG when debugging wire-level send/receive behaviour. The
+    library logs are routed through the same `app` StreamHandler so
+    they land in `docker logs` alongside ours.
     """
     import sys
     app_logger = logging.getLogger("app")
+    handler: logging.Handler
     if not app_logger.handlers:
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter(
@@ -66,6 +73,15 @@ def _configure_logging() -> None:
         app_logger.addHandler(handler)
         app_logger.setLevel(logging.INFO)
         app_logger.propagate = "pytest" in sys.modules
+    else:
+        handler = app_logger.handlers[0]
+    lib_level = os.environ.get("MESHCORE_LIB_LOG_LEVEL")
+    if lib_level:
+        meshcore_logger = logging.getLogger("meshcore")
+        meshcore_logger.setLevel(lib_level.upper())
+        if handler not in meshcore_logger.handlers:
+            meshcore_logger.addHandler(handler)
+        meshcore_logger.propagate = "pytest" in sys.modules
 
 
 _configure_logging()
