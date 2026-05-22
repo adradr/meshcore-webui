@@ -18,8 +18,12 @@ interface Props {
   selfHasGps?: boolean
   /** Emitted when the user clicks "Trace path" on a REP/ROOM popup. */
   onTraceRequest?: (c: ContactMarker) => void
-  /** When true, the per-popup Trace button is disabled (any trace in flight). */
-  traceInFlight?: boolean
+  /**
+   * Pubkey of the node whose trace is currently in flight, or `null` when no
+   * trace is running. Forwarded to each popup so only the matching node spins
+   * and every other Trace button greys out.
+   */
+  traceInFlightPubkey: string | null
 }
 
 export function MarkersLayer({
@@ -27,7 +31,7 @@ export function MarkersLayer({
   onLosRequest,
   selfHasGps,
   onTraceRequest,
-  traceInFlight,
+  traceInFlightPubkey,
 }: Props) {
   return (
     <>
@@ -44,7 +48,7 @@ export function MarkersLayer({
               selfHasGps={selfHasGps}
               isSelf={c.id === "__self__"}
               onTraceRequest={onTraceRequest}
-              traceInFlight={traceInFlight}
+              traceInFlightPubkey={traceInFlightPubkey}
             />
           </Popup>
         </Marker>

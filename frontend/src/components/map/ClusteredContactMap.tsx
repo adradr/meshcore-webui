@@ -22,8 +22,12 @@ interface Props {
   selfHasGps?: boolean
   /** Emitted when the user clicks "Trace path" on a REP/ROOM popup. */
   onTraceRequest?: (c: ContactMarker) => void
-  /** True when any trace mutation is in flight — disables per-popup Trace buttons. */
-  traceInFlight?: boolean
+  /**
+   * Pubkey of the node whose trace is currently in flight, or `null`. The
+   * matching popup shows the spinner; every other Trace button is disabled
+   * but does not spin.
+   */
+  traceInFlightPubkey: string | null
   /**
    * Rendered inside the `<MapContainer>` (after markers, before fit button).
    * Use this to mount react-leaflet overlays like `TracePathLayer` that
@@ -52,7 +56,7 @@ export function ClusteredContactMap({
   onLosRequest,
   selfHasGps,
   onTraceRequest,
-  traceInFlight,
+  traceInFlightPubkey,
   children,
 }: Props) {
   // Include self in fitBounds + center so the camera respects your own pin
@@ -82,7 +86,7 @@ export function ClusteredContactMap({
           onLosRequest={onLosRequest}
           selfHasGps={selfHasGps}
           onTraceRequest={onTraceRequest}
-          traceInFlight={traceInFlight}
+          traceInFlightPubkey={traceInFlightPubkey}
         />
       </MarkerClusterGroup>
       {/* Self marker rendered OUTSIDE the cluster so it always shows distinctly */}

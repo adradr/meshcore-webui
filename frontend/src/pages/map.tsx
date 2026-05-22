@@ -51,6 +51,10 @@ export function MapPage() {
   const traceMutation = useTracePath()
   const [activeTrace, setActiveTrace] = useState<TraceOut | null>(null)
   const [hopsOpen, setHopsOpen] = useState(false)
+  // Track the in-flight node's pubkey rather than a single boolean so each
+  // marker popup can decide whether to spin (itself) or merely grey out (other
+  // nodes) — see MarkerPopupBody for the per-marker rendering logic.
+  const [tracingPubkey, setTracingPubkey] = useState<string | null>(null)
 
   const self =
     selfInfo &&
@@ -84,10 +88,14 @@ export function MapPage() {
     : []
 
   const handleTraceRequest = (c: { id: string; name: string }) => {
+    setTracingPubkey(c.id)
     traceMutation.mutate(c.id, {
       onSuccess: (trace) => {
         setActiveTrace(trace)
       },
+      // Clear on settled (NOT onSuccess) so an error doesn't leave the
+      // markers wedged in the disabled state forever.
+      onSettled: () => setTracingPubkey(null),
     })
   }
 
@@ -109,7 +117,7 @@ export function MapPage() {
         }
         selfHasGps={self !== null}
         onTraceRequest={handleTraceRequest}
-        traceInFlight={traceMutation.isPending}
+        traceInFlightPubkey={tracingPubkey}
       >
         {activeTrace && (
           <TracePathLayer hops={activeTrace.hops} origin={self} />

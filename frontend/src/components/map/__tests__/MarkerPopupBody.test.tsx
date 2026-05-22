@@ -170,14 +170,14 @@ describe("MarkerPopupBody", () => {
     expect(onTrace).toHaveBeenCalledWith(repContact)
   })
 
-  it("disables Trace button when traceInFlight=true", () => {
+  it("disables Trace button when this node's trace is in flight", () => {
     const repContact = { ...contact, nodeType: "REP" as const }
     render(
       <MemoryRouter>
         <MarkerPopupBody
           contact={repContact}
           onTraceRequest={vi.fn()}
-          traceInFlight={true}
+          traceInFlightPubkey={repContact.id}
           isSelf={false}
         />
       </MemoryRouter>,
@@ -185,14 +185,14 @@ describe("MarkerPopupBody", () => {
     expect(screen.getByLabelText(/trace path to/i)).toBeDisabled()
   })
 
-  it("shows spinner instead of Route icon when traceInFlight=true", () => {
+  it("shows spinner instead of Route icon when this node's trace is in flight", () => {
     const repContact = { ...contact, nodeType: "REP" as const }
     render(
       <MemoryRouter>
         <MarkerPopupBody
           contact={repContact}
           onTraceRequest={vi.fn()}
-          traceInFlight={true}
+          traceInFlightPubkey={repContact.id}
           isSelf={false}
         />
       </MemoryRouter>,
@@ -202,19 +202,70 @@ describe("MarkerPopupBody", () => {
     expect(btn.querySelector(".animate-spin")).toBeTruthy()
   })
 
-  it("shows Route icon (no spinner) when traceInFlight=false", () => {
+  it("shows Route icon (no spinner) when no trace is in flight", () => {
     const repContact = { ...contact, nodeType: "REP" as const }
     render(
       <MemoryRouter>
         <MarkerPopupBody
           contact={repContact}
           onTraceRequest={vi.fn()}
-          traceInFlight={false}
+          traceInFlightPubkey={null}
           isSelf={false}
         />
       </MemoryRouter>,
     )
     const btn = screen.getByLabelText(/trace path to/i)
     expect(btn.querySelector(".animate-spin")).toBeNull()
+  })
+
+  it("shows spinner only on the node whose trace is in flight; disables others", () => {
+    const tracingId = "aaaa1111"
+    const otherId = "bbbb2222"
+
+    // Render the popup for the tracing node:
+    const tracingMarker: ContactMarker = {
+      id: tracingId,
+      name: "A",
+      lat: 0,
+      lon: 0,
+      nodeType: "REP",
+    }
+    const { unmount } = render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={tracingMarker}
+          isSelf={false}
+          onTraceRequest={vi.fn()}
+          traceInFlightPubkey={tracingId}
+        />
+      </MemoryRouter>,
+    )
+    const tracingBtn = screen.getByLabelText(/trace path to a/i)
+    expect(tracingBtn).toBeDisabled()
+    expect(tracingBtn.querySelector(".animate-spin")).toBeTruthy()
+    unmount()
+
+    // Render the popup for an unrelated node while tracing the first:
+    const otherMarker: ContactMarker = {
+      id: otherId,
+      name: "B",
+      lat: 0,
+      lon: 0,
+      nodeType: "REP",
+    }
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={otherMarker}
+          isSelf={false}
+          onTraceRequest={vi.fn()}
+          traceInFlightPubkey={tracingId}
+        />
+      </MemoryRouter>,
+    )
+    const otherBtn = screen.getByLabelText(/trace path to b/i)
+    // Other node's button is disabled (greyed) but NOT spinning
+    expect(otherBtn).toBeDisabled()
+    expect(otherBtn.querySelector(".animate-spin")).toBeNull()
   })
 })

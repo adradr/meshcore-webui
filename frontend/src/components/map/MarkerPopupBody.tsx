@@ -23,11 +23,12 @@ interface Props {
   /** Emitted when the user clicks the "Trace path" button (REP/ROOM only). */
   onTraceRequest?: (c: ContactMarker) => void
   /**
-   * True when ANY trace mutation is in flight. Per-marker pending state would
-   * require lifting the mutation per-marker which is overkill for v1 — accept
-   * the coarse disabling.
+   * Pubkey of the node whose trace is currently in flight, or `null` when no
+   * trace is running. The popup whose `contact.id` matches shows the spinner;
+   * every OTHER node's Trace button is disabled (greyed) but does not spin —
+   * so the user isn't misled into thinking they're waiting on unrelated nodes.
    */
-  traceInFlight?: boolean
+  traceInFlightPubkey: string | null
 }
 
 /** Node types where the "Trace path" button makes sense (multi-hop targets). */
@@ -45,14 +46,16 @@ export function MarkerPopupBody({
   selfHasGps,
   isSelf,
   onTraceRequest,
-  traceInFlight,
+  traceInFlightPubkey,
 }: Props) {
   const losDisabled = !selfHasGps || !onLosRequest
   const losTitle = selfHasGps
     ? `Line of sight to ${contact.name}`
     : "Self location unknown — set up your device's GPS to compute line of sight"
   const showTrace = TRACEABLE_TYPES.has(contact.nodeType) && !!onTraceRequest
-  const traceDisabled = !!traceInFlight
+  const isThisTracing = traceInFlightPubkey === contact.id
+  const anyTracing = traceInFlightPubkey != null
+  const traceDisabled = anyTracing
 
   return (
     <div className="min-w-44 space-y-2">
@@ -117,7 +120,7 @@ export function MarkerPopupBody({
               disabled={traceDisabled}
               onClick={() => onTraceRequest?.(contact)}
             >
-              {traceInFlight ? (
+              {isThisTracing ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Route className="h-3.5 w-3.5" />
