@@ -70,7 +70,7 @@ export function LoginPage() {
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
                   disabled={pending}
-                  placeholder="Paste the bearer token from your server's .env"
+                  placeholder="API key"
                 />
               </div>
               {error && (

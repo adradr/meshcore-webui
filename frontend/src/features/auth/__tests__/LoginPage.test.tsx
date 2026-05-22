@@ -21,6 +21,12 @@ describe("LoginPage", () => {
     expect(btn).toBeDisabled()
   })
 
+  it("uses a short placeholder so the field doesn't crowd on mobile", () => {
+    render(<LoginPage />)
+    const input = screen.getByLabelText(/api key/i) as HTMLInputElement
+    expect(input.placeholder).toBe("API key")
+  })
+
   it("calls setApiKey with the entered value on submit", async () => {
     setApiKeyMock.mockResolvedValue({ required: true, valid: true })
     render(<LoginPage />)
