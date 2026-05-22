@@ -934,9 +934,17 @@ class MeshCoreClient:
         mc = await self._require_mc()
         cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
+            # DIAGNOSTIC PROBE: force a 30s min_timeout to test whether
+            # the firmware's ~7s suggested_timeout is cutting off legit
+            # flood replies. If this makes pings to PILISMETEOR succeed,
+            # the fix is to bump min_timeout permanently. If it still
+            # times out at 30s, the reply genuinely isn't arriving and
+            # the problem is elsewhere (filter mismatch, RF, etc.).
             res = await self._req_with_firmware_timeout(
                 "req_status", pubkey,
-                lambda: mc.commands.req_status_sync(pubkey, timeout=0),
+                lambda: mc.commands.req_status_sync(
+                    pubkey, timeout=0, min_timeout=30,
+                ),
                 max_wait=cap,
             )
             if res is None:
