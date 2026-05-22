@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Command,
@@ -25,6 +25,12 @@ interface Props {
   onSubmit?: () => void
   placeholder?: string
   disabled?: boolean
+  /**
+   * Optional outer ref to the underlying textarea — exposes only
+   * `focus()` so parents (e.g. MessageInput's seedKey bump) can move
+   * focus without taking over the existing internal ref.
+   */
+  textareaRef?: React.Ref<{ focus: () => void }>
 }
 
 const MIN_ROWS = 1
@@ -54,8 +60,16 @@ export function MentionTextarea({
   onSubmit,
   placeholder,
   disabled,
+  textareaRef,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  useImperativeHandle(
+    textareaRef,
+    () => ({
+      focus: () => ref.current?.focus(),
+    }),
+    [],
+  )
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [tokenStart, setTokenStart] = useState<number | null>(null)

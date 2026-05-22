@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react"
-import { MoreVertical } from "lucide-react"
+import { useMemo, useRef, useState } from "react"
+import { MoreVertical, Reply } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import {
   ContextMenu,
@@ -43,7 +43,17 @@ interface Props {
    * the raw `message.text`.
    */
   displayText?: string
+  /**
+   * Channel-only: invoked when the user swipes the bubble right >= 50px to
+   * tag the sender into the composer. Argument is the resolved adv_name.
+   */
+  onReply?: (senderName: string) => void
 }
+
+// Swipe-to-reply geometry — visual follow up to SWIPE_MAX, trigger at
+// SWIPE_THRESHOLD on release. Hand-rolled (no gesture lib in the repo).
+const SWIPE_THRESHOLD = 50
+const SWIPE_MAX = 80
 
 /**
  * Build the asymmetric rounded-corner classes for a bubble inside a
@@ -78,9 +88,12 @@ export function MessageBubble({
   resolvedSender,
   senderPrefix: _senderPrefix,
   displayText,
+  onReply,
 }: Props) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
+  const [dx, setDx] = useState(0)
+  const swipeStartXRef = useRef<number | null>(null)
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
   const sendRetry = useSendMessage()
@@ -118,8 +131,87 @@ export function MessageBubble({
     isOut ? "bg-primary text-primary-foreground" : "bg-muted"
   } ${bubbleRoundingClasses(isOut, isFirstInGroup, isLastInGroup)} animate-in fade-in slide-in-from-bottom-1 duration-200`
 
+  // Swipe-to-reply only applies to inbound channel bubbles with a resolved
+  // sender; DMs, outbound bubbles and unresolved channel senders skip it.
+  const swipeEnabled =
+    !isOut &&
+    message.channel_idx != null &&
+    !!onReply &&
+    !!resolvedSender
+  const senderName = resolvedSender?.adv_name
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!swipeEnabled) return
+    const target = e.target as HTMLElement | null
+    // Don't start a swipe from interactive controls (more-actions trigger,
+    // retry button, dropdown items). Buttons and elements opting out via
+    // data-no-swipe are excluded.
+    if (target && target.closest("button, [data-no-swipe], [role='menuitem']")) {
+      return
+    }
+    swipeStartXRef.current = e.clientX
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {
+      // jsdom / older browsers may not support pointer capture; ignore.
+    }
+  }
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (swipeStartXRef.current == null) return
+    const raw = e.clientX - swipeStartXRef.current
+    if (raw <= 0) {
+      setDx(0)
+      return
+    }
+    setDx(Math.min(raw, SWIPE_MAX))
+  }
+
+  const finishSwipe = (e: React.PointerEvent<HTMLDivElement>, fire: boolean) => {
+    if (swipeStartXRef.current == null) return
+    const finalDx = e.clientX - swipeStartXRef.current
+    swipeStartXRef.current = null
+    setDx(0)
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {
+      // ignore
+    }
+    if (fire && finalDx >= SWIPE_THRESHOLD && senderName) {
+      onReply?.(senderName)
+    }
+  }
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) =>
+    finishSwipe(e, true)
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) =>
+    finishSwipe(e, false)
+
+  const replyHintOpacity = Math.min(dx / SWIPE_THRESHOLD, 1)
+
   return (
     <>
+      <div
+        data-swipe-root
+        className="relative touch-pan-y select-none"
+        style={{
+          transform: `translateX(${dx}px)`,
+          transition: dx === 0 ? "transform 150ms ease-out" : "none",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+      >
+        {swipeEnabled && dx > 0 && (
+          <span
+            className="pointer-events-none absolute -left-8 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-muted text-muted-foreground"
+            style={{ opacity: replyHintOpacity }}
+            aria-hidden="true"
+          >
+            <Reply className="h-3.5 w-3.5" />
+          </span>
+        )}
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className={bubbleClass}>
@@ -170,6 +262,7 @@ export function MessageBubble({
           ))}
         </ContextMenuContent>
       </ContextMenu>
+      </div>
       <HeardRepeatsSheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}

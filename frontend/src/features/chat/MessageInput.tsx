@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { useSendMessage } from "./useSendMessage"
 import { useContacts, useContact } from "@/features/contacts/queries"
@@ -9,14 +9,47 @@ import { Send } from "lucide-react"
 interface Props {
   contactPubKey?: string
   channelIdx?: number
+  /**
+   * Controlled-text mode: pass BOTH `value` and `onChange` to lift the
+   * draft into the parent (used by chat.tsx to prefill `@Sender ` from a
+   * swipe-to-reply). Leave both undefined to keep the legacy uncontrolled
+   * behaviour where the component owns its own draft state.
+   */
+  value?: string
+  onChange?: (v: string) => void
+  /**
+   * Monotonic seed counter — when it changes, the textarea receives focus.
+   * Pair with a controlled `value` to prefill content before bumping.
+   */
+  seedKey?: number
 }
 
 // MeshCore packet payload limits — soft warning > 140 chars, hard at >200.
 const SOFT_LIMIT = 140
 const HARD_LIMIT = 200
 
-export function MessageInput({ contactPubKey, channelIdx }: Props) {
-  const [text, setText] = useState("")
+export function MessageInput({
+  contactPubKey,
+  channelIdx,
+  value,
+  onChange,
+  seedKey,
+}: Props) {
+  // Controlled when BOTH value+onChange are supplied; otherwise we keep
+  // our own internal state for backwards compat with existing call-sites.
+  const isControlled = value !== undefined && onChange !== undefined
+  const [internalText, setInternalText] = useState("")
+  const text = isControlled ? value! : internalText
+  const setText = (v: string) => {
+    if (isControlled) onChange!(v)
+    else setInternalText(v)
+  }
+  const textareaHandleRef = useRef<{ focus: () => void } | null>(null)
+  // seedKey bump = "focus me" — paired with a fresh `value` from the parent.
+  useEffect(() => {
+    if (seedKey === undefined) return
+    textareaHandleRef.current?.focus()
+  }, [seedKey])
   const { mutate, isPending } = useSendMessage()
   const { data: contactsMap } = useContacts()
   const { contact } = useContact(contactPubKey)
@@ -68,6 +101,7 @@ export function MessageInput({ contactPubKey, channelIdx }: Props) {
             onSubmit={submit}
             placeholder={placeholder}
             disabled={isPending}
+            textareaRef={textareaHandleRef}
           />
           {overSoft && (
             <div

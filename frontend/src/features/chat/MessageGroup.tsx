@@ -16,6 +16,8 @@ interface Props {
   group: GroupShape
   showSender: boolean
   contacts: Record<string, { public_key?: string; adv_name?: string }> | undefined
+  /** Channel-only: forwarded to each MessageBubble for swipe-to-reply. */
+  onReply?: (senderName: string) => void
 }
 
 /**
@@ -51,7 +53,7 @@ function resolveDmSender(
  * Outgoing groups are flipped right-aligned with no avatar column.
  * Incoming channel groups show the sender name above the first bubble.
  */
-export function MessageGroup({ group, showSender, contacts }: Props) {
+export function MessageGroup({ group, showSender, contacts, onReply }: Props) {
   const first = group.messages[0]
   const last = group.messages[group.messages.length - 1]
   const parsed = first._parsedSender ?? null
@@ -141,6 +143,7 @@ export function MessageGroup({ group, showSender, contacts }: Props) {
               resolvedSender={resolved}
               senderPrefix={dmSenderPrefix}
               displayText={displayText}
+              onReply={onReply}
             />
           )
         })}

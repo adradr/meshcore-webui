@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import { ConversationHeader } from "@/features/chat/ConversationHeader"
 import { MessageList } from "@/features/chat/MessageList"
@@ -43,6 +43,15 @@ export function ChatPage() {
   const markRead = useMarkRead()
   const { lastMessage } = useRealtime()
 
+  // Composer draft is lifted so swipe-to-reply on a channel bubble can
+  // prefill `@SenderName ` and bump `seedKey` to refocus the textarea.
+  const [draft, setDraft] = useState("")
+  const [seedKey, setSeedKey] = useState(0)
+  const handleReply = useCallback((senderName: string) => {
+    setDraft((d) => (d.trim() ? `${d} @${senderName} ` : `@${senderName} `))
+    setSeedKey((k) => k + 1)
+  }, [])
+
   // Mark read on mount / when route conversation changes.
   useEffect(() => {
     if (!pubKey && channelIdx === undefined) return
@@ -71,9 +80,19 @@ export function ChatPage() {
     <div className="flex h-full flex-col">
       <ConversationHeader contactPubKey={pubKey} channelIdx={channelIdx} />
       <div className="flex-1 min-h-0">
-        <MessageList contactPubKey={pubKey} channelIdx={channelIdx} />
+        <MessageList
+          contactPubKey={pubKey}
+          channelIdx={channelIdx}
+          onReply={handleReply}
+        />
       </div>
-      <MessageInput contactPubKey={pubKey} channelIdx={channelIdx} />
+      <MessageInput
+        contactPubKey={pubKey}
+        channelIdx={channelIdx}
+        value={draft}
+        onChange={setDraft}
+        seedKey={seedKey}
+      />
     </div>
   )
 }

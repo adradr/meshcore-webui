@@ -18,6 +18,8 @@ export interface EnrichedMessage extends Message {
 interface Props {
   contactPubKey?: string
   channelIdx?: number
+  /** Channel-only: invoked when a bubble is swiped-to-reply. */
+  onReply?: (senderName: string) => void
 }
 
 type GroupItem = {
@@ -144,7 +146,7 @@ function buildTimeline(messages: EnrichedMessage[], isChannel: boolean): Timelin
  * The list OWNS its own scroll container — do not wrap it in another
  * `overflow-y-auto` parent or the sentinel/observer math breaks.
  */
-export function MessageList({ contactPubKey, channelIdx }: Props) {
+export function MessageList({ contactPubKey, channelIdx, onReply }: Props) {
   const q = useMessages(contactPubKey, channelIdx)
   const { data: contacts } = useContacts()
   const isChannel = channelIdx !== undefined
@@ -285,6 +287,7 @@ export function MessageList({ contactPubKey, channelIdx }: Props) {
               group={it}
               showSender={isChannel}
               contacts={contacts}
+              onReply={onReply}
             />
           )
         })}
