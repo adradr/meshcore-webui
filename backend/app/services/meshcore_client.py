@@ -811,6 +811,83 @@ class MeshCoreClient:
             await mc.commands.send_appstart()
         log.warning("RADIO ACTION=set_multi_acks value=%d", value)
 
+    # ----- Custom vars / time sync / BLE PIN (Task 2.3 / 2.4 / 2.5) -----
+
+    async def get_custom_vars(self) -> dict:
+        """Read firmware-defined custom variables.
+
+        Returns the dict the firmware advertises in CUSTOM_VARS — keys and
+        value types are firmware-specific and passed through verbatim. No
+        ``send_appstart`` afterwards: custom vars are not part of
+        ``self_info`` so the lib cache doesn't need a refresh.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_custom_vars()
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected get_custom_vars")
+        return dict(ev.payload or {})
+
+    async def set_custom_var(self, key: str, value: Any) -> None:
+        """Write a firmware-defined custom variable.
+
+        Type of ``value`` is firmware-specific; pass-through to the lib.
+        We log the key but NOT the value because callers may stash
+        firmware-specific secrets (PIN-derived seeds, etc.) here.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_custom_var(key, value)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_custom_var")
+        log.warning("RADIO ACTION=set_custom_var key=%s", key)
+
+    async def get_device_time(self) -> int:
+        """Read the device's wall-clock epoch (seconds).
+
+        The lib's CURRENT_TIME parser emits ``{"time": int}`` but other
+        firmware builds have been observed to surface a bare int or a
+        dict keyed ``"epoch"`` — we tolerate all three shapes so a
+        firmware quirk doesn't break the /api/device/time skew readout.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_time()
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected get_time")
+        payload = ev.payload
+        if isinstance(payload, int):
+            return payload
+        if isinstance(payload, dict):
+            return int(payload.get("epoch") or payload.get("time") or 0)
+        return 0
+
+    async def set_device_time(self, epoch: int) -> None:
+        """Push a wall-clock epoch (seconds) to the device.
+
+        Used to keep the radio's clock in sync with the host — the
+        firmware uses this to timestamp packets and order messages.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_time(epoch)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_time")
+        log.warning("RADIO ACTION=set_device_time epoch=%d", epoch)
+
+    async def set_ble_pin(self, pin: int) -> None:
+        """Set the BLE pairing PIN (write-only — firmware exposes no read).
+
+        Schema layer clamps to 0..999_999 (6-digit). We do NOT log the pin
+        value — only the action — so it doesn't end up in audit logs.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_devicepin(pin)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_ble_pin")
+        log.warning("RADIO ACTION=set_ble_pin")  # NOTE: pin value omitted on purpose
+
     # Bound on how long device_partial_reset blocks waiting for the
     # supervisor to re-establish the TCP companion link after a reboot.
     # Empirically the device is back in 2-5s; 15s is a generous ceiling

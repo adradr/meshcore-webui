@@ -1599,3 +1599,258 @@ class TestGetSelfInfo:
         client._mc = fake_mc
         with pytest.raises(RuntimeError, match="self_info unavailable"):
             await client.get_self_info()
+
+
+class TestCustomVars:
+    """`get_custom_vars` / `set_custom_var` round-trip firmware-defined
+    key/value pairs. Payload from the lib is already a dict; the wrapper
+    just defensively copies it and applies the standard error contract.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_custom_vars_returns_dict(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = {"foo": "1", "bar": "baz"}
+        fake_mc.commands.get_custom_vars = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        out = await client.get_custom_vars()
+
+        assert out == {"foo": "1", "bar": "baz"}
+        fake_mc.commands.get_custom_vars.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_get_custom_vars_empty_payload_returns_empty_dict(self):
+        """Firmware with no vars defined replies with ``{}`` — the wrapper
+        must not mistake that for an error."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = {}
+        fake_mc.commands.get_custom_vars = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        assert await client.get_custom_vars() == {}
+
+    @pytest.mark.asyncio
+    async def test_get_custom_vars_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_custom_vars = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_custom_vars"):
+            await client.get_custom_vars()
+
+    @pytest.mark.asyncio
+    async def test_get_custom_vars_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_custom_vars = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_custom_vars"):
+            await client.get_custom_vars()
+
+    @pytest.mark.asyncio
+    async def test_set_custom_var_happy_path(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_custom_var = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_custom_var("foo", "bar")
+
+        fake_mc.commands.set_custom_var.assert_awaited_once_with("foo", "bar")
+
+    @pytest.mark.asyncio
+    async def test_set_custom_var_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_custom_var = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_custom_var"):
+            await client.set_custom_var("foo", "bar")
+
+    @pytest.mark.asyncio
+    async def test_set_custom_var_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_custom_var = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_custom_var"):
+            await client.set_custom_var("foo", "bar")
+
+
+class TestTime:
+    """`get_device_time` / `set_device_time` are the radio clock sync.
+    The wrapper tolerates three lib payload shapes: bare int, ``{"time": int}``,
+    and ``{"epoch": int}`` — observed across firmware builds.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_device_time_dict_time_key(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = {"time": 1_700_000_000}
+        fake_mc.commands.get_time = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        assert await client.get_device_time() == 1_700_000_000
+
+    @pytest.mark.asyncio
+    async def test_get_device_time_dict_epoch_key(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = {"epoch": 1_700_000_001}
+        fake_mc.commands.get_time = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        assert await client.get_device_time() == 1_700_000_001
+
+    @pytest.mark.asyncio
+    async def test_get_device_time_bare_int(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = 1_700_000_002
+        fake_mc.commands.get_time = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        assert await client.get_device_time() == 1_700_000_002
+
+    @pytest.mark.asyncio
+    async def test_get_device_time_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_time = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_time"):
+            await client.get_device_time()
+
+    @pytest.mark.asyncio
+    async def test_get_device_time_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_time = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_time"):
+            await client.get_device_time()
+
+    @pytest.mark.asyncio
+    async def test_set_device_time_happy_path(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_time = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_device_time(1_700_000_000)
+
+        fake_mc.commands.set_time.assert_awaited_once_with(1_700_000_000)
+
+    @pytest.mark.asyncio
+    async def test_set_device_time_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_time = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_time"):
+            await client.set_device_time(1)
+
+    @pytest.mark.asyncio
+    async def test_set_device_time_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_time = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_time"):
+            await client.set_device_time(1)
+
+
+class TestBlePin:
+    """`set_ble_pin` is write-only and security-sensitive — the wrapper
+    MUST NOT log the pin value, only the action. We assert that
+    explicitly via caplog so a future refactor doesn't leak it.
+    """
+
+    @pytest.mark.asyncio
+    async def test_set_ble_pin_happy_path(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_devicepin = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_ble_pin(123456)
+
+        fake_mc.commands.set_devicepin.assert_awaited_once_with(123456)
+
+    @pytest.mark.asyncio
+    async def test_set_ble_pin_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_devicepin = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_ble_pin"):
+            await client.set_ble_pin(123456)
+
+    @pytest.mark.asyncio
+    async def test_set_ble_pin_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_devicepin = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_ble_pin"):
+            await client.set_ble_pin(123456)
+
+    @pytest.mark.asyncio
+    async def test_set_ble_pin_does_not_log_value(self, caplog):
+        """Guards against accidental logging of the pin in the audit
+        stream. The wrapper logs ``RADIO ACTION=set_ble_pin`` only."""
+        import logging
+
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_devicepin = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        # The wrapper logs via `app.services.meshcore_client` (module-
+        # level `log`); capture WARNING and above on the "app" tree.
+        with caplog.at_level(logging.WARNING, logger="app.services.meshcore_client"):
+            await client.set_ble_pin(987654)
+
+        # At least one record was emitted for the action…
+        action_records = [r for r in caplog.records if "set_ble_pin" in r.getMessage()]
+        assert action_records, "expected a RADIO ACTION=set_ble_pin record"
+        # …and none of them contain the pin digits.
+        for record in caplog.records:
+            assert "987654" not in record.getMessage()

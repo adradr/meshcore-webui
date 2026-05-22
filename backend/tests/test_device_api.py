@@ -936,3 +936,260 @@ async def test_policy_502_on_runtime_error(client):
         assert r.status_code == 502
     finally:
         del app.state.meshcore_client
+
+
+# --- Task 2.3: GET / PUT /api/device/custom-vars/{key} -------------------
+
+@pytest.mark.asyncio
+async def test_get_custom_vars_returns_dict(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_custom_vars = AsyncMock(
+        return_value={"foo": "1", "bar": "baz"},
+    )
+    try:
+        r = await client.get("/api/device/custom-vars")
+        assert r.status_code == 200
+        assert r.json() == {"foo": "1", "bar": "baz"}
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_custom_vars_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_custom_vars = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.get("/api/device/custom-vars")
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_string_value_returns_204(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_custom_var = AsyncMock(return_value=None)
+    try:
+        r = await client.put("/api/device/custom-vars/foo", json={"value": "x"})
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_custom_var.assert_awaited_once_with(
+            "foo", "x",
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_int_value_returns_204(client):
+    """Body value may be a scalar int — passed through to the lib."""
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_custom_var = AsyncMock(return_value=None)
+    try:
+        r = await client.put("/api/device/custom-vars/foo", json={"value": 42})
+        assert r.status_code == 204
+        app.state.meshcore_client.set_custom_var.assert_awaited_once_with(
+            "foo", 42,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_422_on_bad_key(client):
+    """Path key regex rejects characters outside ``[A-Za-z0-9_-]{1,32}``."""
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.put(
+        "/api/device/custom-vars/bad.key",
+        json={"value": "x"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_422_on_overlong_key(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.put(
+        f"/api/device/custom-vars/{'x' * 33}",
+        json={"value": "x"},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_422_on_non_scalar_value(client):
+    """Nested dict / list values aren't allowed — the firmware's wire
+    format is a flat key:value list with no round-trip for structure."""
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.put(
+        "/api/device/custom-vars/foo",
+        json={"value": {"nested": "dict"}},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_custom_var_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_custom_var = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.put("/api/device/custom-vars/foo", json={"value": "x"})
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- Task 2.4: GET /api/device/time + POST /api/device/time/sync ---------
+
+@pytest.mark.asyncio
+async def test_get_time_returns_skew_shape(client, monkeypatch):
+    """Skew is signed: ``device_epoch - server_epoch``. We pin both
+    sides via monkeypatch (host) + mock (radio) so the assertion is
+    exact instead of bounded."""
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_device_time = AsyncMock(
+        return_value=1_700_000_010,
+    )
+    # Patch `time.time` as seen by app.api.device (the only consumer);
+    # using `time.time` from inside the endpoint resolves to the
+    # module-level binding `app.api.device.time.time`.
+    import app.api.device as device_mod
+
+    monkeypatch.setattr(device_mod.time, "time", lambda: 1_700_000_000.0)
+    try:
+        r = await client.get("/api/device/time")
+        assert r.status_code == 200
+        body = r.json()
+        assert body == {
+            "device_epoch": 1_700_000_010,
+            "server_epoch": 1_700_000_000,
+            "skew_s": 10,
+        }
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_time_negative_skew(client, monkeypatch):
+    """Device behind host — skew is negative."""
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_device_time = AsyncMock(
+        return_value=1_700_000_000,
+    )
+    import app.api.device as device_mod
+
+    monkeypatch.setattr(device_mod.time, "time", lambda: 1_700_000_005.0)
+    try:
+        r = await client.get("/api/device/time")
+        assert r.status_code == 200
+        assert r.json()["skew_s"] == -5
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_time_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_device_time = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.get("/api/device/time")
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_sync_time_pushes_host_epoch(client, monkeypatch):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_time = AsyncMock(return_value=None)
+    import app.api.device as device_mod
+
+    monkeypatch.setattr(device_mod.time, "time", lambda: 1_700_000_123.7)
+    try:
+        r = await client.post("/api/device/time/sync")
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_device_time.assert_awaited_once_with(
+            1_700_000_123,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_sync_time_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_time = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post("/api/device/time/sync")
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- Task 2.5: POST /api/device/ble-pin ----------------------------------
+
+@pytest.mark.asyncio
+async def test_set_ble_pin_success_returns_204(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_ble_pin = AsyncMock(return_value=None)
+    try:
+        r = await client.post("/api/device/ble-pin", json={"pin": 123456})
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_ble_pin.assert_awaited_once_with(123456)
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_ble_pin_zero_allowed(client):
+    """Pin 0 is the documented ``no pairing prompt`` sentinel on some builds."""
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_ble_pin = AsyncMock(return_value=None)
+    try:
+        r = await client.post("/api/device/ble-pin", json={"pin": 0})
+        assert r.status_code == 204
+        app.state.meshcore_client.set_ble_pin.assert_awaited_once_with(0)
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_ble_pin_422_on_negative(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post("/api/device/ble-pin", json={"pin": -1})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_ble_pin_422_on_over_six_digits(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post("/api/device/ble-pin", json={"pin": 1_000_000})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_ble_pin_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_ble_pin = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post("/api/device/ble-pin", json={"pin": 123456})
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client

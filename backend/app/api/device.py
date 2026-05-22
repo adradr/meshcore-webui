@@ -16,8 +16,9 @@ radio link itself isn't established.
 from __future__ import annotations
 
 import hmac
+import time
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Path, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -322,4 +323,99 @@ async def update_policy(body: PolicyUpdate, request: Request) -> Response:
         await _call(client.set_advert_loc_policy(body.adv_loc_policy))
     if body.multi_acks is not None:
         await _call(client.set_multi_acks(body.multi_acks))
+    return Response(status_code=204)
+
+
+# ----- Custom vars / time / BLE PIN (Task 2.3 / 2.4 / 2.5) ---------------
+
+# Keys are restricted to a conservative slug so the URL doesn't admit
+# slashes, dots, or other path-segment surprises. The firmware itself
+# accepts a broader set, but the wire surface we want to support is
+# this regex — bump it if a firmware-defined key ever needs more chars.
+_CUSTOM_VAR_KEY_PATTERN = r"^[A-Za-z0-9_-]{1,32}$"
+
+
+class CustomVarValue(BaseModel):
+    """Body for ``PUT /api/device/custom-vars/{key}``.
+
+    Scalars only — dict / list values aren't accepted because the
+    firmware's CUSTOM_VARS wire format is a flat comma-separated
+    ``key:value`` list and nested shapes have no round-trip.
+    """
+
+    value: str | int | float
+
+
+class BlePinIn(BaseModel):
+    """Body for ``POST /api/device/ble-pin``.
+
+    6-digit decimal PIN. Lower bound 0 allows the all-zero PIN that some
+    firmware builds use as a documented "no pairing prompt" sentinel.
+    """
+
+    pin: int = Field(ge=0, le=999_999)
+
+
+@router.get("/custom-vars")
+async def get_custom_vars(request: Request) -> dict:
+    """Read all firmware-defined custom variables.
+
+    Returns a flat ``{key: value}`` dict — keys and value types are
+    firmware-specific and pass through verbatim from the device.
+    """
+    client = _require_client(request)
+    return await _call(client.get_custom_vars())
+
+
+@router.put("/custom-vars/{key}", status_code=204, response_class=Response)
+async def set_custom_var(
+    body: CustomVarValue,
+    request: Request,
+    key: str = Path(..., pattern=_CUSTOM_VAR_KEY_PATTERN),
+) -> Response:
+    """Write a single firmware-defined custom variable.
+
+    Path key is constrained to ``[A-Za-z0-9_-]{1,32}`` so the URL doesn't
+    admit arbitrary segments. Value type passes through to the lib.
+    """
+    client = _require_client(request)
+    await _call(client.set_custom_var(key, body.value))
+    return Response(status_code=204)
+
+
+@router.get("/time")
+async def get_time(request: Request) -> dict:
+    """Return device epoch + server epoch + signed skew (s).
+
+    ``skew_s = device_epoch - server_epoch`` — positive means the device
+    clock is ahead of the host. UI uses this to flag drift before it
+    starts to confuse message ordering.
+    """
+    client = _require_client(request)
+    device_epoch = await _call(client.get_device_time())
+    server_epoch = int(time.time())
+    return {
+        "device_epoch": device_epoch,
+        "server_epoch": server_epoch,
+        "skew_s": device_epoch - server_epoch,
+    }
+
+
+@router.post("/time/sync", status_code=204, response_class=Response)
+async def sync_time(request: Request) -> Response:
+    """Push the host's current epoch to the device. Resets skew to ~0."""
+    client = _require_client(request)
+    await _call(client.set_device_time(int(time.time())))
+    return Response(status_code=204)
+
+
+@router.post("/ble-pin", status_code=204, response_class=Response)
+async def set_ble_pin(body: BlePinIn, request: Request) -> Response:
+    """Set the BLE pairing PIN. Write-only — firmware exposes no read.
+
+    The wrapper logs only ``RADIO ACTION=set_ble_pin`` (no value) so the
+    pin never lands in audit logs.
+    """
+    client = _require_client(request)
+    await _call(client.set_ble_pin(body.pin))
     return Response(status_code=204)
