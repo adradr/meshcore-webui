@@ -110,31 +110,62 @@ function wrap(ui: React.ReactNode, initialPath = "/device") {
 }
 
 describe("DevicePage tabs", () => {
-  it("renders the three primary tab triggers", () => {
+  it("renders all five tab triggers", () => {
     ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
     })
     render(wrap(<DevicePage />))
-    expect(screen.getByRole("tab", { name: /^info$/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /^overview$/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /^radio$/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /^behaviour$/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /rx log/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /^noise$/i })).toBeInTheDocument()
   })
 
-  it("defaults to the Info tab when no ?tab query param is set", () => {
+  it("defaults to the Overview tab when no ?tab query param is set", () => {
     ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
     })
     render(wrap(<DevicePage />))
-    const infoTab = screen.getByRole("tab", { name: /^info$/i })
-    expect(infoTab).toHaveAttribute("aria-selected", "true")
-    // Info content (collapsed Device card) is visible. Assert on the mocked
-    // device name rather than a section title — that survives further UI
-    // restructures.
+    const overviewTab = screen.getByRole("tab", { name: /^overview$/i })
+    expect(overviewTab).toHaveAttribute("aria-selected", "true")
+    // Overview content (Device card) is visible — assert on the mocked
+    // device name rather than a section title to survive UI restructures.
     expect(screen.getByText("Test Device")).toBeInTheDocument()
+  })
+
+  it("?tab=radio selects the Radio tab on mount", () => {
+    ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+    })
+    render(wrap(<DevicePage />, "/device?tab=radio"))
+    expect(screen.getByRole("tab", { name: /^radio$/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+  })
+
+  it("clicking the Behaviour trigger updates the URL to ?tab=behaviour", async () => {
+    ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+    })
+    render(wrap(<DevicePage />))
+    const behaviourTab = screen.getByRole("tab", { name: /^behaviour$/i })
+    // Radix Tabs triggers selection on pointerdown / mousedown for snappier
+    // touch behaviour; fireEvent.click alone does not flip the active tab.
+    fireEvent.mouseDown(behaviourTab)
+    fireEvent.click(behaviourTab)
+    await waitFor(() =>
+      expect(behaviourTab).toHaveAttribute("aria-selected", "true"),
+    )
   })
 
   it("clicking the RX Log tab reveals the rx-log content", async () => {
@@ -203,14 +234,14 @@ describe("DevicePage tabs", () => {
     expect(screen.getByLabelText(/longitude/i)).toBeInTheDocument()
   })
 
-  it("ignores unknown ?tab values and falls back to Info", () => {
+  it("ignores unknown ?tab values and falls back to Overview", () => {
     ;(useNoiseSamples as ReturnType<typeof vi.fn>).mockReturnValue({
       data: undefined,
       isLoading: true,
       isError: false,
     })
     render(wrap(<DevicePage />, "/device?tab=bogus"))
-    expect(screen.getByRole("tab", { name: /^info$/i })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: /^overview$/i })).toHaveAttribute(
       "aria-selected",
       "true",
     )

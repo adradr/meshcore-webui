@@ -34,7 +34,7 @@ import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
 import { PositionPicker } from "@/components/map/PositionPicker"
 
-const VALID_TABS = ["info", "rx-log", "noise"] as const
+const VALID_TABS = ["overview", "radio", "behaviour", "rx-log", "noise"] as const
 type DeviceTab = (typeof VALID_TABS)[number]
 
 function isDeviceTab(value: string | null): value is DeviceTab {
@@ -501,12 +501,12 @@ export function DevicePage() {
   const requestedTab = searchParams.get("tab")
   const activeTab: DeviceTab = isDeviceTab(requestedTab)
     ? requestedTab
-    : "info"
+    : "overview"
 
   const handleTabChange = (value: string) => {
     if (!isDeviceTab(value)) return
     const next = new URLSearchParams(searchParams)
-    if (value === "info") {
+    if (value === "overview") {
       next.delete("tab")
     } else {
       next.set("tab", value)
@@ -523,8 +523,14 @@ export function DevicePage() {
           className="flex h-full flex-col gap-4"
         >
           <TabsList className="sticky top-0 z-10 w-full self-stretch">
-            <TabsTrigger value="info" className="flex-1">
-              Info
+            <TabsTrigger value="overview" className="flex-1">
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="radio" className="flex-1">
+              Radio
+            </TabsTrigger>
+            <TabsTrigger value="behaviour" className="flex-1">
+              Behaviour
             </TabsTrigger>
             <TabsTrigger value="rx-log" className="flex-1">
               RX Log
@@ -533,8 +539,18 @@ export function DevicePage() {
               Noise
             </TabsTrigger>
           </TabsList>
-          <TabsContent value="info" className="mt-0">
+          <TabsContent value="overview" className="mt-0">
             <DeviceInfoPanel />
+          </TabsContent>
+          <TabsContent value="radio" className="mt-0">
+            <div className="rounded-lg border border-dashed border-muted p-8 text-center text-sm text-muted-foreground">
+              Radio configuration — coming soon
+            </div>
+          </TabsContent>
+          <TabsContent value="behaviour" className="mt-0">
+            <div className="rounded-lg border border-dashed border-muted p-8 text-center text-sm text-muted-foreground">
+              Behaviour settings — coming soon
+            </div>
           </TabsContent>
           <TabsContent
             value="rx-log"
