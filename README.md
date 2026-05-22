@@ -38,7 +38,7 @@ It bridges the gaps the official mobile app can't:
 ### RF tools
 
 - 📶 **Line of Sight calculator** (`/map` → click any node's "Line of sight" button) — terrain profile + Fresnel zone analysis between your device and any contact. Uses [OpenTopoData](https://www.opentopodata.org/) (public or self-hosted) for elevation.
-- 🧭 **Trace path** (`/map` → click a repeater's "Trace path" button) — broadcasts a trace packet and renders the multi-hop path as a polyline with per-hop SNR data.
+- 🧭 **Trace path / Ping** (`/map` → click a repeater's "Trace path" button, or the chat header's "Ping") — directed trace to a specific peer. Mirrors the first-party [`meshcore-cli`](https://github.com/meshcore-dev/meshcore-cli)'s `trace` / `dtrace` flow: builds a symmetric out-and-back path through the contact's stored hops (or zero-hop direct probe when no path is stored) and waits the firmware-suggested timeout. Reachable peers return in ~1 s with round-trip duration, outbound SNR, and return-leg SNR — same surface as the official mobile app's "Ping".
 - 📜 **RX log** (`/rx-log`) — realtime stream of every packet your device receives, with filter, search, and CSV/JSON export. Optional SQLite persistence.
 - 📉 **Noise floor chart** (`/noise` or as a widget on `/device`) — realtime sliding chart of the radio noise floor, polled every 2 s.
 
