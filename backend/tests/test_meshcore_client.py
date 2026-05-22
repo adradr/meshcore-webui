@@ -1244,11 +1244,15 @@ class TestTuning:
         fake_mc.commands.set_tuning = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
+        # set_tuning fires send_appstart so the lib's self_info cache
+        # picks up the new values for the next /api/device/self-info read.
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
         client._mc = fake_mc
 
         await client.set_tuning(rx_delay=150, airtime_factor=250)
 
         fake_mc.commands.set_tuning.assert_awaited_once_with(150, 250)
+        fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_set_tuning_raises_on_error(self):
@@ -1357,11 +1361,15 @@ class TestSetRadio:
         fake_mc.commands.set_tx_power = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
+        # set_tx_power fires send_appstart so the lib's self_info.tx_power
+        # cache picks up the new value.
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
         client._mc = fake_mc
 
         await client.set_tx_power(20)
 
         fake_mc.commands.set_tx_power.assert_awaited_once_with(20)
+        fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_set_tx_power_raises_on_error(self):
@@ -1382,11 +1390,15 @@ class TestSetRadio:
         fake_mc.commands.set_name = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
+        # set_device_name fires send_appstart so the lib's self_info.name
+        # cache picks up the new value.
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
         client._mc = fake_mc
 
         await client.set_device_name("Alpha-7")
 
         fake_mc.commands.set_name.assert_awaited_once_with("Alpha-7")
+        fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_set_device_name_raises_on_error(self):
@@ -1433,3 +1445,18 @@ class TestFactoryReset:
 
         with pytest.raises(RuntimeError, match="rejected factory_reset"):
             await client.factory_reset()
+
+
+class TestGetSelfInfo:
+    """`get_self_info` must never return an empty dict — callers depend on
+    a populated payload or a RuntimeError that `_call()` can map to a 502."""
+
+    @pytest.mark.asyncio
+    async def test_get_self_info_raises_when_payload_empty(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {}  # empty dict — falsy
+        fake_mc.commands.send_appstart = AsyncMock()  # called but doesn't populate
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="self_info unavailable"):
+            await client.get_self_info()

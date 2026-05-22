@@ -666,12 +666,18 @@ class MeshCoreClient:
 
     async def set_tuning(self, rx_delay: int, airtime_factor: int) -> None:
         """Write RX tuning parameters to the device. Both values are
-        firmware uint32 LE; the schema layer validates the bounds."""
+        firmware uint32 LE; the schema layer validates the bounds.
+
+        Fires ``send_appstart`` after a successful write so the lib's
+        cached ``self_info`` reflects the new values — matches the
+        ``set_coords`` pattern.
+        """
         mc = await self._require_mc()
         async with self._lock:
             ev = await mc.commands.set_tuning(rx_delay, airtime_factor)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_tuning")
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_tuning")
+            await mc.commands.send_appstart()
 
     async def set_radio(
         self,
@@ -715,22 +721,32 @@ class MeshCoreClient:
 
     async def set_tx_power(self, dbm: int) -> None:
         """Set the LoRa TX power. Schema clamps to 0..22 dBm; firmware
-        further clamps to ``self_info.max_tx_power``."""
+        further clamps to ``self_info.max_tx_power``.
+
+        Fires ``send_appstart`` after a successful write so the lib's
+        cached ``self_info.tx_power`` reflects the new value.
+        """
         mc = await self._require_mc()
         async with self._lock:
             ev = await mc.commands.set_tx_power(dbm)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_tx_power")
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_tx_power")
+            await mc.commands.send_appstart()
         log.warning("RADIO ACTION=set_tx_power dbm=%d", dbm)
 
     async def set_device_name(self, name: str) -> None:
         """Rename the device. Persists to flash; takes effect immediately
-        in subsequent adverts."""
+        in subsequent adverts.
+
+        Fires ``send_appstart`` after a successful write so the lib's
+        cached ``self_info.name`` reflects the new value.
+        """
         mc = await self._require_mc()
         async with self._lock:
             ev = await mc.commands.set_name(name)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_device_name")
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_device_name")
+            await mc.commands.send_appstart()
         log.warning("RADIO ACTION=set_device_name name=%s", name)
 
     # Bound on how long device_partial_reset blocks waiting for the
@@ -798,7 +814,9 @@ class MeshCoreClient:
         if not mc.self_info:
             # Refresh by re-sending appstart so meshcore repopulates self_info.
             await mc.commands.send_appstart()
-        return dict(mc.self_info) if mc.self_info else {}
+        if not mc.self_info:
+            raise RuntimeError("self_info unavailable after appstart")
+        return dict(mc.self_info)
 
     # ----- Contact actions (v1.5) -----
 

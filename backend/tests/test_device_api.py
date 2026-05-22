@@ -40,13 +40,21 @@ async def test_get_device_info_502_on_runtime_error(client):
         del app.state.meshcore_client
 
 
-@pytest.mark.asyncio
-async def test_get_self_info(client):
-    fake = {
+def _fake_self_info(**overrides) -> dict:
+    """Canonical full ``SELF_INFO`` payload — every key the lib's reader
+    produces. Tests override only the keys they care about."""
+    base = {
         "name": "adr",
         "public_key": "33f0",
+        "adv_type": 1,
         "adv_lat": 47.62,
         "adv_lon": 18.84,
+        "adv_loc_policy": 0,
+        "multi_acks": 1,
+        "telemetry_mode_base": 1,
+        "telemetry_mode_loc": 1,
+        "telemetry_mode_env": 0,
+        "manual_add_contacts": False,
         "radio_freq": 869.618,
         "radio_bw": 62.5,
         "radio_sf": 8,
@@ -54,12 +62,71 @@ async def test_get_self_info(client):
         "tx_power": 22,
         "max_tx_power": 22,
     }
+    base.update(overrides)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_get_self_info(client):
+    fake = _fake_self_info()
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
     try:
         r = await client.get("/api/device/self-info")
         assert r.status_code == 200
         assert r.json() == fake
+    finally:
+        del app.state.meshcore_client
+
+
+# --- Task 1.5: complete SELF_INFO payload --------------------------------
+
+@pytest.mark.asyncio
+async def test_get_self_info_includes_full_payload(client):
+    """Every firmware-side ``SELF_INFO`` field must appear in the response
+    so the UI can render the telemetry-mode / loc-policy / multi-acks /
+    manual-add-contacts toggles without a second roundtrip."""
+    fake = _fake_self_info(
+        adv_type=2,
+        adv_loc_policy=1,
+        multi_acks=2,
+        telemetry_mode_base=2,
+        telemetry_mode_loc=1,
+        telemetry_mode_env=3,
+        manual_add_contacts=True,
+    )
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
+    try:
+        r = await client.get("/api/device/self-info")
+        assert r.status_code == 200
+        body = r.json()
+        for k in (
+            "name", "public_key", "adv_type", "adv_lat", "adv_lon",
+            "adv_loc_policy", "multi_acks", "telemetry_mode_base",
+            "telemetry_mode_loc", "telemetry_mode_env",
+            "manual_add_contacts", "radio_freq", "radio_bw", "radio_sf",
+            "radio_cr", "tx_power", "max_tx_power",
+        ):
+            assert k in body, f"missing {k}"
+        assert body["adv_type"] == 2
+        assert body["manual_add_contacts"] is True
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_self_info_extra_fields_pass_through(client):
+    """``SelfInfo`` declares ``extra='allow'`` so a newer firmware build
+    that adds a key (e.g. ``foobar_setting``) doesn't get silently
+    truncated — the UI can still surface it as raw data."""
+    fake = _fake_self_info(foobar_setting=42)
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
+    try:
+        r = await client.get("/api/device/self-info")
+        assert r.status_code == 200
+        assert r.json().get("foobar_setting") == 42
     finally:
         del app.state.meshcore_client
 
@@ -348,6 +415,436 @@ async def test_device_reset_502_on_runtime_error(client):
             "/api/device/reset",
             json={"mode": "factory", "confirm": "FACTORY RESET"},
         )
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- Task 1.4: radio / tx-power / tuning / name --------------------------
+
+# --- GET /api/device/radio -----------------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_radio_success(client):
+    """GET /api/device/radio must remap radio_* keys → freq/bw/sf/cr and
+    include tx_power + max_tx_power so the UI's slider knows its clamp."""
+    fake = _fake_self_info(
+        radio_freq=869.618, radio_bw=125.0, radio_sf=10, radio_cr=5,
+        tx_power=14, max_tx_power=22,
+    )
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
+    try:
+        r = await client.get("/api/device/radio")
+        assert r.status_code == 200
+        assert r.json() == {
+            "freq": 869.618, "bw": 125.0, "sf": 10, "cr": 5,
+            "tx_power": 14, "max_tx_power": 22,
+        }
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_radio_503_when_no_client(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.get("/api/device/radio")
+    assert r.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_get_radio_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(
+        side_effect=ConnectionError("MeshCore not connected"),
+    )
+    try:
+        r = await client.get("/api/device/radio")
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_radio_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.get("/api/device/radio")
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_radio_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_self_info = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.get("/api/device/radio")
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- POST /api/device/radio ----------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_radio_success(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_radio = AsyncMock(
+        return_value={"reconnected": True},
+    )
+    try:
+        r = await client.post(
+            "/api/device/radio",
+            json={"freq": 869.618, "bw": 125.0, "sf": 10, "cr": 5},
+        )
+        assert r.status_code == 200
+        assert r.json() == {"reconnected": True}
+        app.state.meshcore_client.set_radio.assert_awaited_once_with(
+            869.618, 125.0, 10, 5,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_radio_422_on_bad_freq(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post(
+        "/api/device/radio",
+        json={"freq": 50, "bw": 125.0, "sf": 10, "cr": 5},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_radio_422_on_bad_sf(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post(
+        "/api/device/radio",
+        json={"freq": 869.618, "bw": 125.0, "sf": 13, "cr": 5},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_radio_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_radio = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/radio",
+            json={"freq": 869.618, "bw": 125.0, "sf": 10, "cr": 5},
+        )
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_radio_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_radio = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/radio",
+            json={"freq": 869.618, "bw": 125.0, "sf": 10, "cr": 5},
+        )
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_radio_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_radio = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/radio",
+            json={"freq": 869.618, "bw": 125.0, "sf": 10, "cr": 5},
+        )
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- POST /api/device/tx-power -------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_tx_power_success_returns_204(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tx_power = AsyncMock(return_value=None)
+    try:
+        r = await client.post("/api/device/tx-power", json={"dbm": 14})
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_tx_power.assert_awaited_once_with(14)
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tx_power_422_on_overrange(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post("/api/device/tx-power", json={"dbm": 25})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_tx_power_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tx_power = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.post("/api/device/tx-power", json={"dbm": 10})
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tx_power_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tx_power = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.post("/api/device/tx-power", json={"dbm": 10})
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tx_power_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tx_power = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post("/api/device/tx-power", json={"dbm": 10})
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- GET / POST /api/device/tuning ---------------------------------------
+
+@pytest.mark.asyncio
+async def test_get_tuning_success(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_tuning = AsyncMock(
+        return_value={"rx_delay": 1234, "airtime_factor": 5678},
+    )
+    try:
+        r = await client.get("/api/device/tuning")
+        assert r.status_code == 200
+        assert r.json() == {"rx_delay": 1234, "airtime_factor": 5678}
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_tuning_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_tuning = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.get("/api/device/tuning")
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_tuning_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_tuning = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.get("/api/device/tuning")
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_tuning_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_tuning = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.get("/api/device/tuning")
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tuning_success_returns_204(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tuning = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/device/tuning",
+            json={"rx_delay": 1234, "airtime_factor": 5678},
+        )
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_tuning.assert_awaited_once_with(
+            1234, 5678,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tuning_422_on_negative_value(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post(
+        "/api/device/tuning",
+        json={"rx_delay": -1, "airtime_factor": 0},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_tuning_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tuning = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/tuning",
+            json={"rx_delay": 1, "airtime_factor": 2},
+        )
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tuning_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tuning = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/tuning",
+            json={"rx_delay": 1, "airtime_factor": 2},
+        )
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_tuning_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_tuning = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/tuning",
+            json={"rx_delay": 1, "airtime_factor": 2},
+        )
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client
+
+
+# --- POST /api/device/name -----------------------------------------------
+
+@pytest.mark.asyncio
+async def test_set_name_success_returns_204(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_name = AsyncMock(return_value=None)
+    try:
+        r = await client.post("/api/device/name", json={"name": "adr-hq"})
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_device_name.assert_awaited_once_with(
+            "adr-hq",
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_name_422_on_empty_name(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post("/api/device/name", json={"name": ""})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_name_422_on_too_long(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post("/api/device/name", json={"name": "x" * 33})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_set_name_503_on_connection_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_name = AsyncMock(
+        side_effect=ConnectionError("not connected"),
+    )
+    try:
+        r = await client.post("/api/device/name", json={"name": "adr"})
+        assert r.status_code == 503
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_name_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_name = AsyncMock(
+        side_effect=TimeoutError("timed out"),
+    )
+    try:
+        r = await client.post("/api/device/name", json={"name": "adr"})
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_set_name_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_device_name = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post("/api/device/name", json={"name": "adr"})
         assert r.status_code == 502
     finally:
         del app.state.meshcore_client
