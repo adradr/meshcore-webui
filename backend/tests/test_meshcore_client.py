@@ -6,6 +6,7 @@ import pytest
 from meshcore import EventType
 from app.services.meshcore_client import (
     MeshCoreClient,
+    PingResult,
     StatsUnavailable,
     TraceHop,
     TracePathResult,
@@ -67,6 +68,10 @@ class TestSendTrace:
         fake_ack = MagicMock()
         fake_ack.type = MagicMock()
         fake_ack.type.name = "MSG_SENT"
+        fake_ack.payload = {
+            "expected_ack": (12345).to_bytes(4, "little"),
+            "suggested_timeout": 1000,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
 
         fake_trace_event = MagicMock()
@@ -108,6 +113,10 @@ class TestSendTrace:
         fake_ack = MagicMock()
         fake_ack.type = MagicMock()
         fake_ack.type.name = "MSG_SENT"
+        fake_ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            "suggested_timeout": 100,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
@@ -127,29 +136,382 @@ class TestSendTrace:
             await client.send_trace()
 
 
-class TestRequestTimeouts:
-    """Confirm req_* methods use the new 15s default and produce actionable errors.
+class TestSendTraceAckTagging:
+    """`send_trace` must read the tag from the ack's `expected_ack` field
+    (matching meshcore-cli) so that wait_for_event filters on the same
+    value the firmware will stamp on the returning TRACE_DATA event. The
+    wait-timeout must also come from the ack's `suggested_timeout` (in
+    ms, scaled × 1.2 for safety margin) — not a hardcoded constant.
 
-    Bugfix 2: opaque "X failed or timed out" RuntimeErrors translated to 502
-    after 30s waits made every RF-unreachable contact look like a backend bug.
-    New defaults: 15s timeout, error messages include pubkey prefix + hint.
-    """
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:2724-2745"""
 
     @pytest.mark.asyncio
-    async def test_req_telemetry_timeout_default_is_15s(self):
+    async def test_uses_tag_from_expected_ack(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (0x12345678).to_bytes(4, "little"),
+            "suggested_timeout": 1000,  # 1 s → wait 1.2 s
+        }
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+
+        captured: dict[str, object] = {}
+
+        async def fake_wait(event_type, attribute_filters=None, timeout=0):
+            captured["event_type"] = event_type
+            captured["attribute_filters"] = attribute_filters
+            captured["timeout"] = timeout
+            return None  # simulate timeout
+
+        fake_mc.dispatcher.wait_for_event = fake_wait
+        client._mc = fake_mc
+
+        with pytest.raises(TimeoutError):
+            await client.send_trace(target_path="ee")
+
+        assert captured["attribute_filters"] == {"tag": 0x12345678}
+        assert abs(captured["timeout"] - 1.2) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_caller_timeout_when_suggestion_missing(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            # suggested_timeout absent
+        }
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        captured = {}
+
+        async def fake_wait(event_type, attribute_filters=None, timeout=0):
+            captured["timeout"] = timeout
+            return None
+
+        fake_mc.dispatcher.wait_for_event = fake_wait
+        client._mc = fake_mc
+        with pytest.raises(TimeoutError):
+            await client.send_trace(timeout=5.0)
+        assert captured["timeout"] == 5.0
+
+    @pytest.mark.asyncio
+    async def test_raises_when_expected_ack_missing(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {}  # no expected_ack
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="expected_ack"):
+            await client.send_trace()
+
+
+class TestBuildTracePath:
+    """`_build_trace_path` mirrors meshcore-cli's print_trace_to logic.
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810
+    `_build_trace_path_from_discovery` mirrors print_disc_trace_to.
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:1821-1856"""
+
+    @staticmethod
+    def _contact(*, pubkey: str, type_: int, out_path: str, out_path_len: int) -> dict:
+        return {
+            "public_key": pubkey,
+            "type": type_,
+            "out_path": out_path,
+            "out_path_len": out_path_len,
+        }
+
+    # --- _build_trace_path ---
+
+    def test_zero_hop_repeater_just_destination_prefix(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="", out_path_len=0,
+        )
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "ee"
+
+    def test_one_hop_repeater_symmetric(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3c", out_path_len=1,
+        )
+        # i=0: elem = "3c", trace starts ["ee"] -> ["3c","ee","3c"]
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3c,ee,3c"
+
+    def test_two_hop_repeater_symmetric(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3cb9", out_path_len=2,
+        )
+        # i=0: elem = path[2:4] = "b9", parts: ["ee"] -> ["b9","ee","b9"]
+        # i=1: elem = path[0:2] = "3c", parts: -> ["3c","b9","ee","b9","3c"]
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=1)
+            == "3c,b9,ee,b9,3c"
+        )
+
+    def test_non_repeater_contact_no_destination_prefix(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=1, out_path="3c", out_path_len=1,
+        )
+        # parts==[] before loop; i=0: elem="3c", parts becomes ["3c"]
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3c"
+
+    def test_two_byte_hash_mode_uses_wider_slices(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2,
+            out_path="3cb91234", out_path_len=2,
+        )
+        # dest_prefix = "ee10" (2 bytes = 4 hex chars)
+        # i=0: elem = path[4:8] = "1234"; parts: ["ee10"] -> ["1234","ee10","1234"]
+        # i=1: elem = path[0:4] = "3cb9"; parts: -> ["3cb9","1234","ee10","1234","3cb9"]
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=2)
+            == "3cb9,1234,ee10,1234,3cb9"
+        )
+
+    def test_path_len_negative_repeater_returns_dest_prefix_for_zero_hop_fallback(self):
+        c = self._contact(
+            pubkey="ee" + "00" * 31, type_=2, out_path="", out_path_len=-1,
+        )
+        # Zero-hop fallback: just the destination pubkey prefix. Matches
+        # what the official mobile app sends when no stored path exists
+        # (verified against HU-PE-PILISMETEOR over real RF).
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "ee"
+
+    def test_path_len_negative_user_type_returns_none(self):
+        c = self._contact(
+            pubkey="aa" + "00" * 31, type_=1, out_path="", out_path_len=-1,
+        )
+        # type=1 (user) with no path → genuinely no trace target.
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) is None
+
+    def test_three_byte_hash_mode_rewrites_to_two_byte(self):
+        # CLI quirk: hash_mode=2 → path_hash_len=3 → rewrite to 2-byte
+        # by extracting the LEADING 4 hex chars (2 bytes) of each 6-char
+        # (3-byte) slot.
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2,
+            out_path="3c11b9b922cc",  # two 3-byte hops: 3c11b9, b922cc
+            out_path_len=2,
+        )
+        # After rewrite, path becomes the leading 4 hex chars of each
+        # slot taken in REVERSE order (i=0 picks slot path_len-1 first):
+        #   i=0: path[6*(2-0-1):6*(2-0-1)+4] = path[6:10] = "b922"
+        #   i=1: path[6*(2-1-1):6*(2-1-1)+4] = path[0:4] = "3c11"
+        # new_path = "b9223c11", and path_hash_len becomes 2.
+        # dest_prefix at 2*2=4 hex chars: "ee10"
+        # Walking new_path with path_hash_len=2:
+        #   i=0: elem = path[4:8] = "3c11"
+        #        parts: ["ee10"] -> ["3c11","ee10","3c11"]
+        #   i=1: elem = path[0:4] = "b922"
+        #        parts: -> ["b922","3c11","ee10","3c11","b922"]
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=3)
+            == "b922,3c11,ee10,3c11,b922"
+        )
+
+    # --- _build_trace_path_from_discovery ---
+
+    def test_from_discovery_out_then_dest_then_in(self):
+        contact = {"public_key": "ee10f91c" + "00" * 28, "type": 2}
+        disc_payload = {"in_path": "3c", "out_path": "b9"}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        assert result == "b9,ee,3c"
+
+    def test_from_discovery_dedups_trailing_repeated_hop(self):
+        contact = {"public_key": "ee" + "00" * 31, "type": 2}
+        disc_payload = {"in_path": "ee", "out_path": ""}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        # dest_prefix "ee" added, in_path's "ee" suppressed by dedup.
+        assert result == "ee"
+
+    def test_from_discovery_user_type_no_dest_prefix(self):
+        contact = {"public_key": "aa" + "00" * 31, "type": 1}
+        disc_payload = {"in_path": "", "out_path": ""}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        assert result == ""
+
+    def test_from_discovery_two_byte_hash_mode(self):
+        contact = {"public_key": "ee10" + "00" * 30, "type": 2}
+        disc_payload = {"in_path": "3c11", "out_path": "b922"}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=2,
+        )
+        # 2-byte hops: out="b922", dest="ee10", in="3c11" → "b922,ee10,3c11"
+        assert result == "b922,ee10,3c11"
+
+
+class TestPingViaTrace:
+    """ping_via_trace orchestrator: contact lookup → path build (or
+    discovery-then-build) → send_trace → PingResult. Mirrors CLI's
+    trace/dtrace dispatch."""
+
+    @staticmethod
+    def _fake_mc_with_stored_path():
+        mc = MagicMock()
+        mc.is_connected = True
+        mc.commands.get_path_hash_mode = AsyncMock(return_value=0)  # 1B hashes
+        mc.contacts = {
+            "ee10f91c" + "00" * 28: {
+                "public_key": "ee10f91c" + "00" * 28,
+                "type": 2,
+                "out_path": "3c",
+                "out_path_len": 1,
+            },
+        }
+        ack = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (0xCAFEBABE).to_bytes(4, "little"),
+            "suggested_timeout": 500,
+        }
+        mc.commands.send_trace = AsyncMock(return_value=ack)
+        trace_ev = MagicMock()
+        trace_ev.payload = {
+            "tag": 0xCAFEBABE, "flags": 0, "path_len": 2,
+            "path": [
+                {"hash": "3c", "snr": 11.5},
+                {"hash": "ee", "snr": 12.0},
+            ],
+        }
+        mc.dispatcher.wait_for_event = AsyncMock(return_value=trace_ev)
+        return mc
+
+    @pytest.mark.asyncio
+    async def test_uses_stored_out_path_no_discovery(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        client._mc = fake_mc
+
+        result = await client.ping_via_trace("ee10f91c" + "00" * 28)
+
+        # No discovery — stored path was used directly.
+        fake_mc.commands.send_path_discovery_sync.assert_not_called()
+        # send_trace called with the symmetric comma-separated path.
+        call = fake_mc.commands.send_trace.call_args
+        assert call.kwargs["path"] == "3c,ee,3c"
+        assert isinstance(result, PingResult)
+        assert result.snr_there == 11.5
+        assert result.snr_back == 12.0
+        assert result.path_len == 2
+
+    @pytest.mark.asyncio
+    async def test_no_path_uses_zero_hop_fallback(self):
+        """When the contact has no stored out_path (out_path_len == -1),
+        trace_to should send a direct zero-hop trace using just the
+        destination's pubkey prefix — matching what the official mobile
+        app does (verified against HU-PE-PILISMETEOR over real RF).
+        No path discovery call should be made."""
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        pk = "ee10f91c" + "00" * 28
+        fake_mc.contacts[pk]["out_path"] = ""
+        fake_mc.contacts[pk]["out_path_len"] = -1
+        client._mc = fake_mc
+
+        await client.ping_via_trace(pk)
+
+        # No discovery — zero-hop fallback was used.
+        assert not hasattr(fake_mc.commands.send_path_discovery_sync, "called") \
+            or not fake_mc.commands.send_path_discovery_sync.called
+        call = fake_mc.commands.send_trace.call_args
+        assert call.kwargs["path"] == "ee"  # just the dest prefix
+
+    @pytest.mark.asyncio
+    async def test_raises_when_contact_not_in_dict(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="unknown contact"):
+            await client.ping_via_trace("ff" * 32)
+
+    @pytest.mark.asyncio
+    async def test_snr_back_none_when_only_one_hop(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        # Re-stub trace event to have only 1 hop.
+        single_hop = MagicMock()
+        single_hop.payload = {
+            "tag": 0xCAFEBABE, "flags": 0, "path_len": 1,
+            "path": [{"hash": "ee", "snr": 9.0}],
+        }
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=single_hop)
+        client._mc = fake_mc
+        result = await client.ping_via_trace("ee10f91c" + "00" * 28)
+        assert result.snr_there == 9.0
+        assert result.snr_back is None
+
+
+class TestTraceTo:
+    """trace_to returns the raw TracePathResult (with tag/flags) so the
+    /api/trace endpoint can surface them; ping_via_trace wraps this."""
+
+    @pytest.mark.asyncio
+    async def test_returns_trace_path_result_with_tag_and_flags(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = TestPingViaTrace._fake_mc_with_stored_path()
+        client._mc = fake_mc
+        result = await client.trace_to("ee10f91c" + "00" * 28)
+        assert isinstance(result, TracePathResult)
+        assert result.tag == 0xCAFEBABE
+        assert result.flags == 0
+        assert result.path_len == 2
+        assert len(result.hops) == 2
+
+
+class TestRequestTimeouts:
+    """req_* methods pass `timeout=0` to the meshcore lib so the firmware's
+    `suggested_timeout` (which scales with flood / multi-hop complexity)
+    is honoured, AND wrap the call in `asyncio.wait_for(max_wait)` as an
+    outer cap so a stuck firmware cannot hang the request indefinitely.
+
+    Bugfix history:
+      - Bugfix 2 introduced a hardcoded 15s timeout to fail fast for
+        unreachable peers. That over-cut floods that would have replied
+        at 18-30s and made our ping/trace/discover fail for peers the
+        official MeshCore app could reach on the same radio.
+      - Bugfix 3 (this layer): pass `timeout=0` to the lib, enforce a
+        60s outer ceiling via `asyncio.wait_for`. Same fail-fast story
+        for unreachable peers, but legitimate slow floods now succeed.
+    """
+
+    @staticmethod
+    def _lib_timeout(call):
+        """Extract the `timeout=...` arg passed to the mocked lib call —
+        accepting either kwarg or positional form so the tests stay
+        agnostic to the lib's internal call shape."""
+        t = call.kwargs.get("timeout")
+        if t is None:
+            for a in call.args:
+                if isinstance(a, (int, float)) and not isinstance(a, bool):
+                    t = a
+                    break
+        return t
+
+    @pytest.mark.asyncio
+    async def test_req_telemetry_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_telemetry_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_telemetry("ab" * 32)
         fake_mc.commands.req_telemetry_sync.assert_called_once()
-        call = fake_mc.commands.req_telemetry_sync.call_args
-        # Accept either kwarg or positional timeout.
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_telemetry_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
     async def test_req_telemetry_error_mentions_pubkey_prefix(self):
@@ -162,62 +524,74 @@ class TestRequestTimeouts:
             await client.req_telemetry(pk)
 
     @pytest.mark.asyncio
-    async def test_req_status_timeout_default_is_15s(self):
+    async def test_req_status_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_status_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_status("ab" * 32)
-        call = fake_mc.commands.req_status_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_status_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_req_acl_timeout_default_is_15s(self):
+    async def test_req_acl_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.req_acl_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.req_acl("ab" * 32)
-        call = fake_mc.commands.req_acl_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            timeout = call.args[-1]
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.req_acl_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_disc_path_uses_15s_timeout(self):
+    async def test_disc_path_passes_timeout_zero_to_lib(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 15s"):
+        with pytest.raises(RuntimeError, match="within 60s"):
             await client.disc_path("aa" * 32)
-        call = fake_mc.commands.send_path_discovery_sync.call_args
-        timeout = call.kwargs.get("timeout")
-        if timeout is None and call.args:
-            # disc_path may pass timeout positionally.
-            for a in call.args[1:]:
-                if isinstance(a, float):
-                    timeout = a
-                    break
-        assert timeout == 15.0
+        assert self._lib_timeout(
+            fake_mc.commands.send_path_discovery_sync.call_args,
+        ) == 0
 
     @pytest.mark.asyncio
-    async def test_send_trace_default_is_15s(self):
+    async def test_outer_max_wait_cap_fires_when_lib_hangs(self):
+        """If the firmware suggests a runaway timeout (or the lib
+        otherwise stalls), the wrapper's outer `asyncio.wait_for` cap
+        MUST fire — this is the safety net that the bugfix-2 hardcoded
+        15s used to provide. Use a tiny `max_wait` so the test stays
+        fast, and have the lib block on an Event that never gets set."""
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        blocker = asyncio.Event()  # never set
+
+        async def _hang(*_a, **_kw):
+            await blocker.wait()
+            return {"status": "should never arrive"}
+
+        fake_mc.commands.req_status_sync = _hang
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="within 0.1s"):
+            await client.req_status("ab" * 32, max_wait=0.1)
+
+    @pytest.mark.asyncio
+    async def test_send_trace_default_is_60s(self):
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = MagicMock()
         ack = MagicMock()
         ack.type = MagicMock()
         ack.type.name = "MSG_SENT"
+        # No suggested_timeout → falls back to caller's default 60s.
+        ack.payload = {"expected_ack": (1).to_bytes(4, "little")}
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(TimeoutError, match="within 15s"):
+        with pytest.raises(TimeoutError, match="within 60.0s"):
             await client.send_trace()
 
     @pytest.mark.asyncio
@@ -227,6 +601,10 @@ class TestRequestTimeouts:
         ack = MagicMock()
         ack.type = MagicMock()
         ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            "suggested_timeout": 100,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc

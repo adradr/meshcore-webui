@@ -37,5 +37,6 @@ secrets/
 # Docker
 .docker-cache/
 
-docs/
+docs/*
+!docs/external/
 CLAUDE.md

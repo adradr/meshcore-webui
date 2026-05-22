@@ -20,10 +20,12 @@ from app.main import app
 from app.services.meshcore_client import TraceHop, TracePathResult
 
 
-def _make_client_override(send_trace_impl):
-    """Build a stand-in MeshCoreClient with just ``send_trace`` stubbed."""
+def _make_client_override(trace_to_impl):
+    """Build a stand-in MeshCoreClient with `trace_to` stubbed. The
+    endpoint now delegates the full directed-trace flow (lookup +
+    path-build + send_trace) to that method."""
     fake_client = MagicMock()
-    fake_client.send_trace = send_trace_impl
+    fake_client.trace_to = trace_to_impl
     return fake_client
 
 
@@ -170,8 +172,8 @@ async def test_trace_path_422_for_invalid_pubkey():
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             r = await ac.post("/api/trace/not-a-real-pubkey")
             assert r.status_code == 422
-            # send_trace should never have been called for invalid input.
-            fake.send_trace.assert_not_awaited()
+            # trace_to should never have been called for invalid input.
+            fake.trace_to.assert_not_awaited()
     finally:
         app.dependency_overrides.pop(get_meshcore_client, None)
 
@@ -203,5 +205,21 @@ async def test_trace_path_503_when_client_not_ready():
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
             r = await ac.post(f"/api/trace/{'bb' * 32}")
             assert r.status_code == 503
+    finally:
+        app.dependency_overrides.pop(get_meshcore_client, None)
+
+
+@pytest.mark.asyncio
+async def test_trace_path_502_when_path_unbuildable(client):
+    """A RuntimeError from trace_to (e.g. contact has no traceable path)
+    surfaces as 502."""
+    fake = _make_client_override(
+        AsyncMock(side_effect=RuntimeError("trace_to: could not build trace path"))
+    )
+    app.dependency_overrides[get_meshcore_client] = lambda: fake
+    try:
+        r = await client.post(f"/api/trace/{'cc' * 32}")
+        assert r.status_code == 502
+        assert "could not build" in r.json()["detail"]
     finally:
         app.dependency_overrides.pop(get_meshcore_client, None)

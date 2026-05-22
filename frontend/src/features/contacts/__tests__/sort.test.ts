@@ -141,6 +141,49 @@ describe("sortContacts", () => {
     ])
   })
 
+  it("treats future-dated last_advert as 'no data' (sorts to bottom)", () => {
+    // Some firmware builds emit last_advert seconds AHEAD of the host
+    // clock (RTC drift), which surfaces in the UI as "−Xm ago". Those
+    // are not real "most recent" signals — they're broken timestamps
+    // and must sort below the real recently-heard peers.
+    const futureSecs = Math.floor(Date.now() / 1000) + 86_400 // +1 day
+    const items: SortInput[] = [
+      {
+        pubkey: "drift-pk",
+        contact: { adv_name: "drift", last_advert: futureSecs },
+      },
+      ...ITEMS,
+    ]
+    // bob (2026-05-15) is the most-recent real advert; drift should
+    // NOT outrank it even though its raw value is larger.
+    const result = order(sortContacts(items, "last_seen"))
+    expect(result[0]).toBe("bob-pk")
+    expect(result[1]).toBe("alice-pk")
+    // drift + charlie (null) cluster at the bottom; their relative
+    // ordering is unspecified but neither leads.
+    expect(result.slice(-2).sort()).toEqual(["charlie-pk", "drift-pk"].sort())
+  })
+
+  it("treats future-dated first_msg_at as 'no data' (sorts to bottom)", () => {
+    const futureIso = new Date(Date.now() + 86_400_000).toISOString()
+    const items: SortInput[] = [
+      {
+        pubkey: "drift-pk",
+        contact: { adv_name: "drift", last_advert: null },
+        stats: {
+          first_msg_at: futureIso,
+          last_msg_at: futureIso,
+          msg_count: 99,
+        },
+      },
+      ...ITEMS,
+    ]
+    const byFirst = order(sortContacts(items, "first_seen"))
+    expect(byFirst[0]).toBe("bob-pk") // first_msg_at 2026-03-01 — most recent first_seen
+    expect(byFirst[1]).toBe("alice-pk") // 2026-01-01
+    expect(byFirst.slice(-2).sort()).toEqual(["charlie-pk", "drift-pk"].sort())
+  })
+
   it("does not mutate the input array", () => {
     const before = order(ITEMS)
     sortContacts(ITEMS, "most_frequent")

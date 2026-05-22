@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from dataclasses import dataclass, asdict, field
 from typing import Any, Optional
 
@@ -97,10 +96,31 @@ class TraceHop:
 
 @dataclass(frozen=True)
 class TracePathResult:
-    """Structured result of a send_trace request."""
+    """Structured result of a send_trace request.
+
+    For a directed trace, `hops` is the route the packet traversed AND
+    the destination's echo path back; the last hop carries the receive
+    SNR our radio observed for the returning packet (SNR-back). The
+    sum of hop air-times approximates round-trip latency.
+    """
     tag: int
     flags: int
     hops: list[TraceHop]
+    path_len: int
+
+
+@dataclass(frozen=True)
+class PingResult:
+    """Result of a "ping" — what the official MeshCore app surfaces as
+    "Ping Success". Implemented as a directed trace under the hood:
+    the trace echoes off the destination and the round-trip data we
+    care about is one-hop SNRs in both directions plus the elapsed
+    wall-clock time.
+    """
+    duration_ms: int
+    snr_there: float | None  # the destination's receive SNR (forward)
+    snr_back: float | None   # our radio's receive SNR on the echo
+    hops: list[TraceHop]     # full traversed path for diagnostics
     path_len: int
 
 
@@ -870,41 +890,105 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def req_telemetry(self, pubkey: str, timeout: float = 15.0) -> dict:
+    # Outer safety cap on a single binary-request round trip. The lib's
+    # `suggested_timeout` from the firmware ack scales with mesh
+    # complexity (flood routes through many repeaters can need 30–45s);
+    # we cap at 60s so a misbehaving firmware can't stall a request
+    # forever. See `_req_with_firmware_timeout` for the wrapper that
+    # honours firmware's suggestion while enforcing this ceiling.
+    _REQ_MAX_WAIT_S: float = 60.0
+
+    async def _req_with_firmware_timeout(
+        self,
+        op_name: str,
+        pubkey: str,
+        call,
+        *,
+        max_wait: float | None = None,
+    ):
+        """Run a `mc.commands.req_*_sync(...)` style call passing
+        `timeout=0` so the lib honours the firmware's `suggested_timeout`,
+        and wrap it in an outer `asyncio.wait_for` so a stuck firmware
+        cannot exceed `max_wait` (default `_REQ_MAX_WAIT_S`).
+
+        Returns whatever the lib call returns (`None` on no-reply / error)
+        OR raises `RuntimeError` if the outer cap fires — both surface
+        as "no reply within Xs" to the caller.
+        """
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
+        try:
+            return await asyncio.wait_for(call(), timeout=cap)
+        except asyncio.TimeoutError:
+            log.warning(
+                "%s wrapper outer-cap fired at %.1fs for %s…",
+                op_name, cap, pubkey[:8],
+            )
+            return None
+
+    async def req_telemetry(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         """Request telemetry from a contact; returns LPP dict or raises on timeout.
 
-        Default timeout is 15s — long enough for a 2–3 hop reply round-trip
-        but short enough that an unreachable peer fails fast instead of leaving
-        the UI hanging on a 30s spinner. See bugfix 2.
+        Passes `timeout=0` to the lib so the firmware's `suggested_timeout`
+        is honoured — that value scales with flood/multi-hop complexity.
+        An outer `max_wait` cap (default 60s) guarantees the wrapper
+        cannot stall longer than that even if the firmware misbehaves.
+        See bugfix 3 — previously we passed a hardcoded 15s which cut
+        off legitimate flood replies on peers with no known path.
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_telemetry_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_telemetry", pubkey,
+                lambda: mc.commands.req_telemetry_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"Telemetry: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Telemetry: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return dict(res) if hasattr(res, "items") else {"data": res}
 
-    async def req_status(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def req_status(self, pubkey: str, *, max_wait: float | None = None) -> dict:
+        """STATUS request — the firmware's `BinaryReqType.STATUS` op.
+
+        NOTE: most repeater firmwares don't reply to STATUS requests.
+        For the "is this peer reachable, what's the SNR?" UX (what
+        the official MeshCore app surfaces as **"Ping"**), use
+        `directed_trace` instead — it does a `send_trace` along the
+        peer's advert path, gets a TRACE_DATA echo back, and returns
+        round-trip + SNR-there + SNR-back data. STATUS_RESPONSE is
+        the right primitive for nodes that publish battery / uptime
+        / queue depth, not the right primitive for "ping".
+        """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_status_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_status", pubkey,
+                lambda: mc.commands.req_status_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"Status: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Status: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return self._serialize(dict(res))
 
-    async def req_acl(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def req_acl(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_acl_sync(pubkey, timeout=timeout)
+            res = await self._req_with_firmware_timeout(
+                "req_acl", pubkey,
+                lambda: mc.commands.req_acl_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if res is None:
                 raise RuntimeError(
-                    f"ACL: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"ACL: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             # req_acl_sync returns acl_data (list / payload), wrap for JSON.
@@ -918,7 +1002,7 @@ class MeshCoreClient:
         offset: int = 0,
         order_by: int = 0,
         pubkey_prefix_length: int = 4,
-        timeout: float = 15.0,
+        max_wait: float | None = None,
     ) -> dict:
         """Ask a remote node for its neighbour list.
 
@@ -930,20 +1014,28 @@ class MeshCoreClient:
         zero-hop advertisement received by the queried node — NOT a live
         link measurement. A large secs_ago means the neighbour hasn't been
         heard from recently.
+
+        Honours the firmware's `suggested_timeout` via `_req_with_firmware_timeout`;
+        capped at `max_wait` (default 60s).
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            res = await mc.commands.req_neighbours_sync(
-                pubkey,
-                count=count,
-                offset=offset,
-                order_by=order_by,
-                pubkey_prefix_length=pubkey_prefix_length,
-                timeout=timeout,
+            res = await self._req_with_firmware_timeout(
+                "req_neighbours", pubkey,
+                lambda: mc.commands.req_neighbours_sync(
+                    pubkey,
+                    count=count,
+                    offset=offset,
+                    order_by=order_by,
+                    pubkey_prefix_length=pubkey_prefix_length,
+                    timeout=0,
+                ),
+                max_wait=cap,
             )
             if res is None:
                 raise RuntimeError(
-                    f"Neighbours: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Neighbours: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or asleep"
                 )
             return {
@@ -959,19 +1051,26 @@ class MeshCoreClient:
                 ],
             }
 
-    async def disc_path(self, pubkey: str, timeout: float = 15.0) -> dict:
+    async def disc_path(self, pubkey: str, *, max_wait: float | None = None) -> dict:
         """Discover the network path to a contact.
 
-        The meshcore lib's `send_path_discovery_sync` derives its own timeout
-        from the firmware's `suggested_timeout` when `timeout=0`. We pass an
-        explicit 15s ceiling so the UI fails fast for unreachable peers.
+        The meshcore lib's `send_path_discovery_sync` derives its own
+        timeout from the firmware's `suggested_timeout` when `timeout=0`.
+        We pass `timeout=0` to honour that suggestion (it scales with
+        flood / multi-hop complexity) and enforce an outer `max_wait`
+        cap (default 60s) so a stuck firmware can't hang the request.
         """
         mc = await self._require_mc()
+        cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            r = await mc.commands.send_path_discovery_sync(pubkey, timeout=timeout)
+            r = await self._req_with_firmware_timeout(
+                "disc_path", pubkey,
+                lambda: mc.commands.send_path_discovery_sync(pubkey, timeout=0),
+                max_wait=cap,
+            )
             if r is None:
                 raise RuntimeError(
-                    f"Path discovery: no reply from {pubkey[:8]}… within {timeout:g}s"
+                    f"Path discovery: no reply from {pubkey[:8]}… within {cap:g}s"
                     " — peer may be unreachable or not running advertised firmware"
                 )
             if hasattr(r, "is_error") and r.is_error():
@@ -986,59 +1085,98 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def send_trace(self, *, timeout: float = 15.0) -> TracePathResult:
-        """Send a trace packet and wait for the TRACE_DATA response.
+    async def get_advert_path(self, pubkey: str) -> str | None:
+        """Ask the firmware for the most recent advert path it has for
+        a peer. Returns the comma-separated hex repeater-hash string
+        expected by `mc.commands.send_trace(path=...)`, or None when
+        the firmware has no path stored (peer never heard or only
+        heard via flood).
 
-        Trace is a one-shot broadcast — there's no explicit destination.
-        Each hop along the path reports back the SNR at which IT received
-        the previous transmission, plus the first byte of its own pubkey.
+        This is the foundation of the official MeshCore "Ping" feature:
+        the app calls this first to learn HOW to reach the peer, then
+        issues a directed trace through that path. The path is NOT
+        part of the `mc.contacts` payload — `out_path` in the contact
+        dict is the radio's OUT route, which is often empty (`-1`)
+        even when an advert path exists.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_advert_path(pubkey)
+        if ev is None or ev.type == EventType.ERROR:
+            return None
+        p = ev.payload or {}
+        # The reader stores the path bytes as a single hex string; the
+        # send_trace lib API wants comma-separated hex hashes (one per
+        # repeater). path_hash_mode tells us the hash size in bytes:
+        # 0 -> 1B, 1 -> 2B, 2 -> 4B, 3 -> 8B per hop. path_len is the
+        # number of hops.
+        path_hex = p.get("path") or ""
+        path_len = p.get("path_len", 0)
+        hash_mode = p.get("path_hash_mode", 0)
+        if not path_hex or path_len <= 0:
+            return None
+        hash_bytes = 1 << max(0, hash_mode)
+        chars = hash_bytes * 2
+        # Split the hex string into chunks of `chars` per hop, take
+        # only `path_len` hops (the firmware sometimes zero-pads).
+        hops = [path_hex[i : i + chars] for i in range(0, path_len * chars, chars)]
+        return ",".join(h for h in hops if h)
 
-        Returns a TracePathResult describing the path travelled. Raises
-        RuntimeError if not connected or the device didn't ack the send,
-        TimeoutError if no TRACE_DATA arrives within `timeout` seconds.
+    async def send_trace(
+        self,
+        *,
+        target_path: str | bytes | None = None,
+        timeout: float = 60.0,
+    ) -> TracePathResult:
+        """Send a TRACE packet and wait for the TRACE_DATA response.
+
+        When `target_path` is None this is a broadcast/flood probe —
+        every reachable repeater forwards once and reports back, giving
+        the radio a mesh topology snapshot. When `target_path` is a
+        comma-separated hex string of repeater hashes the trace is
+        DIRECTED through that specific chain to a single destination,
+        and the destination echoes back through the reverse path. The
+        returned hops include both directions.
+
+        Mirrors the meshcore-cli flow (meshcore_cli.py:2724-2745): the
+        lib generates its own random tag internally; we read it back
+        from the ack's `expected_ack` field and use that to filter the
+        TRACE_DATA waiter. The wait duration comes from the firmware's
+        per-request `suggested_timeout` (ms) scaled by 1.2 — falling
+        back to the caller-supplied `timeout` only when the firmware
+        omits a suggestion.
         """
         if self._mc is None:
             raise RuntimeError("MeshCore not connected")
 
-        # Random tag so we can match the response and not cross-pollute
-        # with concurrent traces.
-        tag = random.randint(1, 2**31 - 1)
-
-        # Subscribe BEFORE sending to avoid a race where the TRACE_DATA
-        # arrives before we install the waiter. wait_for_event only
-        # subscribes when scheduled, so wrap it in a Task to ensure the
-        # subscription is registered before we kick off the send.
-        waiter = asyncio.ensure_future(
-            self._mc.dispatcher.wait_for_event(
-                EventType.TRACE_DATA,
-                attribute_filters={"tag": tag},
-                timeout=timeout,
-            )
+        ack = await self._mc.commands.send_trace(
+            auth_code=0, tag=None, flags=None, path=target_path,
         )
-        # Yield once so the dispatcher's subscribe() call inside the
-        # waiter coroutine runs before we send.
-        await asyncio.sleep(0)
-
-        try:
-            ack = await self._mc.commands.send_trace(
-                auth_code=0, tag=tag, flags=None, path=None
-            )
-        except BaseException:
-            waiter.cancel()
-            raise
         if ack is None or (
             hasattr(ack, "type")
             and getattr(ack.type, "name", None) != "MSG_SENT"
         ):
-            waiter.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await waiter
             raise RuntimeError(f"send_trace did not ack: {ack!r}")
 
-        trace_event = await waiter
+        expected_ack = ack.payload.get("expected_ack") if ack.payload else None
+        if expected_ack is None:
+            raise RuntimeError("send_trace ack missing expected_ack")
+        tag = int.from_bytes(expected_ack, byteorder="little")
+
+        suggested_ms = ack.payload.get("suggested_timeout")
+        if suggested_ms is not None and suggested_ms > 0:
+            wait_s = suggested_ms / 1000 * 1.2
+        else:
+            wait_s = timeout
+
+        trace_event = await self._mc.dispatcher.wait_for_event(
+            EventType.TRACE_DATA,
+            attribute_filters={"tag": tag},
+            timeout=wait_s,
+        )
         if trace_event is None:
             raise TimeoutError(
-                f"No trace reply within {timeout:g}s"
+                f"No trace reply within {wait_s:.1f}s"
                 " — mesh may have no reachable repeaters or all repeaters dropped the trace packet"
             )
 
@@ -1053,4 +1191,186 @@ class MeshCoreClient:
             flags=int(p.get("flags", 0)),
             hops=hops,
             path_len=int(p.get("path_len", len(hops))),
+        )
+
+    @staticmethod
+    def _build_trace_path(contact: dict, path_hash_len: int) -> str | None:
+        """Construct the trace-path string for a repeater/room contact.
+
+        Adapts meshcore-cli's `print_trace_to`
+        (docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810)
+        with two deltas: comma-separated output (so it goes through the
+        lib's string parser without the "invalid path_hash_len" rejection
+        the concatenated form triggers) and a zero-hop fallback when
+        `out_path_len == -1` (just the destination pubkey prefix —
+        matches what the official mobile app sends when no stored path
+        exists; verified against PILISMETEOR over real RF).
+
+        Returns None only for user-type contacts (type != 2 and != 3)
+        with no usable out_path. Those can't be trace targets — the trace
+        needs SOMETHING for the firmware to route to.
+        """
+        contact_type = contact.get("type", 0)
+        is_traceable_target = contact_type in (2, 3)
+        pubkey = contact.get("public_key", "") or ""
+
+        path = contact.get("out_path", "") or ""
+        path_len = contact.get("out_path_len", -1)
+
+        # 3-byte hash mode requests a 2-byte path; mirror the CLI quirk.
+        # The dest_prefix below is sized against the post-rewrite
+        # path_hash_len so all elements stay the same width.
+        if path_hash_len == 3 and path_len > 0:
+            path_hash_len = 2
+            new_path = ""
+            for i in range(0, path_len):
+                new_path += path[6 * (path_len - i - 1):6 * (path_len - i - 1) + 4]
+            path = new_path
+
+        dest_prefix = pubkey[0:2 * path_hash_len] if is_traceable_target else ""
+
+        # No stored path: zero-hop fallback to the dest prefix.
+        # For user-type contacts (type=1) we have no destination prefix
+        # to fall back to — they can't be the target of a trace.
+        if path_len == -1:
+            return dest_prefix or None
+
+        # Walk the path in reverse, wrapping the trace symmetrically with
+        # each hop on both sides. Use comma separators so the lib's string
+        # parser correctly derives path_hash_len from the first element.
+        parts: list[str] = []
+        if dest_prefix:
+            parts.append(dest_prefix)
+        for i in range(0, path_len):
+            start = 2 * path_hash_len * (path_len - i - 1)
+            end = 2 * path_hash_len * (path_len - i)
+            elem = path[start:end]
+            if not parts:
+                parts = [elem]
+            else:
+                # Wrap symmetrically — same shape as the CLI but expressed
+                # as a sequence rather than concatenated hex.
+                parts = [elem] + parts + [elem]
+
+        return ",".join(parts) if parts else None
+
+    @staticmethod
+    def _build_trace_path_from_discovery(
+        contact: dict, disc_payload: dict, path_hash_len: int,
+    ) -> str:
+        """Build a comma-separated trace path from a path-discovery response.
+
+        Ports `meshcore-cli`'s `print_disc_trace_to`
+        (docs/external/meshcore-cli-reference/meshcore_cli.py:1821-1856).
+
+        Result format: ``out_hop_1,...,out_hop_N,dest_prefix,in_hop_1,...,in_hop_M``
+        with consecutive-duplicate dedupe on the inbound side (avoids
+        ``ee,3c,3c`` when in_path's first hop equals the destination prefix).
+        """
+        inp = disc_payload.get("in_path") or ""
+        outp = disc_payload.get("out_path") or ""
+        chars = 2 * path_hash_len
+        inp_l = len(inp) // chars
+        outp_l = len(outp) // chars
+
+        trace = ""
+
+        for i in range(0, outp_l):
+            elem = outp[chars * i:chars * (i + 1)]
+            trace = elem if trace == "" else f"{trace},{elem}"
+
+        contact_type = contact.get("type", 0)
+        if contact_type in (2, 3):
+            pubkey = contact.get("public_key", "")
+            elem = pubkey[0:chars]
+            trace = elem if trace == "" else f"{trace},{elem}"
+
+        for i in range(0, inp_l):
+            elem = inp[chars * i:chars * (i + 1)]
+            if trace == "":
+                trace = elem
+            elif trace[-chars:] != elem:
+                trace = f"{trace},{elem}"
+
+        return trace
+
+    async def trace_to(
+        self,
+        pubkey: str,
+        *,
+        timeout: float = 60.0,
+    ) -> TracePathResult:
+        """CLI-style directed trace to a known contact.
+
+        Looks up the contact in `mc.contacts`, queries
+        `get_path_hash_mode` for the radio's hop-hash size, builds the
+        trace-path string via `_build_trace_path` (which handles both
+        the stored-out_path symmetric wrap and the zero-hop fallback
+        when no path is stored), then sends the trace and waits for the
+        TRACE_DATA echo through `send_trace`.
+
+        Reference: docs/external/meshcore-cli-reference/meshcore_cli.py
+        (`print_trace_to` at 1781-1810). The CLI's `print_disc_trace_to`
+        (1821-1856) is intentionally NOT used — its
+        `send_path_discovery_sync` call doesn't get a reply on the
+        firmware build deployed in this fleet, so the zero-hop fallback
+        inside `_build_trace_path` is the better path. Confirmed against
+        HU-PE-PILISMETEOR over real RF (May 2026).
+
+        Raises:
+            RuntimeError: contact unknown / can't build a usable path /
+                radio reply malformed (→ 502 at API layer).
+            TimeoutError: no TRACE_DATA echo (→ 504).
+            ConnectionError: radio link down (→ 503).
+        """
+        mc = await self._require_mc()
+
+        contact = (mc.contacts or {}).get(pubkey)
+        if contact is None:
+            raise RuntimeError(f"trace_to: unknown contact {pubkey[:8]}…")
+
+        async with self._lock:
+            path_hash_mode = await mc.commands.get_path_hash_mode()
+        path_hash_len = int(path_hash_mode) + 1
+
+        target_path = self._build_trace_path(contact, path_hash_len)
+        if not target_path:
+            raise RuntimeError(
+                f"trace_to: could not build trace path for {pubkey[:8]}…"
+            )
+
+        return await self.send_trace(target_path=target_path, timeout=timeout)
+
+    async def ping_via_trace(
+        self,
+        pubkey: str,
+        *,
+        timeout: float = 60.0,
+    ) -> PingResult:
+        """The official MeshCore "Ping" feature. Thin wrapper around
+        `trace_to` that adds round-trip timing and surfaces just the
+        first/last hop SNRs as `snr_there` / `snr_back` (matching the
+        mobile app's "Ping Success" display).
+        """
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        result = await self.trace_to(pubkey, timeout=timeout)
+        elapsed_ms = int((loop.time() - t0) * 1000)
+
+        # In a symmetric out-and-back trace the firmware records each
+        # repeater the trace touched. The first hop's SNR is what the
+        # outbound's first repeater measured for our packet; the last
+        # hop's SNR is what our radio measured on the returning echo.
+        # Mirror what the official app surfaces as "SNR there" / "SNR back".
+        snr_there: float | None = result.hops[0].snr if result.hops else None
+        snr_back: float | None = (
+            result.hops[-1].snr if len(result.hops) > 1 else None
+        )
+
+        return PingResult(
+            duration_ms=elapsed_ms,
+            snr_there=snr_there,
+            snr_back=snr_back,
+            hops=result.hops,
+            path_len=result.path_len,
         )
