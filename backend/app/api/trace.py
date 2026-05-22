@@ -45,31 +45,29 @@ async def trace_path(
     client: MeshCoreClient = Depends(get_meshcore_client),
     db: AsyncSession = Depends(get_db),
 ) -> TraceOut:
-    """Trace the route to a specific peer.
+    """Run a directed trace to a specific peer.
 
-    Looks up the peer's advert path from the firmware and fires a
-    DIRECTED trace through that path; the destination echoes the
-    packet back, so the resulting hop list captures both outbound and
-    return SNRs. When no advert path is known the call falls back to
-    a broadcast trace so the UI still gets a useful topology snapshot.
+    Delegates to ``client.trace_to`` for the CLI-style path-construction
+    (stored ``out_path`` or discover-then-trace). Hop hashes are then
+    best-effort name-resolved against the local contacts table for
+    friendly display.
 
-    Each hop's hash is best-effort resolved against the local
-    ``contacts`` table for friendly names — see ``trace_resolver``.
+    Status codes:
+      * 200 — trace completed.
+      * 422 — pubkey not 64 hex chars (handled by Path validator).
+      * 502 — radio reachable but reply malformed / contact unknown.
+      * 503 — radio link down.
+      * 504 — firmware ack'd but no TRACE_DATA in time.
     """
     log.info("Trace requested by UI for target pubkey=%s", pubkey)
 
     try:
-        target_path = await client.get_advert_path(pubkey)
-        result = await client.send_trace(target_path=target_path)
+        result = await client.trace_to(pubkey)
     except TimeoutError as e:
-        # send_trace ack'd but TRACE_DATA never arrived — surface as gateway timeout.
         raise HTTPException(status_code=504, detail=str(e)) from e
     except ConnectionError as e:
-        # Radio link itself is down. Distinct subclass from RuntimeError —
-        # without an explicit branch we'd silently 500.
         raise HTTPException(status_code=503, detail=str(e)) from e
     except RuntimeError as e:
-        # Radio connected but firmware didn't ack — gateway-style failure.
         raise HTTPException(status_code=502, detail=str(e)) from e
 
     raw_hops = [{"hash": h.hash, "snr": h.snr} for h in result.hops]

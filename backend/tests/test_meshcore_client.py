@@ -454,6 +454,23 @@ class TestPingViaTrace:
         assert result.snr_back is None
 
 
+class TestTraceTo:
+    """trace_to returns the raw TracePathResult (with tag/flags) so the
+    /api/trace endpoint can surface them; ping_via_trace wraps this."""
+
+    @pytest.mark.asyncio
+    async def test_returns_trace_path_result_with_tag_and_flags(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = TestPingViaTrace._fake_mc_with_stored_path()
+        client._mc = fake_mc
+        result = await client.trace_to("ee10f91c" + "00" * 28)
+        assert isinstance(result, TracePathResult)
+        assert result.tag == 0xCAFEBABE
+        assert result.flags == 0
+        assert result.path_len == 2
+        assert len(result.hops) == 2
+
+
 class TestRequestTimeouts:
     """req_* methods pass `timeout=0` to the meshcore lib so the firmware's
     `suggested_timeout` (which scales with flood / multi-hop complexity)

@@ -1276,37 +1276,33 @@ class MeshCoreClient:
 
         return trace
 
-    async def ping_via_trace(
+    async def trace_to(
         self,
         pubkey: str,
         *,
         timeout: float = 60.0,
-    ) -> PingResult:
-        """The official MeshCore "Ping" feature.
+    ) -> TracePathResult:
+        """CLI-style directed trace to a known contact.
 
-        Mirrors meshcore-cli's `trace` (when the contact has a stored
-        `out_path`) and `dtrace` (when out_path_len == -1 → discover path
-        first) flows. Returns a PingResult with the round-trip duration,
-        the SNR our radio measured for the outbound first-hop
-        (`snr_there`), and the SNR on the returning echo's first-hop
-        (`snr_back`).
+        Returns the full TracePathResult (tag, flags, path_len, hops) so
+        callers can choose what to surface. Mirrors meshcore-cli's `trace`
+        when the contact has a stored out_path and `dtrace` when it
+        doesn't (out_path_len == -1).
 
         Reference: docs/external/meshcore-cli-reference/meshcore_cli.py
-        (`print_trace_to` at 1781-1810 and `print_disc_trace_to` at
-        1821-1856).
+        (print_trace_to 1781-1810 / print_disc_trace_to 1821-1856).
 
         Raises:
-            RuntimeError: contact unknown, path discovery failed, or
-                radio reply malformed (→ 502).
-            TimeoutError: no TRACE_DATA echo within firmware-suggested
-                window (→ 504).
-            ConnectionError: radio unreachable (→ 503).
+            RuntimeError: contact unknown / path discovery failed / radio
+                reply malformed (→ 502 at API layer).
+            TimeoutError: no TRACE_DATA echo (→ 504).
+            ConnectionError: radio link down (→ 503).
         """
         mc = await self._require_mc()
 
         contact = (mc.contacts or {}).get(pubkey)
         if contact is None:
-            raise RuntimeError(f"ping_via_trace: unknown contact {pubkey[:8]}…")
+            raise RuntimeError(f"trace_to: unknown contact {pubkey[:8]}…")
 
         # path_hash_len is fixed by the radio's path_hash_mode; mirror the
         # CLI's `+1` convention (mode 0 → 1B hashes, etc).
@@ -1324,7 +1320,7 @@ class MeshCoreClient:
                 disc_payload = await self.disc_path(pubkey)
             except RuntimeError as e:
                 raise RuntimeError(
-                    f"ping_via_trace: path discovery failed for {pubkey[:8]}…: {e}"
+                    f"trace_to: path discovery failed for {pubkey[:8]}…: {e}"
                 ) from e
             target_path = self._build_trace_path_from_discovery(
                 contact, disc_payload, path_hash_len,
@@ -1332,12 +1328,25 @@ class MeshCoreClient:
 
         if not target_path:
             raise RuntimeError(
-                f"ping_via_trace: could not build trace path for {pubkey[:8]}…"
+                f"trace_to: could not build trace path for {pubkey[:8]}…"
             )
 
+        return await self.send_trace(target_path=target_path, timeout=timeout)
+
+    async def ping_via_trace(
+        self,
+        pubkey: str,
+        *,
+        timeout: float = 60.0,
+    ) -> PingResult:
+        """The official MeshCore "Ping" feature. Thin wrapper around
+        `trace_to` that adds round-trip timing and surfaces just the
+        first/last hop SNRs as `snr_there` / `snr_back` (matching the
+        mobile app's "Ping Success" display).
+        """
         loop = asyncio.get_running_loop()
         t0 = loop.time()
-        result = await self.send_trace(target_path=target_path, timeout=timeout)
+        result = await self.trace_to(pubkey, timeout=timeout)
         elapsed_ms = int((loop.time() - t0) * 1000)
 
         # In a symmetric out-and-back trace the firmware records each
