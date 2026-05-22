@@ -1195,6 +1195,212 @@ class TestDevicePartialReset:
         assert result["reconnected"] is False
 
 
+class TestTuning:
+    """`get_tuning` / `set_tuning` are simple read/write wrappers with
+    the standard error-translation convention: `None` or `EventType.ERROR`
+    → `RuntimeError("Device rejected …")`.
+    """
+
+    @pytest.mark.asyncio
+    async def test_get_tuning_returns_dict(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock(type=EventType.OK)
+        ev.payload = {"rx_delay": 100, "airtime_factor": 200}
+        fake_mc.commands.get_tuning = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+
+        out = await client.get_tuning()
+
+        assert out == {"rx_delay": 100, "airtime_factor": 200}
+        fake_mc.commands.get_tuning.assert_awaited_once_with()
+
+    @pytest.mark.asyncio
+    async def test_get_tuning_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_tuning = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_tuning"):
+            await client.get_tuning()
+
+    @pytest.mark.asyncio
+    async def test_get_tuning_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.get_tuning = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected get_tuning"):
+            await client.get_tuning()
+
+    @pytest.mark.asyncio
+    async def test_set_tuning_happy_path(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_tuning = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_tuning(rx_delay=150, airtime_factor=250)
+
+        fake_mc.commands.set_tuning.assert_awaited_once_with(150, 250)
+
+    @pytest.mark.asyncio
+    async def test_set_tuning_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_tuning = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_tuning"):
+            await client.set_tuning(rx_delay=10, airtime_factor=20)
+
+    @pytest.mark.asyncio
+    async def test_set_tuning_raises_on_none(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_tuning = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_tuning"):
+            await client.set_tuning(rx_delay=10, airtime_factor=20)
+
+
+class TestSetRadio:
+    """`set_radio` reconfigures the LoRa PHY; like the reboot path,
+    the modem warm-up can drop the TCP socket, so the wrapper releases
+    the lock then blocks on `_wait_for_reconnect`. Tests mock that
+    helper so they finish in milliseconds.
+
+    `set_tx_power` and `set_device_name` are simple write wrappers
+    bundled here so they share the standard error-translation suite.
+    """
+
+    @pytest.mark.asyncio
+    async def test_happy_path_returns_reconnected(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_radio = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+        async def _instant_reconnect(**_kw): return True
+        monkeypatch.setattr(client, "_wait_for_reconnect", _instant_reconnect)
+
+        result = await client.set_radio(869.525, 250.0, 11, 5)
+
+        assert result == {"reconnected": True}
+        fake_mc.commands.set_radio.assert_awaited_once_with(
+            869.525, 250.0, 11, 5,
+        )
+
+    @pytest.mark.asyncio
+    async def test_skip_wait_when_flag_false(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_radio = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+        called = {"v": False}
+        async def _explode(**_kw):
+            called["v"] = True
+            return True
+        monkeypatch.setattr(client, "_wait_for_reconnect", _explode)
+
+        result = await client.set_radio(
+            869.525, 250.0, 11, 5, wait_for_reconnect=False,
+        )
+
+        assert result == {"reconnected": False}
+        assert called["v"] is False
+
+    @pytest.mark.asyncio
+    async def test_raises_on_device_error(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_radio = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+        async def _explode(**_kw):
+            raise AssertionError("must not wait when command fails")
+        monkeypatch.setattr(client, "_wait_for_reconnect", _explode)
+
+        with pytest.raises(RuntimeError, match="Device rejected set_radio"):
+            await client.set_radio(869.525, 250.0, 11, 5)
+
+    @pytest.mark.asyncio
+    async def test_raises_on_none(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_radio = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        async def _explode(**_kw):
+            raise AssertionError("must not wait when command times out")
+        monkeypatch.setattr(client, "_wait_for_reconnect", _explode)
+
+        with pytest.raises(RuntimeError, match="Device rejected set_radio"):
+            await client.set_radio(869.525, 250.0, 11, 5)
+
+    @pytest.mark.asyncio
+    async def test_set_tx_power_happy(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_tx_power = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_tx_power(20)
+
+        fake_mc.commands.set_tx_power.assert_awaited_once_with(20)
+
+    @pytest.mark.asyncio
+    async def test_set_tx_power_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_tx_power = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_tx_power"):
+            await client.set_tx_power(20)
+
+    @pytest.mark.asyncio
+    async def test_set_device_name_happy(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_name = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        client._mc = fake_mc
+
+        await client.set_device_name("Alpha-7")
+
+        fake_mc.commands.set_name.assert_awaited_once_with("Alpha-7")
+
+    @pytest.mark.asyncio
+    async def test_set_device_name_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_name = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(RuntimeError, match="Device rejected set_device_name"):
+            await client.set_device_name("Alpha-7")
+
+
 class TestFactoryReset:
     """`factory_reset` wraps the meshcore lib's two-step request+confirm
     pattern. Wipes ALL device state including the Ed25519 identity keypair.

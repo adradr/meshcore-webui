@@ -645,6 +645,94 @@ class MeshCoreClient:
             )
         return result
 
+    # ----- Radio / tuning / tx-power / name wrappers -----
+
+    async def get_tuning(self) -> dict:
+        """Read current RX tuning parameters from the device.
+
+        Returns ``{"rx_delay": int, "airtime_factor": int}`` — uint32 LE
+        values from the firmware's TUNING_PARAMS response.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_tuning()
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected get_tuning")
+        p = ev.payload
+        return {
+            "rx_delay": int(p["rx_delay"]),
+            "airtime_factor": int(p["airtime_factor"]),
+        }
+
+    async def set_tuning(self, rx_delay: int, airtime_factor: int) -> None:
+        """Write RX tuning parameters to the device. Both values are
+        firmware uint32 LE; the schema layer validates the bounds."""
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_tuning(rx_delay, airtime_factor)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_tuning")
+
+    async def set_radio(
+        self,
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+        *,
+        wait_for_reconnect: bool = True,
+    ) -> dict:
+        """Reconfigure the LoRa PHY.
+
+        Changing freq/bw/sf/cr detunes the device from every other node on
+        the previous preset AND can briefly drop the TCP companion socket
+        while the modem re-initialises. Mirroring the reboot path, we
+        release the lock after the command and block on
+        ``_wait_for_reconnect`` so the SPA's follow-up GET doesn't race
+        the modem warm-up.
+
+        Returns ``{"reconnected": bool}`` — False on timeout.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_radio(freq, bw, sf, cr)
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_radio")
+            log.warning(
+                "RADIO ACTION=set_radio freq=%.3f bw=%.1f sf=%d cr=%d",
+                freq, bw, sf, cr,
+            )
+        # MUST release the lock before waiting for reconnect — the
+        # supervisor's reconnect path may acquire other internal locks,
+        # and holding ours would also serialize unrelated requests for
+        # up to _RECONNECT_WAIT_S.
+        reconnected = False
+        if wait_for_reconnect:
+            reconnected = await self._wait_for_reconnect(
+                timeout=self._RECONNECT_WAIT_S,
+            )
+        return {"reconnected": reconnected}
+
+    async def set_tx_power(self, dbm: int) -> None:
+        """Set the LoRa TX power. Schema clamps to 0..22 dBm; firmware
+        further clamps to ``self_info.max_tx_power``."""
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_tx_power(dbm)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_tx_power")
+        log.warning("RADIO ACTION=set_tx_power dbm=%d", dbm)
+
+    async def set_device_name(self, name: str) -> None:
+        """Rename the device. Persists to flash; takes effect immediately
+        in subsequent adverts."""
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_name(name)
+        if ev is None or ev.type == EventType.ERROR:
+            raise RuntimeError("Device rejected set_device_name")
+        log.warning("RADIO ACTION=set_device_name name=%s", name)
+
     # Bound on how long device_partial_reset blocks waiting for the
     # supervisor to re-establish the TCP companion link after a reboot.
     # Empirically the device is back in 2-5s; 15s is a generous ceiling
