@@ -1,4 +1,4 @@
-import { Crosshair } from "lucide-react"
+import { Maximize2 } from "lucide-react"
 import L from "leaflet"
 import { useMap } from "react-leaflet"
 import { Button } from "@/components/ui/button"
@@ -42,10 +42,10 @@ export function CenterOnContactsButton({ contacts }: Props) {
         className="shadow-md"
         onClick={handleClick}
         disabled={disabled}
-        title={disabled ? "No contacts with GPS" : "Center on contacts"}
-        aria-label="Center on contacts"
+        title={disabled ? "No nodes with GPS" : "Fit all nodes"}
+        aria-label="Fit all nodes on map"
       >
-        <Crosshair className="h-4 w-4" />
+        <Maximize2 className="h-4 w-4" />
       </Button>
     </div>
   )

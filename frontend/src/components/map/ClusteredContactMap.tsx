@@ -7,6 +7,8 @@ import { MapResizer } from "./useMapResize"
 import { MarkersLayer, type ContactMarker } from "./MarkersLayer"
 import { MapViewPersistence } from "./MapViewPersistence"
 import { CenterOnContactsButton } from "./CenterOnContactsButton"
+import { CenterOnSelfButton } from "./CenterOnSelfButton"
+import { LocatePhoneButton } from "./LocatePhoneButton"
 import { iconForNodeType } from "./nodeIcons"
 
 fixDefaultIcon()
@@ -103,6 +105,8 @@ export function ClusteredContactMap({
         </Marker>
       )}
       <CenterOnContactsButton contacts={allPoints} />
+      <CenterOnSelfButton self={self ? { lat: self.lat, lon: self.lon } : null} />
+      <LocatePhoneButton />
       {children}
     </MapContainer>
   )
