@@ -35,18 +35,29 @@ export function ThemeProvider({
 
   useEffect(() => {
     const root = window.document.documentElement
-    root.classList.remove("light", "dark")
 
-    if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
-        .matches
-        ? "dark"
-        : "light"
-      root.classList.add(systemTheme)
-      return
+    const applyResolved = (next: Theme) => {
+      root.classList.remove("light", "dark")
+      if (next === "system") {
+        const systemTheme = window.matchMedia("(prefers-color-scheme: dark)")
+          .matches
+          ? "dark"
+          : "light"
+        root.classList.add(systemTheme)
+        return
+      }
+      root.classList.add(next)
     }
 
-    root.classList.add(theme)
+    applyResolved(theme)
+
+    // When following the OS, listen for live preference flips so the class
+    // updates without requiring a re-render or page reload.
+    if (theme !== "system") return
+    const mql = window.matchMedia("(prefers-color-scheme: dark)")
+    const onChange = () => applyResolved("system")
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
   }, [theme])
 
   const value = {

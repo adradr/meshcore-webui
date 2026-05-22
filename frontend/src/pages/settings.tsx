@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { Monitor, Moon, Sun } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
-import { useTheme } from "@/components/theme-provider"
+import { useTheme, type Theme } from "@/components/theme-provider"
+import { cn } from "@/lib/utils"
 import { notifyError } from "@/lib/notify"
 import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
@@ -17,6 +20,16 @@ import { PushModeRadio } from "@/features/push/PushModeRadio"
 import { DangerZone } from "@/features/admin/DangerZone"
 
 const REPO_URL = "https://github.com/randomicon/meshcore-webui"
+
+const THEME_OPTIONS: ReadonlyArray<{
+  value: Theme
+  label: string
+  Icon: typeof Sun
+}> = [
+  { value: "light", label: "Light", Icon: Sun },
+  { value: "dark", label: "Dark", Icon: Moon },
+  { value: "system", label: "System", Icon: Monitor },
+]
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme()
@@ -78,14 +91,34 @@ export function SettingsPage() {
               Dark mode follows the system by default.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <Label htmlFor="dark">Dark mode</Label>
-            <Switch
-              id="dark"
-              checked={theme === "dark"}
-              onCheckedChange={(c) => setTheme(c ? "dark" : "light")}
-            />
-          </div>
+          <RadioGroup
+            value={theme}
+            onValueChange={(v) => setTheme(v as Theme)}
+            className="flex w-full max-w-xs gap-1 rounded-md border bg-muted p-1"
+            aria-label="Theme"
+          >
+            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+              <Label
+                key={value}
+                htmlFor={`theme-${value}`}
+                aria-label={label}
+                className={cn(
+                  "flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
+                  theme === value &&
+                    "bg-background text-foreground shadow-sm",
+                )}
+              >
+                <RadioGroupItem
+                  id={`theme-${value}`}
+                  value={value}
+                  aria-label={label}
+                  className="sr-only"
+                />
+                <Icon className="size-3.5" aria-hidden />
+                <span>{label}</span>
+              </Label>
+            ))}
+          </RadioGroup>
         </section>
         <Separator />
 
