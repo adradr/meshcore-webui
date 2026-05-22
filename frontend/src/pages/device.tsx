@@ -9,6 +9,7 @@ import {
   useSendAdvert,
   useSetPosition,
 } from "@/features/device/queries"
+import { RadioTab } from "@/features/device/RadioTab"
 import { RxLogPanel } from "@/features/rx_log/RxLogPanel"
 import { NoisePanel } from "@/features/noise/NoisePanel"
 import { useRealtime } from "@/realtime/WebSocketProvider"
@@ -543,9 +544,7 @@ export function DevicePage() {
             <DeviceInfoPanel />
           </TabsContent>
           <TabsContent value="radio" className="mt-0">
-            <div className="rounded-lg border border-dashed border-muted p-8 text-center text-sm text-muted-foreground">
-              Radio configuration — coming soon
-            </div>
+            <RadioTab />
           </TabsContent>
           <TabsContent value="behaviour" className="mt-0">
             <div className="rounded-lg border border-dashed border-muted p-8 text-center text-sm text-muted-foreground">
