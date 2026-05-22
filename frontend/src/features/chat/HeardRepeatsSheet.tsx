@@ -1,4 +1,5 @@
-import { Loader2, Radio, Search } from "lucide-react"
+import { ChevronRight, Loader2, Radio, Search } from "lucide-react"
+import { useNavigate } from "react-router-dom"
 import {
   Sheet,
   SheetContent,
@@ -8,7 +9,7 @@ import {
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
 import { useContacts, useDiscoverPath } from "@/features/contacts/queries"
-import { parseRepeaterPath } from "./repeaterPath"
+import { parseRepeaterPath, type RepeaterHop } from "./repeaterPath"
 
 interface Props {
   open: boolean
@@ -35,6 +36,59 @@ export function HeardRepeatsSheet({
 }: Props) {
   const contacts = useContacts()
   const discoverPath = useDiscoverPath()
+  const navigate = useNavigate()
+
+  // Resolved hops are clickable — navigate to the contact's profile and
+  // close the sheet. Unresolved hops (the repeater isn't in our local
+  // contacts list) render as inert rows so the user understands which
+  // hops they CAN drill into.
+  const openHop = (hop: RepeaterHop) => {
+    if (!hop.resolved || !hop.pubkey) return
+    onOpenChange(false)
+    navigate(`/contact/${hop.pubkey}`)
+  }
+
+  const HopRow = ({ hop, index }: { hop: RepeaterHop; index: number }) => {
+    const clickable = hop.resolved && hop.pubkey
+    const common = (
+      <>
+        <Radio className="h-4 w-4 shrink-0 opacity-70" />
+        <span className="truncate font-medium">{hop.name}</span>
+        <span className="ml-auto font-mono text-xs text-muted-foreground">
+          {hop.hash}
+        </span>
+        {clickable && (
+          <ChevronRight
+            className="h-4 w-4 shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+        )}
+      </>
+    )
+    if (clickable) {
+      return (
+        <li>
+          <button
+            type="button"
+            onClick={() => openHop(hop)}
+            aria-label={`Open ${hop.name} profile`}
+            className="flex w-full items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid={`heard-hop-${index}`}
+          >
+            {common}
+          </button>
+        </li>
+      )
+    }
+    return (
+      <li
+        className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm"
+        data-testid={`heard-hop-${index}`}
+      >
+        {common}
+      </li>
+    )
+  }
 
   const peer = contactPubKey
     ? Object.values(contacts.data ?? {}).find((c) =>
@@ -61,7 +115,16 @@ export function HeardRepeatsSheet({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="sm:max-w-md sm:mx-auto">
+      {/*
+        flex column + max-height so the header (with its built-in close X)
+        stays pinned at the top while only the hop list scrolls. Without
+        this, long repeater paths push the close button below the viewport
+        on short screens.
+      */}
+      <SheetContent
+        side="bottom"
+        className="flex max-h-[85vh] flex-col sm:max-w-md sm:mx-auto"
+      >
         <SheetHeader>
           <SheetTitle>Heard via repeaters</SheetTitle>
           <SheetDescription>
@@ -72,7 +135,10 @@ export function HeardRepeatsSheet({
                 : "Channel message — path data not captured for this packet."}
           </SheetDescription>
         </SheetHeader>
-        <div className="p-4">
+        <div
+          className="flex-1 overflow-y-auto p-4"
+          data-testid="heard-repeats-scroll"
+        >
           {!contactPubKey && !haveMessagePath ? (
             <p className="text-sm text-muted-foreground">
               No path recorded — this message arrived before the radio
@@ -87,16 +153,7 @@ export function HeardRepeatsSheet({
             ) : (
               <ol className="space-y-2">
                 {hops.map((h, i) => (
-                  <li
-                    key={`${i}-${h.hash}`}
-                    className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm"
-                  >
-                    <Radio className="h-4 w-4 shrink-0 opacity-70" />
-                    <span className="font-medium">{h.name}</span>
-                    <span className="ml-auto font-mono text-xs text-muted-foreground">
-                      {h.hash}
-                    </span>
-                  </li>
+                  <HopRow key={`${i}-${h.hash}`} hop={h} index={i} />
                 ))}
               </ol>
             )
@@ -133,16 +190,7 @@ export function HeardRepeatsSheet({
           ) : (
             <ol className="space-y-2">
               {hops.map((h, i) => (
-                <li
-                  key={`${i}-${h.hash}`}
-                  className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2 text-sm"
-                >
-                  <Radio className="h-4 w-4 shrink-0 opacity-70" />
-                  <span className="font-medium">{h.name}</span>
-                  <span className="ml-auto font-mono text-xs text-muted-foreground">
-                    {h.hash}
-                  </span>
-                </li>
+                <HopRow key={`${i}-${h.hash}`} hop={h} index={i} />
               ))}
             </ol>
           )}

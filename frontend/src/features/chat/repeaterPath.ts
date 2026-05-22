@@ -10,6 +10,13 @@ export interface RepeaterHop {
   hash: string
   /** True if a matching repeater contact was found in the local contacts list. */
   resolved: boolean
+  /**
+   * Full hex public key of the matched repeater contact, if `resolved`.
+   * The HeardRepeatsSheet uses this to navigate to `/contact/{pubkey}` on
+   * click — without it the only identifier on a hop is the 2-char hash
+   * which isn't unique enough to address a contact route.
+   */
+  pubkey?: string
 }
 
 /**
@@ -35,6 +42,7 @@ export function parseRepeaterPath(
       name: match?.adv_name ?? `Repeater ${h.toUpperCase()}`,
       hash: h.toUpperCase(),
       resolved: Boolean(match),
+      pubkey: match?.public_key,
     }
   })
 }
