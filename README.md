@@ -320,6 +320,20 @@ Any reverse proxy works as long as it forwards WebSocket upgrades. Tested with:
 
 ---
 
+## Radio control
+
+The **Device** page exposes the full MeshCore radio + behaviour config:
+
+- **Overview** — device info, GPS position editor, send-advert actions
+- **Radio** — region preset picker (EU 868, US 915, AU 915, KR 920, IN 866, HK 920, 433 ISM, Custom) with a live Geist-Mono readout (frequency, bandwidth, spreading factor, coding rate, computed airtime/data-rate/sensitivity), TX-power slider clamped to the firmware's hardware ceiling, RX tuning (rx_delay, airtime_factor)
+- **Behaviour** — device name, telemetry sub-modes (base/loc/env), advert + ack policy, BLE pairing PIN, custom vars, device time sync
+
+Changing radio frequency / BW / SF / CR detunes this node from every other node still on the previous preset. The Apply path requires you to type `APPLY` and waits up to 15 s for the supervisor to re-establish the companion link after the modem re-initialises. TX power, tuning, and behaviour edits don't require a confirm — they're reversible and don't detach the radio from the mesh.
+
+Implementation plan: [`docs/plans/2026-05-22-device-control-surface.md`](docs/plans/2026-05-22-device-control-surface.md).
+
+---
+
 ## iOS push setup
 
 iOS supports Web Push **only for PWAs installed to the Home Screen** (iOS 16.4+).
