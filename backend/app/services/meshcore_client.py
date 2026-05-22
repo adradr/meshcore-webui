@@ -1104,6 +1104,11 @@ class MeshCoreClient:
         async with self._lock:
             ev = await mc.commands.get_advert_path(pubkey)
         if ev is None or ev.type == EventType.ERROR:
+            log.info(
+                "get_advert_path: no path for %s… (ev=%r)",
+                pubkey[:8],
+                getattr(ev, "type", None) if ev is not None else None,
+            )
             return None
         p = ev.payload or {}
         # The reader stores the path bytes as a single hex string; the
@@ -1114,6 +1119,10 @@ class MeshCoreClient:
         path_hex = p.get("path") or ""
         path_len = p.get("path_len", 0)
         hash_mode = p.get("path_hash_mode", 0)
+        log.info(
+            "get_advert_path: %s… raw payload=%r",
+            pubkey[:8], p,
+        )
         if not path_hex or path_len <= 0:
             return None
         hash_bytes = 1 << max(0, hash_mode)
@@ -1121,7 +1130,12 @@ class MeshCoreClient:
         # Split the hex string into chunks of `chars` per hop, take
         # only `path_len` hops (the firmware sometimes zero-pads).
         hops = [path_hex[i : i + chars] for i in range(0, path_len * chars, chars)]
-        return ",".join(h for h in hops if h)
+        result = ",".join(h for h in hops if h)
+        log.info(
+            "get_advert_path: %s… path_len=%d hash_mode=%d → %s",
+            pubkey[:8], path_len, hash_mode, result,
+        )
+        return result
 
     async def send_trace(
         self,
