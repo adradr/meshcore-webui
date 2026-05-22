@@ -67,6 +67,10 @@ class TestSendTrace:
         fake_ack = MagicMock()
         fake_ack.type = MagicMock()
         fake_ack.type.name = "MSG_SENT"
+        fake_ack.payload = {
+            "expected_ack": (12345).to_bytes(4, "little"),
+            "suggested_timeout": 1000,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
 
         fake_trace_event = MagicMock()
@@ -108,6 +112,10 @@ class TestSendTrace:
         fake_ack = MagicMock()
         fake_ack.type = MagicMock()
         fake_ack.type.name = "MSG_SENT"
+        fake_ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            "suggested_timeout": 100,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=fake_ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
@@ -124,6 +132,84 @@ class TestSendTrace:
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
         with pytest.raises(RuntimeError, match="did not ack"):
+            await client.send_trace()
+
+
+class TestSendTraceAckTagging:
+    """`send_trace` must read the tag from the ack's `expected_ack` field
+    (matching meshcore-cli) so that wait_for_event filters on the same
+    value the firmware will stamp on the returning TRACE_DATA event. The
+    wait-timeout must also come from the ack's `suggested_timeout` (in
+    ms, scaled × 1.2 for safety margin) — not a hardcoded constant.
+
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:2724-2745"""
+
+    @pytest.mark.asyncio
+    async def test_uses_tag_from_expected_ack(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (0x12345678).to_bytes(4, "little"),
+            "suggested_timeout": 1000,  # 1 s → wait 1.2 s
+        }
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+
+        captured: dict[str, object] = {}
+
+        async def fake_wait(event_type, attribute_filters=None, timeout=0):
+            captured["event_type"] = event_type
+            captured["attribute_filters"] = attribute_filters
+            captured["timeout"] = timeout
+            return None  # simulate timeout
+
+        fake_mc.dispatcher.wait_for_event = fake_wait
+        client._mc = fake_mc
+
+        with pytest.raises(TimeoutError):
+            await client.send_trace(target_path="ee")
+
+        assert captured["attribute_filters"] == {"tag": 0x12345678}
+        assert abs(captured["timeout"] - 1.2) < 0.01
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_caller_timeout_when_suggestion_missing(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            # suggested_timeout absent
+        }
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        captured = {}
+
+        async def fake_wait(event_type, attribute_filters=None, timeout=0):
+            captured["timeout"] = timeout
+            return None
+
+        fake_mc.dispatcher.wait_for_event = fake_wait
+        client._mc = fake_mc
+        with pytest.raises(TimeoutError):
+            await client.send_trace(timeout=5.0)
+        assert captured["timeout"] == 5.0
+
+    @pytest.mark.asyncio
+    async def test_raises_when_expected_ack_missing(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {}  # no expected_ack
+        fake_mc.commands.send_trace = AsyncMock(return_value=ack)
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="expected_ack"):
             await client.send_trace()
 
 
@@ -242,10 +328,12 @@ class TestRequestTimeouts:
         ack = MagicMock()
         ack.type = MagicMock()
         ack.type.name = "MSG_SENT"
+        # No suggested_timeout → falls back to caller's default 60s.
+        ack.payload = {"expected_ack": (1).to_bytes(4, "little")}
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(TimeoutError, match="within 60s"):
+        with pytest.raises(TimeoutError, match="within 60.0s"):
             await client.send_trace()
 
     @pytest.mark.asyncio
@@ -255,6 +343,10 @@ class TestRequestTimeouts:
         ack = MagicMock()
         ack.type = MagicMock()
         ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            "suggested_timeout": 100,
+        }
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc

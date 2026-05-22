@@ -2,7 +2,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from dataclasses import dataclass, asdict, field
 from typing import Any, Optional
 
@@ -1126,7 +1125,7 @@ class MeshCoreClient:
     async def send_trace(
         self,
         *,
-        target_path: str | None = None,
+        target_path: str | bytes | None = None,
         timeout: float = 60.0,
     ) -> TracePathResult:
         """Send a TRACE packet and wait for the TRACE_DATA response.
@@ -1139,51 +1138,45 @@ class MeshCoreClient:
         and the destination echoes back through the reverse path. The
         returned hops include both directions.
 
-        Default wait of 60s accommodates flood-traces; directed traces
-        typically return in 0.5–2 s.
+        Mirrors the meshcore-cli flow (meshcore_cli.py:2724-2745): the
+        lib generates its own random tag internally; we read it back
+        from the ack's `expected_ack` field and use that to filter the
+        TRACE_DATA waiter. The wait duration comes from the firmware's
+        per-request `suggested_timeout` (ms) scaled by 1.2 — falling
+        back to the caller-supplied `timeout` only when the firmware
+        omits a suggestion.
         """
         if self._mc is None:
             raise RuntimeError("MeshCore not connected")
 
-        # Random tag so we can match the response and not cross-pollute
-        # with concurrent traces.
-        tag = random.randint(1, 2**31 - 1)
-
-        # Subscribe BEFORE sending to avoid a race where the TRACE_DATA
-        # arrives before we install the waiter. wait_for_event only
-        # subscribes when scheduled, so wrap it in a Task to ensure the
-        # subscription is registered before we kick off the send.
-        waiter = asyncio.ensure_future(
-            self._mc.dispatcher.wait_for_event(
-                EventType.TRACE_DATA,
-                attribute_filters={"tag": tag},
-                timeout=timeout,
-            )
+        ack = await self._mc.commands.send_trace(
+            auth_code=0, tag=None, flags=None, path=target_path,
         )
-        # Yield once so the dispatcher's subscribe() call inside the
-        # waiter coroutine runs before we send.
-        await asyncio.sleep(0)
-
-        try:
-            ack = await self._mc.commands.send_trace(
-                auth_code=0, tag=tag, flags=None, path=target_path,
-            )
-        except BaseException:
-            waiter.cancel()
-            raise
         if ack is None or (
             hasattr(ack, "type")
             and getattr(ack.type, "name", None) != "MSG_SENT"
         ):
-            waiter.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await waiter
             raise RuntimeError(f"send_trace did not ack: {ack!r}")
 
-        trace_event = await waiter
+        expected_ack = ack.payload.get("expected_ack") if ack.payload else None
+        if expected_ack is None:
+            raise RuntimeError("send_trace ack missing expected_ack")
+        tag = int.from_bytes(expected_ack, byteorder="little")
+
+        suggested_ms = ack.payload.get("suggested_timeout")
+        if suggested_ms is not None and suggested_ms > 0:
+            wait_s = suggested_ms / 1000 * 1.2
+        else:
+            wait_s = timeout
+
+        trace_event = await self._mc.dispatcher.wait_for_event(
+            EventType.TRACE_DATA,
+            attribute_filters={"tag": tag},
+            timeout=wait_s,
+        )
         if trace_event is None:
             raise TimeoutError(
-                f"No trace reply within {timeout:g}s"
+                f"No trace reply within {wait_s:.1f}s"
                 " — mesh may have no reachable repeaters or all repeaters dropped the trace packet"
             )
 
