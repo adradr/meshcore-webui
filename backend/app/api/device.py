@@ -303,6 +303,10 @@ async def update_policy(body: PolicyUpdate, request: Request) -> Response:
 
     Every field is optional — only set fields are pushed to the radio.
     An empty body is a valid no-op that returns 204 immediately.
+
+    Multi-field updates are **non-atomic** — each field is a separate
+    ``MeshCoreClient`` lock acquisition. If a later field's write fails,
+    earlier fields may have already been committed to flash.
     """
     client = _require_client(request)
     if body.telemetry is not None and (

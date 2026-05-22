@@ -645,39 +645,21 @@ class MeshCoreClient:
             )
         return result
 
-    # ----- Radio / tuning / tx-power / name wrappers -----
+    # ----- Radio / behaviour / custom-vars / time / BLE-PIN -----
+    # Bodies live in `meshcore_client_radio.py`; the methods below are
+    # thin delegators so call sites (`client.get_tuning()` etc.) and
+    # test mocks (`fake_mc.commands.*`) keep working unchanged. The
+    # extracted free functions check `ev` for `None` / EventType.ERROR
+    # INSIDE the lock to match the file's pre-existing style (see
+    # `get_stats_radio` / `get_stats_core`).
 
     async def get_tuning(self) -> dict:
-        """Read current RX tuning parameters from the device.
-
-        Returns ``{"rx_delay": int, "airtime_factor": int}`` — uint32 LE
-        values from the firmware's TUNING_PARAMS response.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.get_tuning()
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected get_tuning")
-        p = ev.payload
-        return {
-            "rx_delay": int(p["rx_delay"]),
-            "airtime_factor": int(p["airtime_factor"]),
-        }
+        from . import meshcore_client_radio as _radio
+        return await _radio.get_tuning(self)
 
     async def set_tuning(self, rx_delay: int, airtime_factor: int) -> None:
-        """Write RX tuning parameters to the device. Both values are
-        firmware uint32 LE; the schema layer validates the bounds.
-
-        Fires ``send_appstart`` after a successful write so the lib's
-        cached ``self_info`` reflects the new values — matches the
-        ``set_coords`` pattern.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_tuning(rx_delay, airtime_factor)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_tuning")
-            await mc.commands.send_appstart()
+        from . import meshcore_client_radio as _radio
+        await _radio.set_tuning(self, rx_delay, airtime_factor)
 
     async def set_radio(
         self,
@@ -688,66 +670,18 @@ class MeshCoreClient:
         *,
         wait_for_reconnect: bool = True,
     ) -> dict:
-        """Reconfigure the LoRa PHY.
-
-        Changing freq/bw/sf/cr detunes the device from every other node on
-        the previous preset AND can briefly drop the TCP companion socket
-        while the modem re-initialises. Mirroring the reboot path, we
-        release the lock after the command and block on
-        ``_wait_for_reconnect`` so the SPA's follow-up GET doesn't race
-        the modem warm-up.
-
-        Returns ``{"reconnected": bool}`` — False on timeout.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_radio(freq, bw, sf, cr)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_radio")
-            log.warning(
-                "RADIO ACTION=set_radio freq=%.3f bw=%.1f sf=%d cr=%d",
-                freq, bw, sf, cr,
-            )
-        # MUST release the lock before waiting for reconnect — the
-        # supervisor's reconnect path may acquire other internal locks,
-        # and holding ours would also serialize unrelated requests for
-        # up to _RECONNECT_WAIT_S.
-        reconnected = False
-        if wait_for_reconnect:
-            reconnected = await self._wait_for_reconnect(
-                timeout=self._RECONNECT_WAIT_S,
-            )
-        return {"reconnected": reconnected}
+        from . import meshcore_client_radio as _radio
+        return await _radio.set_radio(
+            self, freq, bw, sf, cr, wait_for_reconnect=wait_for_reconnect,
+        )
 
     async def set_tx_power(self, dbm: int) -> None:
-        """Set the LoRa TX power. Schema clamps to 0..22 dBm; firmware
-        further clamps to ``self_info.max_tx_power``.
-
-        Fires ``send_appstart`` after a successful write so the lib's
-        cached ``self_info.tx_power`` reflects the new value.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_tx_power(dbm)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_tx_power")
-            await mc.commands.send_appstart()
-        log.warning("RADIO ACTION=set_tx_power dbm=%d", dbm)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_tx_power(self, dbm)
 
     async def set_device_name(self, name: str) -> None:
-        """Rename the device. Persists to flash; takes effect immediately
-        in subsequent adverts.
-
-        Fires ``send_appstart`` after a successful write so the lib's
-        cached ``self_info.name`` reflects the new value.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_name(name)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_device_name")
-            await mc.commands.send_appstart()
-        log.warning("RADIO ACTION=set_device_name name=%s", name)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_device_name(self, name)
 
     async def set_telemetry_mode(
         self,
@@ -756,137 +690,40 @@ class MeshCoreClient:
         loc: int | None = None,
         env: int | None = None,
     ) -> None:
-        """Set one or more telemetry sub-mode values (each 0..3).
-
-        Pass only the modes you want to change; the lib re-uses the
-        existing values for the others by pre-reading self_info.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            if base is not None:
-                ev = await mc.commands.set_telemetry_mode_base(base)
-                if ev is None or ev.type == EventType.ERROR:
-                    raise RuntimeError("Device rejected set_telemetry_mode_base")
-            if loc is not None:
-                ev = await mc.commands.set_telemetry_mode_loc(loc)
-                if ev is None or ev.type == EventType.ERROR:
-                    raise RuntimeError("Device rejected set_telemetry_mode_loc")
-            if env is not None:
-                ev = await mc.commands.set_telemetry_mode_env(env)
-                if ev is None or ev.type == EventType.ERROR:
-                    raise RuntimeError("Device rejected set_telemetry_mode_env")
-            # All three setters internally re-post set_other_params which
-            # refreshes the same self_info bytes; explicit send_appstart
-            # keeps our cache truthful for the next /self-info GET.
-            await mc.commands.send_appstart()
-        log.warning(
-            "RADIO ACTION=set_telemetry_mode base=%s loc=%s env=%s",
-            base, loc, env,
-        )
+        from . import meshcore_client_radio as _radio
+        await _radio.set_telemetry_mode(self, base=base, loc=loc, env=env)
 
     async def set_manual_add_contacts(self, value: bool) -> None:
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_manual_add_contacts(value)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_manual_add_contacts")
-            await mc.commands.send_appstart()
-        log.warning("RADIO ACTION=set_manual_add_contacts value=%s", value)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_manual_add_contacts(self, value)
 
     async def set_advert_loc_policy(self, value: int) -> None:
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_advert_loc_policy(value)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_advert_loc_policy")
-            await mc.commands.send_appstart()
-        log.warning("RADIO ACTION=set_advert_loc_policy value=%d", value)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_advert_loc_policy(self, value)
 
     async def set_multi_acks(self, value: int) -> None:
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_multi_acks(value)
-            if ev is None or ev.type == EventType.ERROR:
-                raise RuntimeError("Device rejected set_multi_acks")
-            await mc.commands.send_appstart()
-        log.warning("RADIO ACTION=set_multi_acks value=%d", value)
-
-    # ----- Custom vars / time sync / BLE PIN (Task 2.3 / 2.4 / 2.5) -----
+        from . import meshcore_client_radio as _radio
+        await _radio.set_multi_acks(self, value)
 
     async def get_custom_vars(self) -> dict:
-        """Read firmware-defined custom variables.
-
-        Returns the dict the firmware advertises in CUSTOM_VARS — keys and
-        value types are firmware-specific and passed through verbatim. No
-        ``send_appstart`` afterwards: custom vars are not part of
-        ``self_info`` so the lib cache doesn't need a refresh.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.get_custom_vars()
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected get_custom_vars")
-        return dict(ev.payload or {})
+        from . import meshcore_client_radio as _radio
+        return await _radio.get_custom_vars(self)
 
     async def set_custom_var(self, key: str, value: Any) -> None:
-        """Write a firmware-defined custom variable.
-
-        Type of ``value`` is firmware-specific; pass-through to the lib.
-        We log the key but NOT the value because callers may stash
-        firmware-specific secrets (PIN-derived seeds, etc.) here.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_custom_var(key, value)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_custom_var")
-        log.warning("RADIO ACTION=set_custom_var key=%s", key)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_custom_var(self, key, value)
 
     async def get_device_time(self) -> int:
-        """Read the device's wall-clock epoch (seconds).
-
-        The lib's CURRENT_TIME parser emits ``{"time": int}`` but other
-        firmware builds have been observed to surface a bare int or a
-        dict keyed ``"epoch"`` — we tolerate all three shapes so a
-        firmware quirk doesn't break the /api/device/time skew readout.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.get_time()
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected get_time")
-        payload = ev.payload
-        if isinstance(payload, int):
-            return payload
-        if isinstance(payload, dict):
-            return int(payload.get("epoch") or payload.get("time") or 0)
-        return 0
+        from . import meshcore_client_radio as _radio
+        return await _radio.get_device_time(self)
 
     async def set_device_time(self, epoch: int) -> None:
-        """Push a wall-clock epoch (seconds) to the device.
-
-        Used to keep the radio's clock in sync with the host — the
-        firmware uses this to timestamp packets and order messages.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_time(epoch)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_time")
-        log.warning("RADIO ACTION=set_device_time epoch=%d", epoch)
+        from . import meshcore_client_radio as _radio
+        await _radio.set_device_time(self, epoch)
 
     async def set_ble_pin(self, pin: int) -> None:
-        """Set the BLE pairing PIN (write-only — firmware exposes no read).
-
-        Schema layer clamps to 0..999_999 (6-digit). We do NOT log the pin
-        value — only the action — so it doesn't end up in audit logs.
-        """
-        mc = await self._require_mc()
-        async with self._lock:
-            ev = await mc.commands.set_devicepin(pin)
-        if ev is None or ev.type == EventType.ERROR:
-            raise RuntimeError("Device rejected set_ble_pin")
-        log.warning("RADIO ACTION=set_ble_pin")  # NOTE: pin value omitted on purpose
+        from . import meshcore_client_radio as _radio
+        await _radio.set_ble_pin(self, pin)
 
     # Bound on how long device_partial_reset blocks waiting for the
     # supervisor to re-establish the TCP companion link after a reboot.
