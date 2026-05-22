@@ -210,15 +210,16 @@ async def test_trace_path_503_when_client_not_ready():
 
 
 @pytest.mark.asyncio
-async def test_trace_path_502_when_path_discovery_fails(client):
-    """The endpoint propagates RuntimeError from a failed path discovery as 502."""
+async def test_trace_path_502_when_path_unbuildable(client):
+    """A RuntimeError from trace_to (e.g. contact has no traceable path)
+    surfaces as 502."""
     fake = _make_client_override(
-        AsyncMock(side_effect=RuntimeError("trace_to: path discovery failed"))
+        AsyncMock(side_effect=RuntimeError("trace_to: could not build trace path"))
     )
     app.dependency_overrides[get_meshcore_client] = lambda: fake
     try:
         r = await client.post(f"/api/trace/{'cc' * 32}")
         assert r.status_code == 502
-        assert "path discovery" in r.json()["detail"]
+        assert "could not build" in r.json()["detail"]
     finally:
         app.dependency_overrides.pop(get_meshcore_client, None)

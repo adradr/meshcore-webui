@@ -1197,44 +1197,62 @@ class MeshCoreClient:
     def _build_trace_path(contact: dict, path_hash_len: int) -> str | None:
         """Construct the trace-path string for a repeater/room contact.
 
-        Mirrors meshcore-cli's `print_trace_to`
-        (docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810).
+        Adapts meshcore-cli's `print_trace_to`
+        (docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810)
+        with two deltas: comma-separated output (so it goes through the
+        lib's string parser without the "invalid path_hash_len" rejection
+        the concatenated form triggers) and a zero-hop fallback when
+        `out_path_len == -1` (just the destination pubkey prefix —
+        matches what the official mobile app sends when no stored path
+        exists; verified against PILISMETEOR over real RF).
 
-        Returns None when the contact has no stored path (`out_path_len == -1`)
-        — the caller must run `send_path_discovery_sync` first and rebuild
-        via `_build_trace_path_from_discovery`.
-
-        The resulting string is the symmetric out-and-back trace: the
-        destination's pubkey prefix sits at the centre, wrapped at front and
-        back by each intermediate hop's hash in reverse order. Without the
-        destination prefix the firmware would treat this as a broadcast probe.
+        Returns None only for user-type contacts (type != 2 and != 3)
+        with no usable out_path. Those can't be trace targets — the trace
+        needs SOMETHING for the firmware to route to.
         """
+        contact_type = contact.get("type", 0)
+        is_traceable_target = contact_type in (2, 3)
+        pubkey = contact.get("public_key", "") or ""
+
         path = contact.get("out_path", "") or ""
         path_len = contact.get("out_path_len", -1)
-        if path_len == -1:
-            return None
 
         # 3-byte hash mode requests a 2-byte path; mirror the CLI quirk.
-        if path_hash_len == 3:
+        # The dest_prefix below is sized against the post-rewrite
+        # path_hash_len so all elements stay the same width.
+        if path_hash_len == 3 and path_len > 0:
             path_hash_len = 2
             new_path = ""
             for i in range(0, path_len):
                 new_path += path[6 * (path_len - i - 1):6 * (path_len - i - 1) + 4]
             path = new_path
 
-        contact_type = contact.get("type", 0)
-        trace = ""
-        if contact_type in (2, 3):
-            pubkey = contact.get("public_key", "")
-            trace = pubkey[0:2 * path_hash_len]
+        dest_prefix = pubkey[0:2 * path_hash_len] if is_traceable_target else ""
 
+        # No stored path: zero-hop fallback to the dest prefix.
+        # For user-type contacts (type=1) we have no destination prefix
+        # to fall back to — they can't be the target of a trace.
+        if path_len == -1:
+            return dest_prefix or None
+
+        # Walk the path in reverse, wrapping the trace symmetrically with
+        # each hop on both sides. Use comma separators so the lib's string
+        # parser correctly derives path_hash_len from the first element.
+        parts: list[str] = []
+        if dest_prefix:
+            parts.append(dest_prefix)
         for i in range(0, path_len):
             start = 2 * path_hash_len * (path_len - i - 1)
             end = 2 * path_hash_len * (path_len - i)
             elem = path[start:end]
-            trace = elem if trace == "" else f"{elem}{trace}{elem}"
+            if not parts:
+                parts = [elem]
+            else:
+                # Wrap symmetrically — same shape as the CLI but expressed
+                # as a sequence rather than concatenated hex.
+                parts = [elem] + parts + [elem]
 
-        return trace
+        return ",".join(parts) if parts else None
 
     @staticmethod
     def _build_trace_path_from_discovery(
@@ -1284,17 +1302,24 @@ class MeshCoreClient:
     ) -> TracePathResult:
         """CLI-style directed trace to a known contact.
 
-        Returns the full TracePathResult (tag, flags, path_len, hops) so
-        callers can choose what to surface. Mirrors meshcore-cli's `trace`
-        when the contact has a stored out_path and `dtrace` when it
-        doesn't (out_path_len == -1).
+        Looks up the contact in `mc.contacts`, queries
+        `get_path_hash_mode` for the radio's hop-hash size, builds the
+        trace-path string via `_build_trace_path` (which handles both
+        the stored-out_path symmetric wrap and the zero-hop fallback
+        when no path is stored), then sends the trace and waits for the
+        TRACE_DATA echo through `send_trace`.
 
         Reference: docs/external/meshcore-cli-reference/meshcore_cli.py
-        (print_trace_to 1781-1810 / print_disc_trace_to 1821-1856).
+        (`print_trace_to` at 1781-1810). The CLI's `print_disc_trace_to`
+        (1821-1856) is intentionally NOT used — its
+        `send_path_discovery_sync` call doesn't get a reply on the
+        firmware build deployed in this fleet, so the zero-hop fallback
+        inside `_build_trace_path` is the better path. Confirmed against
+        HU-PE-PILISMETEOR over real RF (May 2026).
 
         Raises:
-            RuntimeError: contact unknown / path discovery failed / radio
-                reply malformed (→ 502 at API layer).
+            RuntimeError: contact unknown / can't build a usable path /
+                radio reply malformed (→ 502 at API layer).
             TimeoutError: no TRACE_DATA echo (→ 504).
             ConnectionError: radio link down (→ 503).
         """
@@ -1304,28 +1329,11 @@ class MeshCoreClient:
         if contact is None:
             raise RuntimeError(f"trace_to: unknown contact {pubkey[:8]}…")
 
-        # path_hash_len is fixed by the radio's path_hash_mode; mirror the
-        # CLI's `+1` convention (mode 0 → 1B hashes, etc).
         async with self._lock:
             path_hash_mode = await mc.commands.get_path_hash_mode()
         path_hash_len = int(path_hash_mode) + 1
 
-        out_path_len = contact.get("out_path_len", -1)
-        if out_path_len >= 0:
-            target_path = self._build_trace_path(contact, path_hash_len)
-        else:
-            # No stored path — discover first, then build from in/out paths
-            # (CLI's dtrace flow).
-            try:
-                disc_payload = await self.disc_path(pubkey)
-            except RuntimeError as e:
-                raise RuntimeError(
-                    f"trace_to: path discovery failed for {pubkey[:8]}…: {e}"
-                ) from e
-            target_path = self._build_trace_path_from_discovery(
-                contact, disc_payload, path_hash_len,
-            )
-
+        target_path = self._build_trace_path(contact, path_hash_len)
         if not target_path:
             raise RuntimeError(
                 f"trace_to: could not build trace path for {pubkey[:8]}…"

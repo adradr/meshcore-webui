@@ -241,22 +241,25 @@ class TestBuildTracePath:
         c = self._contact(
             pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3c", out_path_len=1,
         )
-        # i=0: elem = "3c", trace starts "ee" -> wraps to "3cee3c"
-        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3cee3c"
+        # i=0: elem = "3c", trace starts ["ee"] -> ["3c","ee","3c"]
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3c,ee,3c"
 
     def test_two_hop_repeater_symmetric(self):
         c = self._contact(
             pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3cb9", out_path_len=2,
         )
-        # i=0: elem = path[2:4] = "b9", trace was "ee" -> "b9eeb9"
-        # i=1: elem = path[0:2] = "3c", trace was "b9eeb9" -> "3cb9eeb93c"
-        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3cb9eeb93c"
+        # i=0: elem = path[2:4] = "b9", parts: ["ee"] -> ["b9","ee","b9"]
+        # i=1: elem = path[0:2] = "3c", parts: -> ["3c","b9","ee","b9","3c"]
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=1)
+            == "3c,b9,ee,b9,3c"
+        )
 
     def test_non_repeater_contact_no_destination_prefix(self):
         c = self._contact(
             pubkey="ee10f91c" + "00" * 28, type_=1, out_path="3c", out_path_len=1,
         )
-        # trace=="" before loop; i=0: elem="3c", trace becomes "3c"
+        # parts==[] before loop; i=0: elem="3c", parts becomes ["3c"]
         assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3c"
 
     def test_two_byte_hash_mode_uses_wider_slices(self):
@@ -265,17 +268,27 @@ class TestBuildTracePath:
             out_path="3cb91234", out_path_len=2,
         )
         # dest_prefix = "ee10" (2 bytes = 4 hex chars)
-        # i=0: elem = path[4:8] = "1234"; trace "ee10" -> "1234ee101234"
-        # i=1: elem = path[0:4] = "3cb9"; trace "1234ee101234" -> "3cb91234ee1012343cb9"
+        # i=0: elem = path[4:8] = "1234"; parts: ["ee10"] -> ["1234","ee10","1234"]
+        # i=1: elem = path[0:4] = "3cb9"; parts: -> ["3cb9","1234","ee10","1234","3cb9"]
         assert (
             MeshCoreClient._build_trace_path(c, path_hash_len=2)
-            == "3cb91234ee1012343cb9"
+            == "3cb9,1234,ee10,1234,3cb9"
         )
 
-    def test_returns_none_when_path_len_negative(self):
+    def test_path_len_negative_repeater_returns_dest_prefix_for_zero_hop_fallback(self):
         c = self._contact(
             pubkey="ee" + "00" * 31, type_=2, out_path="", out_path_len=-1,
         )
+        # Zero-hop fallback: just the destination pubkey prefix. Matches
+        # what the official mobile app sends when no stored path exists
+        # (verified against HU-PE-PILISMETEOR over real RF).
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "ee"
+
+    def test_path_len_negative_user_type_returns_none(self):
+        c = self._contact(
+            pubkey="aa" + "00" * 31, type_=1, out_path="", out_path_len=-1,
+        )
+        # type=1 (user) with no path → genuinely no trace target.
         assert MeshCoreClient._build_trace_path(c, path_hash_len=1) is None
 
     def test_three_byte_hash_mode_rewrites_to_two_byte(self):
@@ -295,12 +308,12 @@ class TestBuildTracePath:
         # dest_prefix at 2*2=4 hex chars: "ee10"
         # Walking new_path with path_hash_len=2:
         #   i=0: elem = path[4:8] = "3c11"
-        #        trace was "ee10" -> "3c11ee103c11"
+        #        parts: ["ee10"] -> ["3c11","ee10","3c11"]
         #   i=1: elem = path[0:4] = "b922"
-        #        trace -> "b9223c11ee103c11b922"
+        #        parts: -> ["b922","3c11","ee10","3c11","b922"]
         assert (
             MeshCoreClient._build_trace_path(c, path_hash_len=3)
-            == "b9223c11ee103c11b922"
+            == "b922,3c11,ee10,3c11,b922"
         )
 
     # --- _build_trace_path_from_discovery ---
@@ -386,48 +399,35 @@ class TestPingViaTrace:
 
         # No discovery — stored path was used directly.
         fake_mc.commands.send_path_discovery_sync.assert_not_called()
-        # send_trace called with the symmetric path string.
+        # send_trace called with the symmetric comma-separated path.
         call = fake_mc.commands.send_trace.call_args
-        assert call.kwargs["path"] == "3cee3c"
+        assert call.kwargs["path"] == "3c,ee,3c"
         assert isinstance(result, PingResult)
         assert result.snr_there == 11.5
         assert result.snr_back == 12.0
         assert result.path_len == 2
 
     @pytest.mark.asyncio
-    async def test_runs_discovery_when_out_path_unknown(self):
+    async def test_no_path_uses_zero_hop_fallback(self):
+        """When the contact has no stored out_path (out_path_len == -1),
+        trace_to should send a direct zero-hop trace using just the
+        destination's pubkey prefix — matching what the official mobile
+        app does (verified against HU-PE-PILISMETEOR over real RF).
+        No path discovery call should be made."""
         client = MeshCoreClient(host="x", port=5000)
         fake_mc = self._fake_mc_with_stored_path()
         pk = "ee10f91c" + "00" * 28
         fake_mc.contacts[pk]["out_path"] = ""
         fake_mc.contacts[pk]["out_path_len"] = -1
-        # Stub disc_path via send_path_discovery_sync since that's what
-        # disc_path wraps. The lib returns an Event with the payload.
-        disc_ev = MagicMock()
-        disc_ev.is_error = MagicMock(return_value=False)
-        disc_ev.payload = {"in_path": "3c", "out_path": "b9"}
-        fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=disc_ev)
         client._mc = fake_mc
 
-        result = await client.ping_via_trace(pk)
+        await client.ping_via_trace(pk)
 
-        fake_mc.commands.send_path_discovery_sync.assert_awaited_once()
+        # No discovery — zero-hop fallback was used.
+        assert not hasattr(fake_mc.commands.send_path_discovery_sync, "called") \
+            or not fake_mc.commands.send_path_discovery_sync.called
         call = fake_mc.commands.send_trace.call_args
-        # Discovery format is comma-separated: out + dest + in.
-        assert call.kwargs["path"] == "b9,ee,3c"
-        assert result.snr_there == 11.5
-
-    @pytest.mark.asyncio
-    async def test_raises_when_discovery_fails(self):
-        client = MeshCoreClient(host="x", port=5000)
-        fake_mc = self._fake_mc_with_stored_path()
-        pk = "ee10f91c" + "00" * 28
-        fake_mc.contacts[pk]["out_path"] = ""
-        fake_mc.contacts[pk]["out_path_len"] = -1
-        fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=None)
-        client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="path discovery"):
-            await client.ping_via_trace(pk)
+        assert call.kwargs["path"] == "ee"  # just the dest prefix
 
     @pytest.mark.asyncio
     async def test_raises_when_contact_not_in_dict(self):
