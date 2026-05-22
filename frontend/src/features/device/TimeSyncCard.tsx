@@ -5,7 +5,13 @@
  *   <TimeSyncCard />
  */
 import { useQueryClient } from "@tanstack/react-query"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useDeviceTime, useSyncDeviceTime } from "./behaviourQueries"
@@ -34,8 +40,23 @@ export function TimeSyncCard() {
 
   return (
     <Card>
-      <CardHeader className="space-y-0 pb-4">
+      <CardHeader className="space-y-1 pb-4">
         <CardTitle className="text-base">Time sync</CardTitle>
+        <CardDescription className="text-xs">
+          The device clock stamps every outgoing advert and is used to order
+          last-heard timestamps for contacts. If you see negative or pre-2020
+          values in the contacts list, the device clock is not synced — push
+          the server time to fix it.{" "}
+          <a
+            href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            MeshCore FAQ
+          </a>
+          .
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isLoading ? (

@@ -5,8 +5,8 @@
  *   0 = Off, 1 = Owner only, 2 = Starred contacts, 3 = All contacts
  *
  * NOTE: These labels follow MeshCore community convention as of 2026 and
- * may not match all firmware builds. Verify against your firmware at
- * docs.meshcore.dev/telemetry before deploying. Flag any discrepancies.
+ * may not match all firmware builds. Verify against your firmware via the
+ * MeshCore payloads reference before deploying. Flag any discrepancies.
  *
  * Usage:
  *   <TelemetryCard selfInfo={data} />
@@ -180,12 +180,12 @@ export function TelemetryCard({ selfInfo, isLoading }: Props) {
               Labels follow MeshCore community convention — verify against your
               firmware.{" "}
               <a
-                href="https://docs.meshcore.dev/telemetry"
+                href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/payloads.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-foreground"
               >
-                docs.meshcore.dev/telemetry
+                MeshCore payloads reference
               </a>
             </p>
             <div className="flex justify-end gap-2 pt-1">

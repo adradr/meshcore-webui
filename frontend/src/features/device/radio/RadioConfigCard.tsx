@@ -6,7 +6,13 @@
  */
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -104,8 +110,24 @@ export function RadioConfigCard() {
 
   return (
     <Card>
-      <CardHeader className="space-y-0 pb-4">
+      <CardHeader className="space-y-1 pb-4">
         <CardTitle className="text-base">Radio Configuration</CardTitle>
+        <CardDescription className="text-xs">
+          Frequency, bandwidth, spreading factor, and coding rate must match
+          every node you want to hear — picking the wrong preset silently
+          isolates this device from the local mesh. Use the regional defaults
+          listed by the community for your area, then only switch to Custom if
+          you know what you are doing.{" "}
+          <a
+            href="https://meshcore.co.uk/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
+          >
+            meshcore.co.uk
+          </a>
+          .
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
         {isLoading ? (

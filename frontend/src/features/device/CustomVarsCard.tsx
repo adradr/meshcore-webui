@@ -11,7 +11,13 @@
  */
 import { useState } from "react"
 import { X } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -128,19 +134,36 @@ export function CustomVarsCard() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">Custom variables</CardTitle>
-        {!addingRow && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => setAddingRow(true)}
-            aria-label="Add custom variable"
+      <CardHeader className="space-y-1">
+        <div className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">Custom variables</CardTitle>
+          {!addingRow && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setAddingRow(true)}
+              aria-label="Add custom variable"
+            >
+              Add
+            </Button>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          Firmware-specific key/value overrides — typically used for radio
+          tuning offsets or build-time toggles exposed by a particular firmware
+          fork. Unknown keys are accepted silently, and a typo will not raise
+          an error, so verify the key name against your firmware's source.{" "}
+          <a
+            href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/index.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
           >
-            Add
-          </Button>
-        )}
+            MeshCore docs
+          </a>
+          .
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {isLoading ? (

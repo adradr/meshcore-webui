@@ -391,6 +391,98 @@ describe("TimeSyncCard — render", () => {
 })
 
 // ===========================================================================
+// Help text + external link smoke tests (Task 10)
+// Each card we touched in the help-text pass advertises an external doc link
+// — make sure the link semantics stay accessible (target=_blank + rel) and
+// the descriptive copy survives future edits.
+// ===========================================================================
+
+function assertExternalLink(
+  link: HTMLAnchorElement,
+  hrefPattern: RegExp,
+) {
+  expect(link.getAttribute("target")).toBe("_blank")
+  expect(link.getAttribute("rel") ?? "").toMatch(/noopener/)
+  expect(link.getAttribute("rel") ?? "").toMatch(/noreferrer/)
+  expect(link.getAttribute("href") ?? "").toMatch(hrefPattern)
+}
+
+describe("Help text + external links", () => {
+  it("IdentityCard renders identity/keypair help text and packet-format link", () => {
+    render(<IdentityCard selfInfo={MOCK_SELF_INFO} isLoading={false} />)
+    expect(
+      screen.getByText(/keypair|permanent mesh identity/i),
+    ).toBeTruthy()
+    const link = screen.getByRole("link", { name: /packet format/i })
+    assertExternalLink(
+      link as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore/,
+    )
+  })
+
+  it("BehaviourTab renders an intro paragraph linking to the MeshCore FAQ", () => {
+    render(<BehaviourTab />)
+    expect(screen.getAllByText(/behavioural|persistent config/i).length).toBeGreaterThan(0)
+    const faq = screen.getAllByRole("link", { name: /meshcore faq/i })[0]
+    assertExternalLink(
+      faq as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore/,
+    )
+  })
+
+  it("BlePinCard renders BLE-pairing help text", () => {
+    render(<BlePinCard />)
+    expect(screen.getByText(/bluetooth low energy|over LoRa/i)).toBeTruthy()
+  })
+
+  it("CustomVarsCard renders firmware-overrides help text and MeshCore docs link", () => {
+    render(<CustomVarsCard />)
+    expect(screen.getByText(/firmware-specific|overrides/i)).toBeTruthy()
+    const link = screen.getByRole("link", { name: /meshcore docs/i })
+    assertExternalLink(
+      link as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore/,
+    )
+  })
+
+  it("TelemetryCard edit-mode footnote now links to the MeshCore payloads reference", async () => {
+    render(<TelemetryCard selfInfo={MOCK_SELF_INFO} isLoading={false} />)
+    await userEvent.click(
+      screen.getByRole("button", { name: /edit telemetry modes/i }),
+    )
+    const link = screen.getByRole("link", {
+      name: /meshcore payloads reference/i,
+    })
+    assertExternalLink(
+      link as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore.*payloads\.md/,
+    )
+  })
+
+  it("TimeSyncCard renders clock-skew help text and links to the FAQ", () => {
+    render(<TimeSyncCard />)
+    expect(screen.getByText(/last-heard|device clock/i)).toBeTruthy()
+    const link = screen.getByRole("link", { name: /meshcore faq/i })
+    assertExternalLink(
+      link as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore/,
+    )
+  })
+
+  it("AdvertPolicyCard renders advert-tradeoff help text and links to payloads.md", () => {
+    render(<AdvertPolicyCard selfInfo={MOCK_SELF_INFO} isLoading={false} />)
+    expect(screen.getByText(/beacons|airtime|easier to track/i)).toBeTruthy()
+    const link = screen.getByRole("link", {
+      name: /meshcore payloads reference/i,
+    })
+    assertExternalLink(
+      link as HTMLAnchorElement,
+      /github\.com\/meshcore-dev\/MeshCore.*payloads\.md/,
+    )
+  })
+})
+
+// ===========================================================================
 // BehaviourTab integration — all 6 cards render
 // ===========================================================================
 

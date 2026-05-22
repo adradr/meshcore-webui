@@ -5,7 +5,13 @@
  *   <IdentityCard selfInfo={data} />
  */
 import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -58,19 +64,37 @@ export function IdentityCard({ selfInfo, isLoading }: Props) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">Identity</CardTitle>
-        {!editing && !isLoading && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={startEdit}
-            aria-label="Edit device name"
+      <CardHeader className="space-y-1">
+        <div className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">Identity</CardTitle>
+          {!editing && !isLoading && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={startEdit}
+              aria-label="Edit device name"
+            >
+              Edit
+            </Button>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          The advertised name and Ed25519 public key that identify this node on
+          the mesh. The public key is the permanent mesh identity — peers
+          remember it across reboots, so changing the name does not change who
+          you are. A factory reset wipes the keypair and you appear as a brand
+          new node.{" "}
+          <a
+            href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/packet_format.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
           >
-            Edit
-          </Button>
-        )}
+            MeshCore packet format
+          </a>
+          .
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {isLoading ? (

@@ -8,7 +8,13 @@
  *   <BlePinCard />
  */
 import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -44,19 +50,28 @@ export function BlePinCard() {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">BLE pairing PIN</CardTitle>
-        {!open && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => setOpen(true)}
-            aria-label="Set BLE PIN"
-          >
-            Set PIN
-          </Button>
-        )}
+      <CardHeader className="space-y-1">
+        <div className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">BLE pairing PIN</CardTitle>
+          {!open && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setOpen(true)}
+              aria-label="Set BLE PIN"
+            >
+              Set PIN
+            </Button>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          Only relevant when pairing a mobile or laptop client to this node
+          over Bluetooth Low Energy — it is never transmitted over the LoRa
+          mesh and never read back from the device. Setting a new PIN
+          invalidates existing BLE bonds, so previously paired clients must
+          re-pair.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {!open ? (

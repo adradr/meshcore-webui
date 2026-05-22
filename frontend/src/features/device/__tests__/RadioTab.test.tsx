@@ -85,6 +85,22 @@ beforeEach(() => {
 })
 
 // ---------------------------------------------------------------------------
+// Help text + external link (Task 10)
+// ---------------------------------------------------------------------------
+
+describe("RadioConfigCard — help text + external link", () => {
+  it("renders mesh-compatibility help text and links to meshcore.co.uk", () => {
+    render(<RadioTab />)
+    expect(screen.getByText(/match every node|silently isolates/i)).toBeTruthy()
+    const link = screen.getByRole("link", { name: /meshcore\.co\.uk/i })
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(link.getAttribute("rel") ?? "").toMatch(/noopener/)
+    expect(link.getAttribute("rel") ?? "").toMatch(/noreferrer/)
+    expect(link.getAttribute("href") ?? "").toMatch(/meshcore\.co\.uk/)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Readout rendering
 // ---------------------------------------------------------------------------
 

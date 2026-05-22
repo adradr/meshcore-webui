@@ -19,7 +19,7 @@ import { MutedList } from "@/features/mutes/MutedList"
 import { PushModeRadio } from "@/features/push/PushModeRadio"
 import { DangerZone } from "@/features/admin/DangerZone"
 
-const REPO_URL = "https://github.com/randomicon/meshcore-webui"
+const REPO_URL = "https://github.com/adradr/meshcore-webui"
 
 const THEME_OPTIONS: ReadonlyArray<{
   value: Theme

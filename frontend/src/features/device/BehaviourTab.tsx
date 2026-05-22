@@ -25,6 +25,22 @@ export function BehaviourTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted-foreground">
+        Behavioural settings control how this node identifies itself, what it
+        reports to peers, and how it pairs with mobile clients. Changes here
+        write to the device's persistent config and take effect on the next
+        radio interaction — they do not require a reboot. For background on the
+        protocol, see the{" "}
+        <a
+          href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/faq.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-foreground"
+        >
+          MeshCore FAQ
+        </a>
+        .
+      </p>
       <IdentityCard selfInfo={selfInfo} isLoading={isLoading} />
       <TelemetryCard selfInfo={selfInfo} isLoading={isLoading} />
       <AdvertPolicyCard selfInfo={selfInfo} isLoading={isLoading} />

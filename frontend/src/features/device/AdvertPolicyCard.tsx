@@ -10,7 +10,13 @@
  *   <AdvertPolicyCard selfInfo={data} />
  */
 import { useState } from "react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -80,19 +86,37 @@ export function AdvertPolicyCard({ selfInfo, isLoading }: Props) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">Advert + ack policy</CardTitle>
-        {!editing && !isLoading && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={startEdit}
-            aria-label="Edit advert policy"
+      <CardHeader className="space-y-1">
+        <div className="flex flex-row items-center justify-between gap-2">
+          <CardTitle className="text-base">Advert + ack policy</CardTitle>
+          {!editing && !isLoading && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={startEdit}
+              aria-label="Edit advert policy"
+            >
+              Edit
+            </Button>
+          )}
+        </div>
+        <CardDescription className="text-xs">
+          Controls how often this node beacons its presence and how aggressively
+          it acks received packets. More frequent adverts make the node easier
+          to discover and route to, but also make it easier to track and
+          consume more airtime. The values are firmware-defined enums — consult
+          your firmware build before tweaking.{" "}
+          <a
+            href="https://github.com/meshcore-dev/MeshCore/blob/main/docs/payloads.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:text-foreground"
           >
-            Edit
-          </Button>
-        )}
+            MeshCore payloads reference
+          </a>
+          .
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {isLoading ? (
