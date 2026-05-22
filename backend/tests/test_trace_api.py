@@ -20,10 +20,14 @@ from app.main import app
 from app.services.meshcore_client import TraceHop, TracePathResult
 
 
-def _make_client_override(send_trace_impl):
-    """Build a stand-in MeshCoreClient with just ``send_trace`` stubbed."""
+def _make_client_override(send_trace_impl, *, advert_path: str | None = None):
+    """Build a stand-in MeshCoreClient with `send_trace` + the new
+    `get_advert_path` stubbed. The trace endpoint resolves the peer's
+    path first; default to None (broadcast trace fallback) unless a
+    test wants to exercise the directed-path branch."""
     fake_client = MagicMock()
     fake_client.send_trace = send_trace_impl
+    fake_client.get_advert_path = AsyncMock(return_value=advert_path)
     return fake_client
 
 

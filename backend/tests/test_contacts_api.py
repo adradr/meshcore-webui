@@ -171,14 +171,37 @@ async def test_telemetry_returns_dict(client):
 
 
 @pytest.mark.asyncio
-async def test_ping_returns_status(client):
+async def test_ping_returns_round_trip(client):
+    """POST /api/contacts/{pk}/ping is now a *directed trace* under
+    the hood — the same RF primitive the official MeshCore app's
+    "Ping" button uses. It returns round-trip duration + per-direction
+    SNR + the full hop list, NOT a STATUS_RESPONSE payload (which
+    repeaters typically don't even send)."""
+    from app.services.meshcore_client import PingResult, TraceHop
+
     mc = _install_mock_client()
-    mc.req_status = AsyncMock(return_value={"uptime": 12345, "tag": "abc"})
+    mc.ping_via_trace = AsyncMock(
+        return_value=PingResult(
+            duration_ms=1125,
+            snr_there=11.5,
+            snr_back=12.0,
+            hops=[TraceHop(hash="ab", snr=11.5), TraceHop(hash="cd", snr=12.0)],
+            path_len=2,
+        ),
+    )
     try:
         r = await client.post(f"/api/contacts/{PK}/ping")
-        assert r.status_code == 200
-        assert r.json() == {"uptime": 12345, "tag": "abc"}
-        mc.req_status.assert_awaited_once_with(PK)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["duration_ms"] == 1125
+        assert body["snr_there"] == 11.5
+        assert body["snr_back"] == 12.0
+        assert body["path_len"] == 2
+        assert body["hops"] == [
+            {"hash": "ab", "snr": 11.5},
+            {"hash": "cd", "snr": 12.0},
+        ]
+        mc.ping_via_trace.assert_awaited_once_with(PK)
     finally:
         _uninstall_mock_client()
 

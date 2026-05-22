@@ -45,17 +45,22 @@ async def trace_path(
     client: MeshCoreClient = Depends(get_meshcore_client),
     db: AsyncSession = Depends(get_db),
 ) -> TraceOut:
-    """Broadcast a TRACE and return the hops the packet traversed.
+    """Trace the route to a specific peer.
 
-    Each hop's 1-byte ``hash`` is best-effort resolved against the local
-    ``contacts`` table so the UI can render names / positions for known
-    repeaters without an extra round-trip. See ``trace_resolver`` for the
-    one-match / many-match / no-match semantics.
+    Looks up the peer's advert path from the firmware and fires a
+    DIRECTED trace through that path; the destination echoes the
+    packet back, so the resulting hop list captures both outbound and
+    return SNRs. When no advert path is known the call falls back to
+    a broadcast trace so the UI still gets a useful topology snapshot.
+
+    Each hop's hash is best-effort resolved against the local
+    ``contacts`` table for friendly names — see ``trace_resolver``.
     """
     log.info("Trace requested by UI for target pubkey=%s", pubkey)
 
     try:
-        result = await client.send_trace()
+        target_path = await client.get_advert_path(pubkey)
+        result = await client.send_trace(target_path=target_path)
     except TimeoutError as e:
         # send_trace ack'd but TRACE_DATA never arrived — surface as gateway timeout.
         raise HTTPException(status_code=504, detail=str(e)) from e

@@ -97,10 +97,31 @@ class TraceHop:
 
 @dataclass(frozen=True)
 class TracePathResult:
-    """Structured result of a send_trace request."""
+    """Structured result of a send_trace request.
+
+    For a directed trace, `hops` is the route the packet traversed AND
+    the destination's echo path back; the last hop carries the receive
+    SNR our radio observed for the returning packet (SNR-back). The
+    sum of hop air-times approximates round-trip latency.
+    """
     tag: int
     flags: int
     hops: list[TraceHop]
+    path_len: int
+
+
+@dataclass(frozen=True)
+class PingResult:
+    """Result of a "ping" — what the official MeshCore app surfaces as
+    "Ping Success". Implemented as a directed trace under the hood:
+    the trace echoes off the destination and the round-trip data we
+    care about is one-hop SNRs in both directions plus the elapsed
+    wall-clock time.
+    """
+    duration_ms: int
+    snr_there: float | None  # the destination's receive SNR (forward)
+    snr_back: float | None   # our radio's receive SNR on the echo
+    hops: list[TraceHop]     # full traversed path for diagnostics
     path_len: int
 
 
@@ -931,20 +952,23 @@ class MeshCoreClient:
             return dict(res) if hasattr(res, "items") else {"data": res}
 
     async def req_status(self, pubkey: str, *, max_wait: float | None = None) -> dict:
+        """STATUS request — the firmware's `BinaryReqType.STATUS` op.
+
+        NOTE: most repeater firmwares don't reply to STATUS requests.
+        For the "is this peer reachable, what's the SNR?" UX (what
+        the official MeshCore app surfaces as **"Ping"**), use
+        `directed_trace` instead — it does a `send_trace` along the
+        peer's advert path, gets a TRACE_DATA echo back, and returns
+        round-trip + SNR-there + SNR-back data. STATUS_RESPONSE is
+        the right primitive for nodes that publish battery / uptime
+        / queue depth, not the right primitive for "ping".
+        """
         mc = await self._require_mc()
         cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         async with self._lock:
-            # DIAGNOSTIC PROBE: force a 30s min_timeout to test whether
-            # the firmware's ~7s suggested_timeout is cutting off legit
-            # flood replies. If this makes pings to PILISMETEOR succeed,
-            # the fix is to bump min_timeout permanently. If it still
-            # times out at 30s, the reply genuinely isn't arriving and
-            # the problem is elsewhere (filter mismatch, RF, etc.).
             res = await self._req_with_firmware_timeout(
                 "req_status", pubkey,
-                lambda: mc.commands.req_status_sync(
-                    pubkey, timeout=0, min_timeout=30,
-                ),
+                lambda: mc.commands.req_status_sync(pubkey, timeout=0),
                 max_wait=cap,
             )
             if res is None:
@@ -1062,21 +1086,61 @@ class MeshCoreClient:
             if hasattr(r, "is_error") and r.is_error():
                 raise RuntimeError(r.payload)
 
-    async def send_trace(self, *, timeout: float = 60.0) -> TracePathResult:
-        """Send a trace packet and wait for the TRACE_DATA response.
+    async def get_advert_path(self, pubkey: str) -> str | None:
+        """Ask the firmware for the most recent advert path it has for
+        a peer. Returns the comma-separated hex repeater-hash string
+        expected by `mc.commands.send_trace(path=...)`, or None when
+        the firmware has no path stored (peer never heard or only
+        heard via flood).
 
-        Trace is a one-shot broadcast — there's no explicit destination.
-        Each hop along the path reports back the SNR at which IT received
-        the previous transmission, plus the first byte of its own pubkey.
+        This is the foundation of the official MeshCore "Ping" feature:
+        the app calls this first to learn HOW to reach the peer, then
+        issues a directed trace through that path. The path is NOT
+        part of the `mc.contacts` payload — `out_path` in the contact
+        dict is the radio's OUT route, which is often empty (`-1`)
+        even when an advert path exists.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.get_advert_path(pubkey)
+        if ev is None or ev.type == EventType.ERROR:
+            return None
+        p = ev.payload or {}
+        # The reader stores the path bytes as a single hex string; the
+        # send_trace lib API wants comma-separated hex hashes (one per
+        # repeater). path_hash_mode tells us the hash size in bytes:
+        # 0 -> 1B, 1 -> 2B, 2 -> 4B, 3 -> 8B per hop. path_len is the
+        # number of hops.
+        path_hex = p.get("path") or ""
+        path_len = p.get("path_len", 0)
+        hash_mode = p.get("path_hash_mode", 0)
+        if not path_hex or path_len <= 0:
+            return None
+        hash_bytes = 1 << max(0, hash_mode)
+        chars = hash_bytes * 2
+        # Split the hex string into chunks of `chars` per hop, take
+        # only `path_len` hops (the firmware sometimes zero-pads).
+        hops = [path_hex[i : i + chars] for i in range(0, path_len * chars, chars)]
+        return ",".join(h for h in hops if h)
 
-        Default wait raised to 60s (bugfix 3): a flood-trace through a
-        dense mesh routinely takes 30–45s to come back as repeaters
-        respect their duty-cycle floors. The previous 15s default
-        timed out a large fraction of legitimate traces.
+    async def send_trace(
+        self,
+        *,
+        target_path: str | None = None,
+        timeout: float = 60.0,
+    ) -> TracePathResult:
+        """Send a TRACE packet and wait for the TRACE_DATA response.
 
-        Returns a TracePathResult describing the path travelled. Raises
-        RuntimeError if not connected or the device didn't ack the send,
-        TimeoutError if no TRACE_DATA arrives within `timeout` seconds.
+        When `target_path` is None this is a broadcast/flood probe —
+        every reachable repeater forwards once and reports back, giving
+        the radio a mesh topology snapshot. When `target_path` is a
+        comma-separated hex string of repeater hashes the trace is
+        DIRECTED through that specific chain to a single destination,
+        and the destination echoes back through the reverse path. The
+        returned hops include both directions.
+
+        Default wait of 60s accommodates flood-traces; directed traces
+        typically return in 0.5–2 s.
         """
         if self._mc is None:
             raise RuntimeError("MeshCore not connected")
@@ -1102,7 +1166,7 @@ class MeshCoreClient:
 
         try:
             ack = await self._mc.commands.send_trace(
-                auth_code=0, tag=tag, flags=None, path=None
+                auth_code=0, tag=tag, flags=None, path=target_path,
             )
         except BaseException:
             waiter.cancel()
@@ -1134,4 +1198,40 @@ class MeshCoreClient:
             flags=int(p.get("flags", 0)),
             hops=hops,
             path_len=int(p.get("path_len", len(hops))),
+        )
+
+    async def ping_via_trace(
+        self,
+        pubkey: str,
+        *,
+        timeout: float = 60.0,
+    ) -> PingResult:
+        """The official MeshCore "Ping" feature, faithfully.
+
+        Resolves the peer's advert path, sends a directed TRACE through
+        that path, and reports round-trip duration plus the SNR
+        observed at the first hop in each direction. Falls back to a
+        flood trace when `get_advert_path` returns no path — in that
+        case `snr_there` / `snr_back` may be `None`.
+
+        Raises ConnectionError / RuntimeError / TimeoutError mirroring
+        `send_trace`; the API layer translates these to 503 / 502 / 504.
+        """
+        target_path = await self.get_advert_path(pubkey)
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        result = await self.send_trace(target_path=target_path, timeout=timeout)
+        elapsed_ms = int((loop.time() - t0) * 1000)
+        # For a directed trace, the first hop's SNR is what the first
+        # repeater on the outbound path observed; the last hop's SNR is
+        # what OUR radio observed on the returning echo. Mirror what
+        # the official app surfaces as "SNR there" / "SNR back".
+        snr_there: float | None = result.hops[0].snr if result.hops else None
+        snr_back: float | None = result.hops[-1].snr if result.hops else None
+        return PingResult(
+            duration_ms=elapsed_ms,
+            snr_there=snr_there,
+            snr_back=snr_back,
+            hops=result.hops,
+            path_len=result.path_len,
         )

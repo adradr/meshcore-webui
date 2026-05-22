@@ -137,8 +137,27 @@ async def telemetry(pubkey: str, request: Request) -> dict:
 
 @router.post("/{pubkey}/ping")
 async def ping(pubkey: str, request: Request) -> dict:
+    """Ping a peer the way the official MeshCore app does it.
+
+    Implemented as a *directed trace*: look up the peer's advert path,
+    fire a TRACE through that path, capture the echo's round-trip. The
+    response carries `duration_ms`, `snr_there`, `snr_back`, and the
+    full hop list so the UI can mirror the official "Ping Success"
+    presentation.
+
+    Repeaters and many node types don't reply to STATUS requests, so
+    `req_status` is the wrong primitive for "is this peer reachable?".
+    Trace-echo is what works in the field.
+    """
     client = _require_client(request)
-    return await _call(client.req_status(pubkey))
+    result = await _call(client.ping_via_trace(pubkey))
+    return {
+        "duration_ms": result.duration_ms,
+        "snr_there": result.snr_there,
+        "snr_back": result.snr_back,
+        "path_len": result.path_len,
+        "hops": [{"hash": h.hash, "snr": h.snr} for h in result.hops],
+    }
 
 
 @router.post("/{pubkey}/acl")
