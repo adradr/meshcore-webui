@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { matchPreset, RADIO_PRESETS } from "../radioPresets"
+import {
+  availableRegions,
+  matchPreset,
+  presetsByRegion,
+  RADIO_PRESETS,
+} from "../radioPresets"
 
 describe("matchPreset", () => {
   it("returns the EU 868 public preset for matching config", () => {
@@ -47,5 +52,53 @@ describe("matchPreset", () => {
   it("returns null for a config not in the presets table", () => {
     const result = matchPreset({ freq: 999.999, bw: 500, sf: 8, cr: 7 })
     expect(result).toBeNull()
+  })
+})
+
+describe("preset metadata", () => {
+  it("every preset has a non-empty humanLabel and description", () => {
+    for (const preset of RADIO_PRESETS) {
+      expect(preset.humanLabel.length).toBeGreaterThan(0)
+      expect(preset.description.length).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe("presetsByRegion", () => {
+  it("groups every preset under its declared region", () => {
+    const grouped = presetsByRegion()
+    let total = 0
+    for (const region of Object.keys(grouped) as (keyof typeof grouped)[]) {
+      for (const preset of grouped[region]) {
+        expect(preset.region).toBe(region)
+        total += 1
+      }
+    }
+    expect(total).toBe(RADIO_PRESETS.length)
+  })
+
+  it("EU has both eu_868_pub and eu_868_alt", () => {
+    const grouped = presetsByRegion()
+    const ids = grouped.EU.map((p) => p.id)
+    expect(ids).toContain("eu_868_pub")
+    expect(ids).toContain("eu_868_alt")
+  })
+
+  it("Global region contains iso_433", () => {
+    const grouped = presetsByRegion()
+    expect(grouped.Global.map((p) => p.id)).toContain("iso_433")
+  })
+})
+
+describe("availableRegions", () => {
+  it("lists regions in first-appearance order from RADIO_PRESETS", () => {
+    const regions = availableRegions()
+    expect(regions[0]).toBe("EU")
+    expect(regions).toContain("Global")
+  })
+
+  it("has no duplicates", () => {
+    const regions = availableRegions()
+    expect(new Set(regions).size).toBe(regions.length)
   })
 })

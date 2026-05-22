@@ -85,6 +85,25 @@ beforeEach(() => {
 })
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Switch to the US region via the Region picker so the single US 915
+ * preset gets auto-applied. Returns once the readout reflects the new freq.
+ */
+async function selectUsRegion(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByTestId("region-picker-trigger"))
+  const usItem = await screen.findByTestId("region-item-US")
+  await user.click(usItem)
+  await waitFor(() => {
+    expect(screen.getByTestId("radio-readout").textContent).toMatch(
+      /910\.525\s*MHz/,
+    )
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Help text + external link (Task 10)
 // ---------------------------------------------------------------------------
 
@@ -107,7 +126,6 @@ describe("RadioConfigCard — help text + external link", () => {
 describe("RadioTab — readout line", () => {
   it("renders the big Geist Mono readout with the radio data", () => {
     render(<RadioTab />)
-    // Target the specific readout paragraph via testid
     const readout = screen.getByTestId("radio-readout")
     expect(readout.textContent).toMatch(/869\.525/)
     expect(readout.textContent).toMatch(/BW/)
@@ -119,7 +137,6 @@ describe("RadioTab — readout line", () => {
 
   it("renders the derived metrics line (airtime, data rate, sensitivity)", () => {
     render(<RadioTab />)
-    // Target the metrics line by testid
     const metricsLine = screen.getByTestId("radio-metrics")
     expect(metricsLine.textContent).toMatch(/airtime/i)
     expect(metricsLine.textContent).toMatch(/kbps/)
@@ -128,82 +145,103 @@ describe("RadioTab — readout line", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Preset selection
+// Region → Profile selection
 // ---------------------------------------------------------------------------
 
-describe("RadioTab — preset selection", () => {
-  it("renders all 8 presets plus the Custom tile", () => {
+describe("RadioTab — region + profile selection", () => {
+  it("seeds the region from the readout (EU) and renders EU profile tiles", () => {
     render(<RadioTab />)
-    // Spot-check a few preset labels via testids
-    expect(screen.getByTestId("preset-tile-eu_868_pub")).toBeTruthy()
-    expect(screen.getByTestId("preset-tile-us_915_pub")).toBeTruthy()
-    expect(screen.getByTestId("preset-tile-custom")).toBeTruthy()
-    // Total: 8 presets + 1 custom
-    const allRadioItems = screen.getAllByRole("radio")
-    expect(allRadioItems.length).toBe(9)
+    expect(screen.getByTestId("region-picker-trigger")).toBeTruthy()
+    // Both EU presets visible
+    expect(screen.getByTestId("profile-tile-eu_868_pub")).toBeTruthy()
+    expect(screen.getByTestId("profile-tile-eu_868_alt")).toBeTruthy()
   })
 
-  it("clicking a different preset updates the readout", async () => {
+  it("switching region to US auto-selects the only US preset and updates the readout", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    // click the tile (the label or the radio item within)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    // 910.525 MHz for US 915 preset
+    await selectUsRegion(user)
+    // After auto-selection the US 915 profile tile is rendered
     await waitFor(() => {
-      expect(screen.getByText(/910\.525\s*MHz/i)).toBeTruthy()
+      expect(screen.getByTestId("profile-tile-us_915_pub")).toBeTruthy()
     })
   })
 
-  it("active preset tile is visually selected (aria-checked or data-state)", () => {
+  it("clicking a different profile tile within the same region updates the readout", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // eu_868_pub is active by default; the RadioGroupItem should be checked
-    const eu868Radio = screen.getByRole("radio", { name: /EU 868 — public/i })
-    expect(eu868Radio).toBeTruthy()
-    // Radix marks the checked item with data-state=checked
-    expect(eu868Radio.getAttribute("data-state") === "checked" ||
-      eu868Radio.getAttribute("aria-checked") === "true").toBe(true)
+    // EU 868 alt = 868.100 MHz
+    await user.click(screen.getByTestId("profile-tile-eu_868_alt"))
+    await waitFor(() => {
+      expect(screen.getByTestId("radio-readout").textContent).toMatch(
+        /868\.1\s*MHz/,
+      )
+    })
+  })
+
+  it("the matching profile tile is marked checked", () => {
+    render(<RadioTab />)
+    const radio = screen.getByRole("radio", { name: /Public — Long Range/i })
+    expect(
+      radio.getAttribute("data-state") === "checked" ||
+        radio.getAttribute("aria-checked") === "true",
+    ).toBe(true)
   })
 })
 
 // ---------------------------------------------------------------------------
-// Custom mode / Advanced disclosure
+// Custom toggle + Advanced disclosure
 // ---------------------------------------------------------------------------
 
-describe("RadioTab — Advanced disclosure", () => {
-  it("disclosure is closed when a matching preset is active", () => {
+describe("RadioTab — Custom toggle", () => {
+  it("custom toggle is off by default when a preset matches", () => {
     render(<RadioTab />)
-    // The advanced section content should be hidden (Collapsible closed)
-    const advancedContent = screen.queryByRole("group", { name: /frequency/i })
-    // Either not in DOM or hidden — we check the collapsible button text
-    const advancedButton = screen.getByRole("button", { name: /advanced/i })
-    expect(advancedButton).toBeTruthy()
-    // Content area should not be visible (closed by default when preset matches)
-    expect(advancedContent).toBeNull()
+    const toggle = screen.getByTestId("radio-custom-toggle")
+    expect(
+      toggle.getAttribute("data-state") === "unchecked" ||
+        toggle.getAttribute("aria-checked") === "false",
+    ).toBe(true)
+    // AdvancedPanel button NOT rendered when toggle is off
+    expect(screen.queryByRole("button", { name: /advanced/i })).toBeNull()
   })
 
-  it("clicking the Custom tile opens the Advanced disclosure", async () => {
+  it("flipping the custom toggle hides the profile tiles and reveals the AdvancedPanel", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // Click the Custom preset tile (use testid to avoid matching the Advanced button)
-    const customTile = screen.getByTestId("preset-tile-custom")
-    await userEvent.click(customTile)
+    await user.click(screen.getByTestId("radio-custom-toggle"))
     await waitFor(() => {
-      // frequency input should now be visible
       expect(screen.getByLabelText(/FREQUENCY/i)).toBeTruthy()
     })
+    // Profile tiles should be hidden
+    expect(screen.queryByTestId("profile-tile-eu_868_pub")).toBeNull()
   })
 
-  it("auto-opens when the current config does not match any preset", async () => {
-    // No preset matches freq=999
+  it("flipping the toggle off again restores the profile tiles", async () => {
+    const user = userEvent.setup()
+    render(<RadioTab />)
+    const toggle = screen.getByTestId("radio-custom-toggle")
+    await user.click(toggle)
+    await waitFor(() => expect(screen.getByLabelText(/FREQUENCY/i)).toBeTruthy())
+    await user.click(toggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("profile-tile-eu_868_pub")).toBeTruthy()
+    })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// matchPreset rehydration on data refresh
+// ---------------------------------------------------------------------------
+
+describe("RadioTab — matchPreset rehydration", () => {
+  it("when readout doesn't match any preset, the readout still reflects the values", () => {
     ;(useRadio as ReturnType<typeof vi.fn>).mockReturnValue({
       data: { freq: 999.0, bw: 250, sf: 11, cr: 5, tx_power: 10, max_tx_power: 22 },
       isLoading: false,
       isSuccess: true,
     })
     render(<RadioTab />)
-    await waitFor(() => {
-      // Advanced section should auto-open
-      expect(screen.getByLabelText(/FREQUENCY/i)).toBeTruthy()
-    })
+    expect(screen.getByTestId("radio-readout").textContent).toMatch(/999/)
   })
 })
 
@@ -212,15 +250,12 @@ describe("RadioTab — Advanced disclosure", () => {
 // ---------------------------------------------------------------------------
 
 describe("RadioTab — TX power slider independence", () => {
-  it("changing the TX power slider does not enable the radio Apply button", async () => {
+  it("changing the TX power slider does not enable the radio Apply button", () => {
     render(<RadioTab />)
-    // The radio Apply button is disabled because form === readout (no RF change)
     const radioApplyBtn = screen.getByTestId("radio-apply-btn")
     expect(radioApplyBtn).toBeDisabled()
-    // The TX power apply button is always enabled (separate state, no dirty check)
     const txApplyBtn = screen.getByTestId("tx-power-apply-btn")
     expect(txApplyBtn).not.toBeDisabled()
-    // The TX apply is independent of the radio apply state
     expect(radioApplyBtn).toBeDisabled()
   })
 })
@@ -236,63 +271,50 @@ describe("RadioTab — Apply radio AlertDialog", () => {
     expect(applyBtn).toBeDisabled()
   })
 
-  it("Apply button becomes enabled after selecting a different preset", async () => {
+  it("Apply button becomes enabled after switching region to US", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // Select a different preset (US 915)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => {
-      const applyBtn = screen.getByTestId("radio-apply-btn")
-      expect(applyBtn).not.toBeDisabled()
-    })
+    await selectUsRegion(user)
+    expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled()
   })
 
   it("opens AlertDialog when Apply is clicked", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // Switch to US 915 to enable Apply
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => {
-      expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled()
-    })
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
-    // Dialog title should appear
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
     expect(screen.getByText(/Change radio configuration/i)).toBeTruthy()
   })
 
   it("action button is disabled without typing APPLY", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled())
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
-    // Find the action button in the dialog
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
     const dialogAction = screen.getByTestId("radio-apply-confirm-btn")
     expect(dialogAction).toBeDisabled()
   })
 
   it("action button becomes enabled after typing APPLY", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled())
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
     const confirmInput = screen.getByTestId("radio-apply-confirm-input")
-    await userEvent.type(confirmInput, "APPLY")
+    await user.type(confirmInput, "APPLY")
     expect(screen.getByTestId("radio-apply-confirm-btn")).not.toBeDisabled()
   })
 
   it("clicking the enabled action calls useSetRadio().mutate with the form values", async () => {
     const mutateSetRadio = vi.fn()
     setupHookMocks({ mutateSetRadio })
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled())
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
     const confirmInput = screen.getByTestId("radio-apply-confirm-input")
-    await userEvent.type(confirmInput, "APPLY")
-    await userEvent.click(screen.getByTestId("radio-apply-confirm-btn"))
+    await user.type(confirmInput, "APPLY")
+    await user.click(screen.getByTestId("radio-apply-confirm-btn"))
     expect(mutateSetRadio).toHaveBeenCalledWith(
       expect.objectContaining({ freq: 910.525, bw: 250, sf: 11, cr: 5 }),
       expect.anything(),
@@ -310,15 +332,14 @@ describe("RadioTab — mutation reconnected flag", () => {
       callbacks?.onSuccess?.({ reconnected: true })
     })
     setupHookMocks({ mutateSetRadio })
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled())
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
-    await userEvent.type(screen.getByTestId("radio-apply-confirm-input"), "APPLY")
-    await userEvent.click(screen.getByTestId("radio-apply-confirm-btn"))
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
+    await user.type(screen.getByTestId("radio-apply-confirm-input"), "APPLY")
+    await user.click(screen.getByTestId("radio-apply-confirm-btn"))
     expect(toast.success).toHaveBeenCalledWith(
-      expect.stringMatching(/back/i)
+      expect.stringMatching(/back/i),
     )
   })
 
@@ -327,15 +348,14 @@ describe("RadioTab — mutation reconnected flag", () => {
       callbacks?.onSuccess?.({ reconnected: false })
     })
     setupHookMocks({ mutateSetRadio })
+    const user = userEvent.setup()
     render(<RadioTab />)
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByTestId("radio-apply-btn")).not.toBeDisabled())
-    await userEvent.click(screen.getByTestId("radio-apply-btn"))
-    await userEvent.type(screen.getByTestId("radio-apply-confirm-input"), "APPLY")
-    await userEvent.click(screen.getByTestId("radio-apply-confirm-btn"))
+    await selectUsRegion(user)
+    await user.click(screen.getByTestId("radio-apply-btn"))
+    await user.type(screen.getByTestId("radio-apply-confirm-input"), "APPLY")
+    await user.click(screen.getByTestId("radio-apply-confirm-btn"))
     expect(toast.warning).toHaveBeenCalledWith(
-      expect.stringMatching(/still re-establishing/i)
+      expect.stringMatching(/still re-establishing/i),
     )
   })
 })
@@ -348,25 +368,23 @@ describe("RadioTab — TX power Apply", () => {
   it("clicking TX power Apply calls useSetTxPower().mutate with the slider value", async () => {
     const mutateTxPower = vi.fn()
     setupHookMocks({ mutateSetTxPower: mutateTxPower })
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // default tx_power is 17, click Apply
     const txApplyBtn = screen.getByTestId("tx-power-apply-btn")
-    // Apply is always clickable for TX power (no change check needed)
-    await userEvent.click(txApplyBtn)
+    await user.click(txApplyBtn)
     expect(mutateTxPower).toHaveBeenCalledWith(17)
   })
 
   it("slider max equals readout.max_tx_power", () => {
     render(<RadioTab />)
     const slider = screen.getByRole("slider")
-    // Radix Slider root has aria-valuemax
     expect(slider.getAttribute("aria-valuemax")).toBe("22")
   })
 
   it("no AlertDialog is opened when TX power Apply is clicked", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    await userEvent.click(screen.getByTestId("tx-power-apply-btn"))
-    // Dialog should NOT appear
+    await user.click(screen.getByTestId("tx-power-apply-btn"))
     expect(screen.queryByText(/Change radio configuration/i)).toBeNull()
   })
 })
@@ -376,15 +394,15 @@ describe("RadioTab — TX power Apply", () => {
 // ---------------------------------------------------------------------------
 
 describe("RadioTab — Reset to current", () => {
-  it("resets form to readout values after a preset change", async () => {
+  it("resets form to readout values after switching region", async () => {
+    const user = userEvent.setup()
     render(<RadioTab />)
-    // Switch to US 915
-    const us915 = screen.getByText(/US 915 — public/i)
-    await userEvent.click(us915.closest("[data-testid]") ?? us915)
-    await waitFor(() => expect(screen.getByText(/910\.525\s*MHz/i)).toBeTruthy())
-    // Reset
-    await userEvent.click(screen.getByRole("button", { name: /reset to current/i }))
-    // Should return to EU 868
-    await waitFor(() => expect(screen.getByText(/869\.525\s*MHz/i)).toBeTruthy())
+    await selectUsRegion(user)
+    await user.click(screen.getByRole("button", { name: /reset to current/i }))
+    await waitFor(() =>
+      expect(screen.getByTestId("radio-readout").textContent).toMatch(
+        /869\.525\s*MHz/,
+      ),
+    )
   })
 })

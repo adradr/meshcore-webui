@@ -234,9 +234,10 @@ describe("DevicePage integration — cross-tab wiring", () => {
     expect(readout.textContent).toMatch(/SF\s*11/)
     expect(readout.textContent).toMatch(/CR\s*4\/5/)
 
-    // ---- 3. Click US 915 preset; readout flips to 910.525 MHz. -----------
-    const us915Tile = screen.getByTestId("preset-tile-us_915_pub")
-    await user.click(us915Tile)
+    // ---- 3. Switch region to US (auto-selects the sole US 915 preset). ---
+    await user.click(screen.getByTestId("region-picker-trigger"))
+    const usItem = await screen.findByTestId("region-item-US")
+    await user.click(usItem)
     await waitFor(() => {
       expect(screen.getByTestId("radio-readout").textContent).toMatch(
         /910\.525\s*MHz/,

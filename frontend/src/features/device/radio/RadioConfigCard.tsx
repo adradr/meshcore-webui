@@ -1,8 +1,9 @@
 /**
- * RadioConfigCard — composes PresetGrid + RadioReadout + AdvancedPanel + Apply.
+ * RadioConfigCard — composes RegionPicker + ProfileCard + RadioReadout +
+ * Custom toggle + AdvancedPanel + Apply.
  *
- * Owns all radio-config form state. Delegates the typed-APPLY confirm dialog
- * to RadioApplyDialog.
+ * Owns all radio-config form state. Delegates the typed-APPLY confirm
+ * dialog to RadioApplyDialog.
  */
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -16,10 +17,19 @@ import {
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { RADIO_PRESETS, matchPreset } from "../radioPresets"
+import { Switch } from "@/components/ui/switch"
+import { Label } from "@/components/ui/label"
+import {
+  RADIO_PRESETS,
+  availableRegions,
+  matchPreset,
+  presetsByRegion,
+  type Region,
+} from "../radioPresets"
 import { useRadio, useSetRadio } from "../radioQueries"
 import type { RadioConfig } from "../types"
-import { PresetGrid, CUSTOM_ID } from "./PresetGrid"
+import { RegionPicker } from "./RegionPicker"
+import { ProfileCard } from "./ProfileCard"
 import { RadioReadout } from "./RadioReadout"
 import { AdvancedPanel } from "./AdvancedPanel"
 import { RadioApplyDialog } from "./RadioApplyDialog"
@@ -58,33 +68,73 @@ export function RadioConfigCard() {
   }, [readout])
 
   // ---- Preset matching ----
-  // `userChoseCustom` lets the user explicitly pick the Custom tile
+  // `userChoseCustom` lets the user explicitly enable the Custom toggle
   // even when the current form happens to match a known preset —
   // they're declaring intent to tweak, not just observing.
   const [userChoseCustom, setUserChoseCustom] = useState(false)
   const matchedPreset = userChoseCustom ? null : matchPreset(form)
-  const selectedPresetId = matchedPreset?.id ?? CUSTOM_ID
+
+  // ---- Region state ----
+  // Track the user's selected region separately so they can browse
+  // sibling regions without an auto-match overriding their pick.
+  const presetsGrouped = presetsByRegion()
+  const regions = availableRegions()
+  const [region, setRegion] = useState<Region | null>(
+    matchedPreset?.region ?? null,
+  )
+
+  // When the form matches a known preset (e.g. after initial seed or
+  // after a refetch), pull the region from the matched preset — but
+  // ONLY when the user hasn't already explicitly chosen a region.
+  useEffect(() => {
+    if (matchedPreset && region === null) {
+      setRegion(matchedPreset.region)
+    }
+  }, [matchedPreset, region])
+
+  // ---- Region change handler ----
+  const onRegionChange = (next: Region) => {
+    setRegion(next)
+    setUserChoseCustom(false)
+    setManuallyClosed(false)
+    const regionPresets = presetsGrouped[next] ?? []
+    if (regionPresets.length === 0) return
+    // If the current form already matches a preset in this region,
+    // keep the existing values. Otherwise pick the first preset in
+    // the region (don't silently flip to Custom).
+    const stillMatches = regionPresets.find(
+      (p) =>
+        p.freq === form.freq &&
+        p.bw === form.bw &&
+        p.sf === form.sf &&
+        p.cr === form.cr,
+    )
+    if (stillMatches) return
+    const first = regionPresets[0]
+    setForm({ freq: first.freq, bw: first.bw, sf: first.sf, cr: first.cr })
+  }
+
+  // ---- Profile (preset) change handler ----
+  const onProfileChange = (id: string) => {
+    const preset = RADIO_PRESETS.find((p) => p.id === id)
+    if (!preset) return
+    setUserChoseCustom(false)
+    setManuallyClosed(false)
+    setForm({ freq: preset.freq, bw: preset.bw, sf: preset.sf, cr: preset.cr })
+  }
+
+  // ---- Custom toggle ----
+  const onCustomToggle = (next: boolean) => {
+    setUserChoseCustom(next)
+    if (next) setManuallyClosed(false)
+  }
 
   // ---- Advanced collapsible ----
   // Open by default when the user is in Custom mode. `manuallyClosed`
   // captures an explicit user override (close the disclosure while
-  // still in Custom). Picking a different preset clears the override
-  // — the next Custom selection auto-opens again.
+  // still in Custom). Changing profile/region clears the override.
   const [manuallyClosed, setManuallyClosed] = useState(false)
-  const advancedOpen = selectedPresetId === CUSTOM_ID && !manuallyClosed
-
-  // ---- Preset click handler ----
-  const onPresetChange = (id: string) => {
-    setManuallyClosed(false) // reset the manual override on any preset change
-    if (id === CUSTOM_ID) {
-      setUserChoseCustom(true)
-      return
-    }
-    setUserChoseCustom(false)
-    const preset = RADIO_PRESETS.find((p) => p.id === id)
-    if (!preset) return
-    setForm({ freq: preset.freq, bw: preset.bw, sf: preset.sf, cr: preset.cr })
-  }
+  const advancedOpen = userChoseCustom && !manuallyClosed
 
   // ---- Apply / reset ----
   const isDirty = readout ? !configEquals(form, readout) : false
@@ -95,7 +145,9 @@ export function RadioConfigCard() {
         if (data.reconnected) {
           toast.success("Radio reconfigured — companion link back")
         } else {
-          toast.warning("Radio reconfigured — supervisor still re-establishing the companion link")
+          toast.warning(
+            "Radio reconfigured — supervisor still re-establishing the companion link",
+          )
         }
       },
     })
@@ -104,9 +156,14 @@ export function RadioConfigCard() {
   const onReset = () => {
     if (!readout) return
     setForm({ freq: readout.freq, bw: readout.bw, sf: readout.sf, cr: readout.cr })
+    setUserChoseCustom(false)
+    setManuallyClosed(false)
+    setRegion(matchPreset(readout)?.region ?? null)
   }
 
-  const currentPresetLabel = matchedPreset?.label ?? "Custom"
+  const currentPresetLabel = matchedPreset?.humanLabel ?? "Custom"
+
+  const regionPresets = region ? (presetsGrouped[region] ?? []) : []
 
   return (
     <Card>
@@ -134,14 +191,45 @@ export function RadioConfigCard() {
           <Skeleton className="h-40 w-full" />
         ) : (
           <>
-            {/* Preset grid */}
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Preset
-              </p>
-              <PresetGrid
-                selectedId={selectedPresetId}
-                onChange={onPresetChange}
+            {/* Step 1 — Region */}
+            <RegionPicker
+              regions={regions}
+              value={region}
+              onChange={onRegionChange}
+              disabled={setRadio.isPending}
+            />
+
+            {/* Step 2 — Profile (only when not in Custom mode and a region is chosen) */}
+            {!userChoseCustom && region && regionPresets.length > 0 && (
+              <ProfileCard
+                presets={regionPresets}
+                selectedId={matchedPreset?.id ?? null}
+                onChange={onProfileChange}
+                disabled={setRadio.isPending}
+              />
+            )}
+
+            {/* Custom toggle */}
+            <div className="flex items-center justify-between rounded-md border border-dashed border-border p-3">
+              <div className="flex flex-col gap-0.5">
+                <Label
+                  htmlFor="radio-custom-toggle"
+                  className="text-sm font-medium"
+                >
+                  Custom configuration
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  Edit frequency / BW / SF / CR by hand. Only do this if you
+                  know what you are doing.
+                </span>
+              </div>
+              <Switch
+                id="radio-custom-toggle"
+                data-testid="radio-custom-toggle"
+                checked={userChoseCustom}
+                onCheckedChange={onCustomToggle}
+                disabled={setRadio.isPending}
+                aria-label="Custom configuration"
               />
             </div>
 
@@ -152,14 +240,16 @@ export function RadioConfigCard() {
 
             <Separator />
 
-            {/* Advanced disclosure */}
-            <AdvancedPanel
-              open={advancedOpen}
-              onOpenChange={(next) => setManuallyClosed(!next)}
-              form={form}
-              onFormChange={setForm}
-              disabled={setRadio.isPending}
-            />
+            {/* Advanced disclosure — only meaningful in Custom mode */}
+            {userChoseCustom && (
+              <AdvancedPanel
+                open={advancedOpen}
+                onOpenChange={(next) => setManuallyClosed(!next)}
+                form={form}
+                onFormChange={setForm}
+                disabled={setRadio.isPending}
+              />
+            )}
 
             {/* Footer actions */}
             <div className="flex items-center justify-end gap-2 pt-1">
