@@ -32,6 +32,7 @@ import {
 } from "@/features/contacts/queries"
 import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
+import { formatLastSeen } from "@/features/rx_log/format"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { LinkDiagnosticPanel } from "@/features/diagnostics/LinkDiagnosticPanel"
@@ -89,21 +90,6 @@ const NODE_TYPE_BADGE: Record<number, string> = {
   2: "Repeater",
   3: "Room",
   4: "Sensor",
-}
-
-/**
- * Format a unix timestamp as a short relative-time string suitable for
- * "last heard" / "last advert" labels. Falls back to an absolute date
- * for anything older than a week.
- */
-function relativeTime(unix?: number | null): string {
-  if (unix == null) return "—"
-  const diff = Math.max(0, Math.floor(Date.now() / 1000 - unix))
-  if (diff < 60) return "just now"
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 7 * 86400) return `${Math.floor(diff / 86400)}d ago`
-  return new Date(unix * 1000).toLocaleDateString()
 }
 
 function hasGps(lat?: number | null, lon?: number | null): boolean {
@@ -305,8 +291,7 @@ export function ContactDetailPage() {
   const hops = parseRepeaterPath(pathString(contact) ?? null, allContacts ?? {})
   const isRepOrRoom = contact.type === 2 || contact.type === 3
 
-  const lastHeard =
-    contact.last_advert != null ? relativeTime(contact.last_advert) : null
+  const lastHeard = formatLastSeen(contact.last_advert)
 
   const headerActions = (
     <>

@@ -17,6 +17,7 @@ import {
   sortContacts,
   type ContactSort,
 } from "@/features/contacts/sort"
+import { formatLastSeen } from "@/features/rx_log/format"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -51,15 +52,6 @@ const NODE_TYPE_LABEL: Record<number, string> = {
 }
 
 const STAR_FLAG = 0x01
-
-function relativeTime(epochSeconds: number | null | undefined): string | null {
-  if (epochSeconds == null) return null
-  const diff = Math.floor(Date.now() / 1000 - epochSeconds)
-  if (diff < 60) return `${diff}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
-}
 
 interface ContactRow {
   pubKey: string
@@ -280,7 +272,7 @@ export function ContactsPage() {
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const row = filtered[virtualRow.index]
-            const lastSeen = relativeTime(row.lastAdvert)
+            const lastSeen = formatLastSeen(row.lastAdvert)
             return (
               <div
                 key={row.pubKey}

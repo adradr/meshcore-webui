@@ -1,4 +1,5 @@
 import type { RxEntry } from "@/features/rx_log/api"
+import { isPlausibleSeconds } from "@/lib/timestamps"
 
 export function formatRecvClock(unixSeconds: number | null | undefined): string {
   if (unixSeconds == null || unixSeconds === 0) return "—"
@@ -16,8 +17,12 @@ export function relativeTime(
   unixSeconds: number | null | undefined,
   nowMs: number = Date.now(),
 ): string {
-  if (unixSeconds == null || unixSeconds === 0) return "—"
-  const diffSec = Math.round(nowMs / 1000 - unixSeconds)
+  // Short-circuit implausible timestamps to an em-dash so the UI doesn't
+  // render nonsense like "55483 days ago" for a -1 sentinel or
+  // "-30s ago" for a future-dated value. ``isPlausibleSeconds`` already
+  // covers the legacy ``null | undefined | 0`` cases.
+  if (!isPlausibleSeconds(unixSeconds, nowMs)) return "—"
+  const diffSec = Math.round(nowMs / 1000 - (unixSeconds as number))
   if (diffSec < 1) return "now"
   if (diffSec < 60) return `${diffSec}s ago`
   const minutes = Math.floor(diffSec / 60)
@@ -32,6 +37,25 @@ export function relativeTime(
   }
   const days = Math.floor(diffSec / 86400)
   return `${days}d ago`
+}
+
+/**
+ * Display helper for "last heard" / "last advert" labels: returns a
+ * relative-time string for plausible timestamps, ``null`` for
+ * missing or implausible values so call-sites can hide the row by
+ * truthiness check rather than rendering a misleading em-dash.
+ *
+ * Use this in contact lists / profile cards where the surrounding chrome
+ * (badge, label) only makes sense if there's a real timestamp to show.
+ * ``relativeTime`` itself is preserved for table cells (rx log) that
+ * need a visible em-dash placeholder.
+ */
+export function formatLastSeen(
+  unixSeconds: number | null | undefined,
+  nowMs: number = Date.now(),
+): string | null {
+  if (!isPlausibleSeconds(unixSeconds, nowMs)) return null
+  return relativeTime(unixSeconds, nowMs)
 }
 
 export function formatRssi(rssi: number | null | undefined): string {

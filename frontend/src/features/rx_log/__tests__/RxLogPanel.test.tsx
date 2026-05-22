@@ -211,6 +211,10 @@ describe("formatRecvClock", () => {
   })
 })
 
+// 2027-01-15 UTC — fixed reference time inside the plausibility window
+// for advert / last-heard timestamps (post-2020, not future-dated).
+const NOW_MS = 1_800_000_000_000
+
 describe("relativeTime", () => {
   it("returns em-dash for missing time", () => {
     expect(relativeTime(null)).toBe("—")
@@ -219,30 +223,25 @@ describe("relativeTime", () => {
   })
 
   it('returns "now" for diffs under one second', () => {
-    const now = 1_000_000_000_000
-    expect(relativeTime(now / 1000, now)).toBe("now")
+    expect(relativeTime(NOW_MS / 1000, NOW_MS)).toBe("now")
   })
 
   it("returns seconds for sub-minute diffs", () => {
-    const now = 1_000_000_000_000
-    expect(relativeTime(now / 1000 - 12, now)).toBe("12s ago")
+    expect(relativeTime(NOW_MS / 1000 - 12, NOW_MS)).toBe("12s ago")
   })
 
   it("returns minutes for sub-hour diffs", () => {
-    const now = 1_000_000_000_000
-    expect(relativeTime(now / 1000 - 90, now)).toBe("1m 30s ago")
-    expect(relativeTime(now / 1000 - 120, now)).toBe("2m ago")
+    expect(relativeTime(NOW_MS / 1000 - 90, NOW_MS)).toBe("1m 30s ago")
+    expect(relativeTime(NOW_MS / 1000 - 120, NOW_MS)).toBe("2m ago")
   })
 
   it("returns hours for sub-day diffs", () => {
-    const now = 1_000_000_000_000
-    expect(relativeTime(now / 1000 - 3700, now)).toBe("1h 1m ago")
-    expect(relativeTime(now / 1000 - 7200, now)).toBe("2h ago")
+    expect(relativeTime(NOW_MS / 1000 - 3700, NOW_MS)).toBe("1h 1m ago")
+    expect(relativeTime(NOW_MS / 1000 - 7200, NOW_MS)).toBe("2h ago")
   })
 
   it("returns days for big diffs", () => {
-    const now = 1_000_000_000_000
-    expect(relativeTime(now / 1000 - 86400 * 3, now)).toBe("3d ago")
+    expect(relativeTime(NOW_MS / 1000 - 86400 * 3, NOW_MS)).toBe("3d ago")
   })
 })
 

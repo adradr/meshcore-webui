@@ -1,3 +1,7 @@
+import {
+  FUTURE_GRACE_S,
+  MIN_PLAUSIBLE_LAST_ADVERT_S,
+} from "@/lib/timestamps"
 import type { Contact, ContactStatsRow } from "./queries"
 
 export const CONTACT_SORTS = [
@@ -24,26 +28,12 @@ export interface SortInput {
 }
 
 /**
- * Plausibility window for advert timestamps. The radio firmware can emit:
- *  - 0 / negative values when an advert was received before the RTC was
- *    synced (firmware starts at epoch 0 on cold boot)
- *  - small positive values (a few seconds / minutes since boot) on
- *    devices that never NTP-synced
- *  - -1 as a "never seen" sentinel on some builds
- *  - **future-dated values** when the radio's RTC drifts ahead of the
- *    host clock, which surfaces in the UI as "negative seconds ago"
- * We clamp ALL of these to "no data" so they sort to the bottom of any
- * recency-based ordering instead of misleadingly showing as "ancient"
- * or pretending to be the most recent.
- */
-const MIN_PLAUSIBLE_LAST_ADVERT_S = 1_577_836_800 // 2020-01-01 UTC
-// Clock drift between firmware and host has been seen at a few minutes
-// on freshly-booted radios; a one-hour grace window absorbs that without
-// admitting genuinely-broken timestamps days into the future.
-const FUTURE_GRACE_S = 3600
-
-/**
- * Sort key extractor for each mode. Returns a numeric value suitable for
+ * Plausibility constants (``MIN_PLAUSIBLE_LAST_ADVERT_S`` /
+ * ``FUTURE_GRACE_S``) live in ``@/lib/timestamps`` and are shared with
+ * the display helpers in ``features/rx_log/format.ts`` so the sort and
+ * render layers agree on what counts as "no data".
+ *
+ * Sort key extractor for each mode returns a numeric value suitable for
  * descending sort (higher = "more recent" / "more frequent"). The "name"
  * mode is handled separately because it sorts strings ascending.
  *
