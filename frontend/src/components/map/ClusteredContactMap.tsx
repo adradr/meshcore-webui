@@ -37,6 +37,14 @@ interface Props {
 const INITIAL_CENTER: LatLngExpression = [47.4979, 19.0402] // Budapest
 const INITIAL_ZOOM = 6
 
+// Halved from the library default (80) so neighbouring city-block nodes
+// stay visually separate at mid zoom instead of merging into a cluster.
+const CLUSTER_RADIUS_PX = 40
+
+// Don't aggregate at street-level zoom — at this point the user is clearly
+// scrutinising individual nodes, not the global map shape.
+const DISABLE_CLUSTER_AT_ZOOM = 14
+
 export function ClusteredContactMap({
   contacts,
   self,
@@ -62,7 +70,13 @@ export function ClusteredContactMap({
       <ThemedTileLayer dark={dark} />
       <MapResizer />
       <MapViewPersistence contacts={allPoints} />
-      <MarkerClusterGroup chunkedLoading>
+      <MarkerClusterGroup
+        chunkedLoading
+        maxClusterRadius={CLUSTER_RADIUS_PX}
+        disableClusteringAtZoom={DISABLE_CLUSTER_AT_ZOOM}
+        spiderfyOnMaxZoom={true}
+        showCoverageOnHover={false}
+      >
         <MarkersLayer
           contacts={contacts}
           onLosRequest={onLosRequest}
