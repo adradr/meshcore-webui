@@ -67,7 +67,7 @@ describe("MarkerPopupBody", () => {
     ).toBeDisabled()
   })
 
-  it("renders Profile + Message links for non-self contacts", () => {
+  it("renders Profile link for non-self contacts; Message hidden for REP", () => {
     render(
       wrap(
         <MarkerPopupBody contact={contact} selfHasGps={true} isSelf={false} />,
@@ -77,9 +77,72 @@ describe("MarkerPopupBody", () => {
       "href",
       "/contact/abc123",
     )
+    // Repeater contacts don't accept plain DMs — see upstream meshcore-cli
+    // (admin-command target, not a DM peer). The Message button must be hidden.
     expect(
-      screen.getByRole("link", { name: /message repeater alpha/i }),
-    ).toHaveAttribute("href", "/chat/abc123")
+      screen.queryByRole("link", { name: /message repeater alpha/i }),
+    ).toBeNull()
+  })
+
+  it("renders Message link for companion (CLI) contacts", () => {
+    const cliContact = {
+      ...contact,
+      nodeType: "CLI" as const,
+      id: "cli1",
+      name: "Companion Bob",
+    }
+    render(
+      wrap(
+        <MarkerPopupBody
+          contact={cliContact}
+          selfHasGps={true}
+          isSelf={false}
+        />,
+      ),
+    )
+    expect(
+      screen.getByRole("link", { name: /message companion bob/i }),
+    ).toHaveAttribute("href", "/chat/cli1")
+  })
+
+  it("hides Message link for ROOM contacts (admin-command target, not DM peer)", () => {
+    const roomContact = {
+      ...contact,
+      nodeType: "ROOM" as const,
+      name: "Room Server",
+    }
+    render(
+      wrap(
+        <MarkerPopupBody
+          contact={roomContact}
+          selfHasGps={true}
+          isSelf={false}
+        />,
+      ),
+    )
+    expect(
+      screen.queryByRole("link", { name: /message room server/i }),
+    ).toBeNull()
+  })
+
+  it("still renders Message link for UNKNOWN nodeType (safe fallback)", () => {
+    const unknownContact = {
+      ...contact,
+      nodeType: "UNKNOWN" as const,
+      name: "Mystery Node",
+    }
+    render(
+      wrap(
+        <MarkerPopupBody
+          contact={unknownContact}
+          selfHasGps={true}
+          isSelf={false}
+        />,
+      ),
+    )
+    expect(
+      screen.getByRole("link", { name: /message mystery node/i }),
+    ).toBeInTheDocument()
   })
 
   it("renders only the Device info action when isSelf=true (no LoS button)", () => {

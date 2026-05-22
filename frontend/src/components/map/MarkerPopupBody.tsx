@@ -35,6 +35,19 @@ interface Props {
 const TRACEABLE_TYPES: ReadonlySet<NodeType> = new Set(["REP", "ROOM"])
 
 /**
+ * Node types that accept a plain DM. Repeaters and room servers receive
+ * admin commands over a different protocol path (see upstream
+ * `meshcore-cli` lines 1149-1208), and this WebUI doesn't yet implement
+ * that flow — so we hide the Message link rather than route the user to
+ * a chat that would silently fail. UNKNOWN keeps the button as a safe
+ * fallback: better a usable-looking chat than a wrongly-hidden one.
+ */
+const MESSAGEABLE_NODE_TYPES: ReadonlySet<NodeType> = new Set([
+  "CLI",
+  "UNKNOWN",
+])
+
+/**
  * Popup body for a marker on the contact map. Extracted from `MarkersLayer`
  * so it can be unit-tested in isolation — Leaflet's popup rendering is
  * notoriously hard to drive through JSDOM because popups mount lazily into
@@ -53,6 +66,7 @@ export function MarkerPopupBody({
     ? `Line of sight to ${contact.name}`
     : "Self location unknown — set up your device's GPS to compute line of sight"
   const showTrace = TRACEABLE_TYPES.has(contact.nodeType) && !!onTraceRequest
+  const showMessage = MESSAGEABLE_NODE_TYPES.has(contact.nodeType)
   const isThisTracing = traceInFlightPubkey === contact.id
   const anyTracing = traceInFlightPubkey != null
   const traceDisabled = anyTracing
@@ -86,17 +100,19 @@ export function MarkerPopupBody({
               <ArrowRight className="ml-auto h-3 w-3 opacity-70" />
             </Link>
           </Button>
-          <Button
-            asChild
-            size="sm"
-            variant="outline"
-            className="h-8 w-9 p-0"
-            title={`Message ${contact.name}`}
-          >
-            <Link to={`/chat/${contact.id}`} aria-label={`Message ${contact.name}`}>
-              <MessageCircle className="h-3.5 w-3.5" />
-            </Link>
-          </Button>
+          {showMessage && (
+            <Button
+              asChild
+              size="sm"
+              variant="outline"
+              className="h-8 w-9 p-0"
+              title={`Message ${contact.name}`}
+            >
+              <Link to={`/chat/${contact.id}`} aria-label={`Message ${contact.name}`}>
+                <MessageCircle className="h-3.5 w-3.5" />
+              </Link>
+            </Button>
+          )}
           <Button
             type="button"
             size="sm"

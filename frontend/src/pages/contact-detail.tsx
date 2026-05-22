@@ -30,6 +30,7 @@ import {
   useShareContact,
   type Contact,
 } from "@/features/contacts/queries"
+import { isMessageableContact } from "@/features/contacts/types"
 import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
 import { formatLastSeen } from "@/features/rx_log/format"
@@ -369,11 +370,13 @@ export function ContactDetailPage() {
             4-col on sm+ when there's room. min-h keeps icon+label centred
             comfortably even when the label fits on one line. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ActionTile
-            icon={MessageCircle}
-            label="Message"
-            onClick={() => navigate(`/chat/${pubKey}`)}
-          />
+          {isMessageableContact(contact.type) && (
+            <ActionTile
+              icon={MessageCircle}
+              label="Message"
+              onClick={() => navigate(`/chat/${pubKey}`)}
+            />
+          )}
           <ActionTile
             icon={Radio}
             label="Ping"
