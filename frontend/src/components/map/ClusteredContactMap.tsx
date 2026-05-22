@@ -27,7 +27,7 @@ interface Props {
    * matching popup shows the spinner; every other Trace button is disabled
    * but does not spin.
    */
-  traceInFlightPubkey: string | null
+  traceInFlightPubkey?: string | null
   /**
    * Rendered inside the `<MapContainer>` (after markers, before fit button).
    * Use this to mount react-leaflet overlays like `TracePathLayer` that
@@ -56,7 +56,7 @@ export function ClusteredContactMap({
   onLosRequest,
   selfHasGps,
   onTraceRequest,
-  traceInFlightPubkey,
+  traceInFlightPubkey = null,
   children,
 }: Props) {
   // Include self in fitBounds + center so the camera respects your own pin

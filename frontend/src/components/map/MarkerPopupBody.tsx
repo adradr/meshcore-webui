@@ -28,7 +28,7 @@ interface Props {
    * every OTHER node's Trace button is disabled (greyed) but does not spin —
    * so the user isn't misled into thinking they're waiting on unrelated nodes.
    */
-  traceInFlightPubkey: string | null
+  traceInFlightPubkey?: string | null
 }
 
 /** Node types where the "Trace path" button makes sense (multi-hop targets). */
@@ -46,7 +46,7 @@ export function MarkerPopupBody({
   selfHasGps,
   isSelf,
   onTraceRequest,
-  traceInFlightPubkey,
+  traceInFlightPubkey = null,
 }: Props) {
   const losDisabled = !selfHasGps || !onLosRequest
   const losTitle = selfHasGps
