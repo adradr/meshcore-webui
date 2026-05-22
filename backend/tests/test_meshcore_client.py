@@ -213,6 +213,132 @@ class TestSendTraceAckTagging:
             await client.send_trace()
 
 
+class TestBuildTracePath:
+    """`_build_trace_path` mirrors meshcore-cli's print_trace_to logic.
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810
+    `_build_trace_path_from_discovery` mirrors print_disc_trace_to.
+    Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:1821-1856"""
+
+    @staticmethod
+    def _contact(*, pubkey: str, type_: int, out_path: str, out_path_len: int) -> dict:
+        return {
+            "public_key": pubkey,
+            "type": type_,
+            "out_path": out_path,
+            "out_path_len": out_path_len,
+        }
+
+    # --- _build_trace_path ---
+
+    def test_zero_hop_repeater_just_destination_prefix(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="", out_path_len=0,
+        )
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "ee"
+
+    def test_one_hop_repeater_symmetric(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3c", out_path_len=1,
+        )
+        # i=0: elem = "3c", trace starts "ee" -> wraps to "3cee3c"
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3cee3c"
+
+    def test_two_hop_repeater_symmetric(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2, out_path="3cb9", out_path_len=2,
+        )
+        # i=0: elem = path[2:4] = "b9", trace was "ee" -> "b9eeb9"
+        # i=1: elem = path[0:2] = "3c", trace was "b9eeb9" -> "3cb9eeb93c"
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3cb9eeb93c"
+
+    def test_non_repeater_contact_no_destination_prefix(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=1, out_path="3c", out_path_len=1,
+        )
+        # trace=="" before loop; i=0: elem="3c", trace becomes "3c"
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) == "3c"
+
+    def test_two_byte_hash_mode_uses_wider_slices(self):
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2,
+            out_path="3cb91234", out_path_len=2,
+        )
+        # dest_prefix = "ee10" (2 bytes = 4 hex chars)
+        # i=0: elem = path[4:8] = "1234"; trace "ee10" -> "1234ee101234"
+        # i=1: elem = path[0:4] = "3cb9"; trace "1234ee101234" -> "3cb91234ee1012343cb9"
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=2)
+            == "3cb91234ee1012343cb9"
+        )
+
+    def test_returns_none_when_path_len_negative(self):
+        c = self._contact(
+            pubkey="ee" + "00" * 31, type_=2, out_path="", out_path_len=-1,
+        )
+        assert MeshCoreClient._build_trace_path(c, path_hash_len=1) is None
+
+    def test_three_byte_hash_mode_rewrites_to_two_byte(self):
+        # CLI quirk: hash_mode=2 → path_hash_len=3 → rewrite to 2-byte
+        # by extracting the LEADING 4 hex chars (2 bytes) of each 6-char
+        # (3-byte) slot.
+        c = self._contact(
+            pubkey="ee10f91c" + "00" * 28, type_=2,
+            out_path="3c11b9b922cc",  # two 3-byte hops: 3c11b9, b922cc
+            out_path_len=2,
+        )
+        # After rewrite, path becomes the leading 4 hex chars of each
+        # slot taken in REVERSE order (i=0 picks slot path_len-1 first):
+        #   i=0: path[6*(2-0-1):6*(2-0-1)+4] = path[6:10] = "b922"
+        #   i=1: path[6*(2-1-1):6*(2-1-1)+4] = path[0:4] = "3c11"
+        # new_path = "b9223c11", and path_hash_len becomes 2.
+        # dest_prefix at 2*2=4 hex chars: "ee10"
+        # Walking new_path with path_hash_len=2:
+        #   i=0: elem = path[4:8] = "3c11"
+        #        trace was "ee10" -> "3c11ee103c11"
+        #   i=1: elem = path[0:4] = "b922"
+        #        trace -> "b9223c11ee103c11b922"
+        assert (
+            MeshCoreClient._build_trace_path(c, path_hash_len=3)
+            == "b9223c11ee103c11b922"
+        )
+
+    # --- _build_trace_path_from_discovery ---
+
+    def test_from_discovery_out_then_dest_then_in(self):
+        contact = {"public_key": "ee10f91c" + "00" * 28, "type": 2}
+        disc_payload = {"in_path": "3c", "out_path": "b9"}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        assert result == "b9,ee,3c"
+
+    def test_from_discovery_dedups_trailing_repeated_hop(self):
+        contact = {"public_key": "ee" + "00" * 31, "type": 2}
+        disc_payload = {"in_path": "ee", "out_path": ""}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        # dest_prefix "ee" added, in_path's "ee" suppressed by dedup.
+        assert result == "ee"
+
+    def test_from_discovery_user_type_no_dest_prefix(self):
+        contact = {"public_key": "aa" + "00" * 31, "type": 1}
+        disc_payload = {"in_path": "", "out_path": ""}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=1,
+        )
+        assert result == ""
+
+    def test_from_discovery_two_byte_hash_mode(self):
+        contact = {"public_key": "ee10" + "00" * 30, "type": 2}
+        disc_payload = {"in_path": "3c11", "out_path": "b922"}
+        result = MeshCoreClient._build_trace_path_from_discovery(
+            contact, disc_payload, path_hash_len=2,
+        )
+        # 2-byte hops: out="b922", dest="ee10", in="3c11" → "b922,ee10,3c11"
+        assert result == "b922,ee10,3c11"
+
+
 class TestRequestTimeouts:
     """req_* methods pass `timeout=0` to the meshcore lib so the firmware's
     `suggested_timeout` (which scales with flood / multi-hop complexity)

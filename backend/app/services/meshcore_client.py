@@ -1193,6 +1193,89 @@ class MeshCoreClient:
             path_len=int(p.get("path_len", len(hops))),
         )
 
+    @staticmethod
+    def _build_trace_path(contact: dict, path_hash_len: int) -> str | None:
+        """Construct the trace-path string for a repeater/room contact.
+
+        Mirrors meshcore-cli's `print_trace_to`
+        (docs/external/meshcore-cli-reference/meshcore_cli.py:1781-1810).
+
+        Returns None when the contact has no stored path (`out_path_len == -1`)
+        — the caller must run `send_path_discovery_sync` first and rebuild
+        via `_build_trace_path_from_discovery`.
+
+        The resulting string is the symmetric out-and-back trace: the
+        destination's pubkey prefix sits at the centre, wrapped at front and
+        back by each intermediate hop's hash in reverse order. Without the
+        destination prefix the firmware would treat this as a broadcast probe.
+        """
+        path = contact.get("out_path", "") or ""
+        path_len = contact.get("out_path_len", -1)
+        if path_len == -1:
+            return None
+
+        # 3-byte hash mode requests a 2-byte path; mirror the CLI quirk.
+        if path_hash_len == 3:
+            path_hash_len = 2
+            new_path = ""
+            for i in range(0, path_len):
+                new_path += path[6 * (path_len - i - 1):6 * (path_len - i - 1) + 4]
+            path = new_path
+
+        contact_type = contact.get("type", 0)
+        trace = ""
+        if contact_type in (2, 3):
+            pubkey = contact.get("public_key", "")
+            trace = pubkey[0:2 * path_hash_len]
+
+        for i in range(0, path_len):
+            start = 2 * path_hash_len * (path_len - i - 1)
+            end = 2 * path_hash_len * (path_len - i)
+            elem = path[start:end]
+            trace = elem if trace == "" else f"{elem}{trace}{elem}"
+
+        return trace
+
+    @staticmethod
+    def _build_trace_path_from_discovery(
+        contact: dict, disc_payload: dict, path_hash_len: int,
+    ) -> str:
+        """Build a comma-separated trace path from a path-discovery response.
+
+        Ports `meshcore-cli`'s `print_disc_trace_to`
+        (docs/external/meshcore-cli-reference/meshcore_cli.py:1821-1856).
+
+        Result format: ``out_hop_1,...,out_hop_N,dest_prefix,in_hop_1,...,in_hop_M``
+        with consecutive-duplicate dedupe on the inbound side (avoids
+        ``ee,3c,3c`` when in_path's first hop equals the destination prefix).
+        """
+        inp = disc_payload.get("in_path") or ""
+        outp = disc_payload.get("out_path") or ""
+        chars = 2 * path_hash_len
+        inp_l = len(inp) // chars
+        outp_l = len(outp) // chars
+
+        trace = ""
+
+        for i in range(0, outp_l):
+            elem = outp[chars * i:chars * (i + 1)]
+            trace = elem if trace == "" else f"{trace},{elem}"
+
+        contact_type = contact.get("type", 0)
+        if contact_type in (2, 3):
+            pubkey = contact.get("public_key", "")
+            elem = pubkey[0:chars]
+            trace = elem if trace == "" else f"{trace},{elem}"
+
+        for i in range(0, inp_l):
+            elem = inp[chars * i:chars * (i + 1)]
+            if trace == "":
+                trace = elem
+            elif trace[-chars:] != elem:
+                trace = f"{trace},{elem}"
+
+        return trace
+
     async def ping_via_trace(
         self,
         pubkey: str,
