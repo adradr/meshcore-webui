@@ -848,3 +848,91 @@ async def test_set_name_502_on_runtime_error(client):
         assert r.status_code == 502
     finally:
         del app.state.meshcore_client
+
+
+# --- POST /api/device/policy ---------------------------------------------
+
+@pytest.mark.asyncio
+async def test_policy_empty_body_returns_204_no_calls(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_telemetry_mode = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_manual_add_contacts = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_advert_loc_policy = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_multi_acks = AsyncMock(return_value=None)
+    try:
+        r = await client.post("/api/device/policy", json={})
+        assert r.status_code == 204
+        assert r.content == b""
+        app.state.meshcore_client.set_telemetry_mode.assert_not_awaited()
+        app.state.meshcore_client.set_manual_add_contacts.assert_not_awaited()
+        app.state.meshcore_client.set_advert_loc_policy.assert_not_awaited()
+        app.state.meshcore_client.set_multi_acks.assert_not_awaited()
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_policy_partial_update_only_calls_selected(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_telemetry_mode = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_manual_add_contacts = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_advert_loc_policy = AsyncMock(return_value=None)
+    app.state.meshcore_client.set_multi_acks = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/device/policy",
+            json={"manual_add_contacts": True},
+        )
+        assert r.status_code == 204
+        app.state.meshcore_client.set_manual_add_contacts.assert_awaited_once_with(
+            True,
+        )
+        app.state.meshcore_client.set_telemetry_mode.assert_not_awaited()
+        app.state.meshcore_client.set_advert_loc_policy.assert_not_awaited()
+        app.state.meshcore_client.set_multi_acks.assert_not_awaited()
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_policy_telemetry_modes_routed_correctly(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_telemetry_mode = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/device/policy",
+            json={"telemetry": {"base": 1, "env": 2}},
+        )
+        assert r.status_code == 204
+        app.state.meshcore_client.set_telemetry_mode.assert_awaited_once_with(
+            base=1, loc=None, env=2,
+        )
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_policy_422_on_out_of_range(client):
+    if hasattr(app.state, "meshcore_client"):
+        del app.state.meshcore_client
+    r = await client.post(
+        "/api/device/policy",
+        json={"adv_loc_policy": 256},
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_policy_502_on_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_manual_add_contacts = AsyncMock(
+        side_effect=RuntimeError("rejected"),
+    )
+    try:
+        r = await client.post(
+            "/api/device/policy",
+            json={"manual_add_contacts": True},
+        )
+        assert r.status_code == 502
+    finally:
+        del app.state.meshcore_client

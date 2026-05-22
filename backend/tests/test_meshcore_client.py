@@ -1413,6 +1413,145 @@ class TestSetRadio:
             await client.set_device_name("Alpha-7")
 
 
+class TestBehaviour:
+    """Behaviour / policy setters: telemetry sub-modes, manual-add-contacts,
+    advert location policy, multi-acks. Each setter is a simple write
+    wrapper that fires send_appstart after a successful write so the lib's
+    cached self_info reflects the new value.
+    """
+
+    @pytest.mark.asyncio
+    async def test_set_telemetry_mode_calls_only_specified_modes(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_telemetry_mode_base = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_telemetry_mode_loc = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_telemetry_mode_env = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        await client.set_telemetry_mode(base=1, env=2)
+
+        fake_mc.commands.set_telemetry_mode_base.assert_awaited_once_with(1)
+        fake_mc.commands.set_telemetry_mode_env.assert_awaited_once_with(2)
+        fake_mc.commands.set_telemetry_mode_loc.assert_not_awaited()
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_telemetry_mode_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_telemetry_mode_base = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.set_telemetry_mode_loc = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        fake_mc.commands.set_telemetry_mode_env = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        with pytest.raises(
+            RuntimeError, match="Device rejected set_telemetry_mode_loc",
+        ):
+            await client.set_telemetry_mode(base=1, loc=2, env=3)
+
+    @pytest.mark.asyncio
+    async def test_set_manual_add_contacts_happy(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_manual_add_contacts = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        await client.set_manual_add_contacts(True)
+
+        fake_mc.commands.set_manual_add_contacts.assert_awaited_once_with(True)
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_manual_add_contacts_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_manual_add_contacts = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(
+            RuntimeError, match="Device rejected set_manual_add_contacts",
+        ):
+            await client.set_manual_add_contacts(True)
+
+    @pytest.mark.asyncio
+    async def test_set_advert_loc_policy_happy(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_advert_loc_policy = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        await client.set_advert_loc_policy(1)
+
+        fake_mc.commands.set_advert_loc_policy.assert_awaited_once_with(1)
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_advert_loc_policy_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_advert_loc_policy = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(
+            RuntimeError, match="Device rejected set_advert_loc_policy",
+        ):
+            await client.set_advert_loc_policy(1)
+
+    @pytest.mark.asyncio
+    async def test_set_multi_acks_happy(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_multi_acks = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock(return_value=None)
+        client._mc = fake_mc
+
+        await client.set_multi_acks(2)
+
+        fake_mc.commands.set_multi_acks.assert_awaited_once_with(2)
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_set_multi_acks_raises_on_error(self):
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_multi_acks = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        client._mc = fake_mc
+
+        with pytest.raises(
+            RuntimeError, match="Device rejected set_multi_acks",
+        ):
+            await client.set_multi_acks(2)
+
+
 class TestFactoryReset:
     """`factory_reset` wraps the meshcore lib's two-step request+confirm
     pattern. Wipes ALL device state including the Ed25519 identity keypair.

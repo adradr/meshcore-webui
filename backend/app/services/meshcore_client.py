@@ -749,6 +749,68 @@ class MeshCoreClient:
             await mc.commands.send_appstart()
         log.warning("RADIO ACTION=set_device_name name=%s", name)
 
+    async def set_telemetry_mode(
+        self,
+        *,
+        base: int | None = None,
+        loc: int | None = None,
+        env: int | None = None,
+    ) -> None:
+        """Set one or more telemetry sub-mode values (each 0..3).
+
+        Pass only the modes you want to change; the lib re-uses the
+        existing values for the others by pre-reading self_info.
+        """
+        mc = await self._require_mc()
+        async with self._lock:
+            if base is not None:
+                ev = await mc.commands.set_telemetry_mode_base(base)
+                if ev is None or ev.type == EventType.ERROR:
+                    raise RuntimeError("Device rejected set_telemetry_mode_base")
+            if loc is not None:
+                ev = await mc.commands.set_telemetry_mode_loc(loc)
+                if ev is None or ev.type == EventType.ERROR:
+                    raise RuntimeError("Device rejected set_telemetry_mode_loc")
+            if env is not None:
+                ev = await mc.commands.set_telemetry_mode_env(env)
+                if ev is None or ev.type == EventType.ERROR:
+                    raise RuntimeError("Device rejected set_telemetry_mode_env")
+            # All three setters internally re-post set_other_params which
+            # refreshes the same self_info bytes; explicit send_appstart
+            # keeps our cache truthful for the next /self-info GET.
+            await mc.commands.send_appstart()
+        log.warning(
+            "RADIO ACTION=set_telemetry_mode base=%s loc=%s env=%s",
+            base, loc, env,
+        )
+
+    async def set_manual_add_contacts(self, value: bool) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_manual_add_contacts(value)
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_manual_add_contacts")
+            await mc.commands.send_appstart()
+        log.warning("RADIO ACTION=set_manual_add_contacts value=%s", value)
+
+    async def set_advert_loc_policy(self, value: int) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_advert_loc_policy(value)
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_advert_loc_policy")
+            await mc.commands.send_appstart()
+        log.warning("RADIO ACTION=set_advert_loc_policy value=%d", value)
+
+    async def set_multi_acks(self, value: int) -> None:
+        mc = await self._require_mc()
+        async with self._lock:
+            ev = await mc.commands.set_multi_acks(value)
+            if ev is None or ev.type == EventType.ERROR:
+                raise RuntimeError("Device rejected set_multi_acks")
+            await mc.commands.send_appstart()
+        log.warning("RADIO ACTION=set_multi_acks value=%d", value)
+
     # Bound on how long device_partial_reset blocks waiting for the
     # supervisor to re-establish the TCP companion link after a reboot.
     # Empirically the device is back in 2-5s; 15s is a generous ceiling

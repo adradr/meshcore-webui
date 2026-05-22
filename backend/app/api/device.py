@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.policy import PolicyUpdate
 from app.schemas.radio import (
     DeviceNameIn,
     RadioConfig,
@@ -291,4 +292,34 @@ async def set_name(body: DeviceNameIn, request: Request) -> Response:
     next advert the device transmits."""
     client = _require_client(request)
     await _call(client.set_device_name(body.name))
+    return Response(status_code=204)
+
+
+@router.post("/policy", status_code=204, response_class=Response)
+async def update_policy(body: PolicyUpdate, request: Request) -> Response:
+    """Partial update for device behaviour: telemetry sub-modes,
+    manual-add-contacts, advert location policy, and multi-acks.
+
+    Every field is optional — only set fields are pushed to the radio.
+    An empty body is a valid no-op that returns 204 immediately.
+    """
+    client = _require_client(request)
+    if body.telemetry is not None and (
+        body.telemetry.base is not None
+        or body.telemetry.loc is not None
+        or body.telemetry.env is not None
+    ):
+        await _call(
+            client.set_telemetry_mode(
+                base=body.telemetry.base,
+                loc=body.telemetry.loc,
+                env=body.telemetry.env,
+            ),
+        )
+    if body.manual_add_contacts is not None:
+        await _call(client.set_manual_add_contacts(body.manual_add_contacts))
+    if body.adv_loc_policy is not None:
+        await _call(client.set_advert_loc_policy(body.adv_loc_policy))
+    if body.multi_acks is not None:
+        await _call(client.set_multi_acks(body.multi_acks))
     return Response(status_code=204)
