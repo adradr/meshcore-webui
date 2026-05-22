@@ -1282,28 +1282,74 @@ class MeshCoreClient:
         *,
         timeout: float = 60.0,
     ) -> PingResult:
-        """The official MeshCore "Ping" feature, faithfully.
+        """The official MeshCore "Ping" feature.
 
-        Resolves the peer's advert path, sends a directed TRACE through
-        that path, and reports round-trip duration plus the SNR
-        observed at the first hop in each direction. Falls back to a
-        flood trace when `get_advert_path` returns no path — in that
-        case `snr_there` / `snr_back` may be `None`.
+        Mirrors meshcore-cli's `trace` (when the contact has a stored
+        `out_path`) and `dtrace` (when out_path_len == -1 → discover path
+        first) flows. Returns a PingResult with the round-trip duration,
+        the SNR our radio measured for the outbound first-hop
+        (`snr_there`), and the SNR on the returning echo's first-hop
+        (`snr_back`).
 
-        Raises ConnectionError / RuntimeError / TimeoutError mirroring
-        `send_trace`; the API layer translates these to 503 / 502 / 504.
+        Reference: docs/external/meshcore-cli-reference/meshcore_cli.py
+        (`print_trace_to` at 1781-1810 and `print_disc_trace_to` at
+        1821-1856).
+
+        Raises:
+            RuntimeError: contact unknown, path discovery failed, or
+                radio reply malformed (→ 502).
+            TimeoutError: no TRACE_DATA echo within firmware-suggested
+                window (→ 504).
+            ConnectionError: radio unreachable (→ 503).
         """
-        target_path = await self.get_advert_path(pubkey)
+        mc = await self._require_mc()
+
+        contact = (mc.contacts or {}).get(pubkey)
+        if contact is None:
+            raise RuntimeError(f"ping_via_trace: unknown contact {pubkey[:8]}…")
+
+        # path_hash_len is fixed by the radio's path_hash_mode; mirror the
+        # CLI's `+1` convention (mode 0 → 1B hashes, etc).
+        async with self._lock:
+            path_hash_mode = await mc.commands.get_path_hash_mode()
+        path_hash_len = int(path_hash_mode) + 1
+
+        out_path_len = contact.get("out_path_len", -1)
+        if out_path_len >= 0:
+            target_path = self._build_trace_path(contact, path_hash_len)
+        else:
+            # No stored path — discover first, then build from in/out paths
+            # (CLI's dtrace flow).
+            try:
+                disc_payload = await self.disc_path(pubkey)
+            except RuntimeError as e:
+                raise RuntimeError(
+                    f"ping_via_trace: path discovery failed for {pubkey[:8]}…: {e}"
+                ) from e
+            target_path = self._build_trace_path_from_discovery(
+                contact, disc_payload, path_hash_len,
+            )
+
+        if not target_path:
+            raise RuntimeError(
+                f"ping_via_trace: could not build trace path for {pubkey[:8]}…"
+            )
+
         loop = asyncio.get_running_loop()
         t0 = loop.time()
         result = await self.send_trace(target_path=target_path, timeout=timeout)
         elapsed_ms = int((loop.time() - t0) * 1000)
-        # For a directed trace, the first hop's SNR is what the first
-        # repeater on the outbound path observed; the last hop's SNR is
-        # what OUR radio observed on the returning echo. Mirror what
-        # the official app surfaces as "SNR there" / "SNR back".
+
+        # In a symmetric out-and-back trace the firmware records each
+        # repeater the trace touched. The first hop's SNR is what the
+        # outbound's first repeater measured for our packet; the last
+        # hop's SNR is what our radio measured on the returning echo.
+        # Mirror what the official app surfaces as "SNR there" / "SNR back".
         snr_there: float | None = result.hops[0].snr if result.hops else None
-        snr_back: float | None = result.hops[-1].snr if result.hops else None
+        snr_back: float | None = (
+            result.hops[-1].snr if len(result.hops) > 1 else None
+        )
+
         return PingResult(
             duration_ms=elapsed_ms,
             snr_there=snr_there,

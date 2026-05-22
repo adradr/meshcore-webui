@@ -6,6 +6,7 @@ import pytest
 from meshcore import EventType
 from app.services.meshcore_client import (
     MeshCoreClient,
+    PingResult,
     StatsUnavailable,
     TraceHop,
     TracePathResult,
@@ -337,6 +338,120 @@ class TestBuildTracePath:
         )
         # 2-byte hops: out="b922", dest="ee10", in="3c11" → "b922,ee10,3c11"
         assert result == "b922,ee10,3c11"
+
+
+class TestPingViaTrace:
+    """ping_via_trace orchestrator: contact lookup → path build (or
+    discovery-then-build) → send_trace → PingResult. Mirrors CLI's
+    trace/dtrace dispatch."""
+
+    @staticmethod
+    def _fake_mc_with_stored_path():
+        mc = MagicMock()
+        mc.is_connected = True
+        mc.commands.get_path_hash_mode = AsyncMock(return_value=0)  # 1B hashes
+        mc.contacts = {
+            "ee10f91c" + "00" * 28: {
+                "public_key": "ee10f91c" + "00" * 28,
+                "type": 2,
+                "out_path": "3c",
+                "out_path_len": 1,
+            },
+        }
+        ack = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (0xCAFEBABE).to_bytes(4, "little"),
+            "suggested_timeout": 500,
+        }
+        mc.commands.send_trace = AsyncMock(return_value=ack)
+        trace_ev = MagicMock()
+        trace_ev.payload = {
+            "tag": 0xCAFEBABE, "flags": 0, "path_len": 2,
+            "path": [
+                {"hash": "3c", "snr": 11.5},
+                {"hash": "ee", "snr": 12.0},
+            ],
+        }
+        mc.dispatcher.wait_for_event = AsyncMock(return_value=trace_ev)
+        return mc
+
+    @pytest.mark.asyncio
+    async def test_uses_stored_out_path_no_discovery(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        client._mc = fake_mc
+
+        result = await client.ping_via_trace("ee10f91c" + "00" * 28)
+
+        # No discovery — stored path was used directly.
+        fake_mc.commands.send_path_discovery_sync.assert_not_called()
+        # send_trace called with the symmetric path string.
+        call = fake_mc.commands.send_trace.call_args
+        assert call.kwargs["path"] == "3cee3c"
+        assert isinstance(result, PingResult)
+        assert result.snr_there == 11.5
+        assert result.snr_back == 12.0
+        assert result.path_len == 2
+
+    @pytest.mark.asyncio
+    async def test_runs_discovery_when_out_path_unknown(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        pk = "ee10f91c" + "00" * 28
+        fake_mc.contacts[pk]["out_path"] = ""
+        fake_mc.contacts[pk]["out_path_len"] = -1
+        # Stub disc_path via send_path_discovery_sync since that's what
+        # disc_path wraps. The lib returns an Event with the payload.
+        disc_ev = MagicMock()
+        disc_ev.is_error = MagicMock(return_value=False)
+        disc_ev.payload = {"in_path": "3c", "out_path": "b9"}
+        fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=disc_ev)
+        client._mc = fake_mc
+
+        result = await client.ping_via_trace(pk)
+
+        fake_mc.commands.send_path_discovery_sync.assert_awaited_once()
+        call = fake_mc.commands.send_trace.call_args
+        # Discovery format is comma-separated: out + dest + in.
+        assert call.kwargs["path"] == "b9,ee,3c"
+        assert result.snr_there == 11.5
+
+    @pytest.mark.asyncio
+    async def test_raises_when_discovery_fails(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        pk = "ee10f91c" + "00" * 28
+        fake_mc.contacts[pk]["out_path"] = ""
+        fake_mc.contacts[pk]["out_path_len"] = -1
+        fake_mc.commands.send_path_discovery_sync = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="path discovery"):
+            await client.ping_via_trace(pk)
+
+    @pytest.mark.asyncio
+    async def test_raises_when_contact_not_in_dict(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="unknown contact"):
+            await client.ping_via_trace("ff" * 32)
+
+    @pytest.mark.asyncio
+    async def test_snr_back_none_when_only_one_hop(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = self._fake_mc_with_stored_path()
+        # Re-stub trace event to have only 1 hop.
+        single_hop = MagicMock()
+        single_hop.payload = {
+            "tag": 0xCAFEBABE, "flags": 0, "path_len": 1,
+            "path": [{"hash": "ee", "snr": 9.0}],
+        }
+        fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=single_hop)
+        client._mc = fake_mc
+        result = await client.ping_via_trace("ee10f91c" + "00" * 28)
+        assert result.snr_there == 9.0
+        assert result.snr_back is None
 
 
 class TestRequestTimeouts:
