@@ -32,7 +32,10 @@ function decorateText(text: string, keyPrefix: string): React.ReactNode[] {
         href={href}
         target="_blank"
         rel="noopener"
-        className="text-primary underline decoration-1 underline-offset-2 hover:opacity-80"
+        // `[overflow-wrap:anywhere]` lets long un-breakable URLs wrap
+        // mid-string so the bubble never overflows a narrow viewport.
+        // Plain `break-words` doesn't apply inside <a> reliably.
+        className="text-primary underline decoration-1 underline-offset-2 hover:opacity-80 [overflow-wrap:anywhere]"
         onClick={(e) => e.stopPropagation()}
       >
         {href}
@@ -67,7 +70,9 @@ function decorateHex(text: string, keyPrefix: string): React.ReactNode[] {
     out.push(
       <code
         key={`${keyPrefix}-h${idx++}`}
-        className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[0.85em]"
+        // Long hex pubkey prefixes break mid-string when they'd
+        // otherwise overflow a narrow message bubble.
+        className="rounded bg-foreground/5 px-1 py-0.5 font-mono text-[0.85em] [overflow-wrap:anywhere]"
       >
         {match[0]}
       </code>,
