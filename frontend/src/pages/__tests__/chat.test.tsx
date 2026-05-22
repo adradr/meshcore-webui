@@ -13,6 +13,18 @@ vi.mock("@/features/contacts/queries", () => ({
   useContacts: () => ({ data: {} }),
   useContact: () => ({ contact: undefined }),
   useDiscoverPath: () => ({ mutate: vi.fn(), isPending: false }),
+  // Pulled in by the AttachmentMenu adornment now rendered inside the
+  // composer; keep it inert so this integration test stays focused on
+  // the swipe-to-reply behaviour.
+  useShareContact: () => ({ mutate: vi.fn(), isPending: false }),
+}))
+
+vi.mock("@/features/device/queries", () => ({
+  useSelfInfo: () => ({ data: undefined }),
+}))
+
+vi.mock("@/features/chat/ShareLocationMapDialog", () => ({
+  ShareLocationMapDialog: () => null,
 }))
 
 vi.mock("@/features/channels/queries", () => ({

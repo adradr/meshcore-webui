@@ -4,6 +4,7 @@ import { useSendMessage } from "./useSendMessage"
 import { useContacts, useContact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
 import { MentionTextarea, type MentionContact } from "./MentionTextarea"
+import { AttachmentMenu } from "./AttachmentMenu"
 import { Send } from "lucide-react"
 
 interface Props {
@@ -84,6 +85,15 @@ export function MessageInput({
     )
   }
 
+  /** Append a snippet from the AttachmentMenu to the current draft.
+   *  Non-empty drafts get a newline separator first so the inserted
+   *  meshcore URI / OSM link is not glued onto the previous line. */
+  const onInsert = (snippet: string) => {
+    const current = text.trim()
+    const next = current ? `${current}\n${snippet}` : snippet
+    setText(next)
+  }
+
   return (
     <div className="border-t bg-background/95 backdrop-blur">
       <form
@@ -93,6 +103,7 @@ export function MessageInput({
           submit()
         }}
       >
+        <AttachmentMenu onInsert={onInsert} disabled={isPending} />
         <div className="flex flex-1 flex-col">
           <MentionTextarea
             value={text}
