@@ -21,6 +21,22 @@ services:
       # Read from .env (gitignored). To run without auth, remove this line or
       # leave MESHCORE_WEBUI_API_KEY empty in .env.
       MESHCORE_WEBUI_API_KEY: "${MESHCORE_WEBUI_API_KEY:-}"
+      # Public base URL for shared image links. REQUIRED for the
+      # attachment-sharing feature to work. Must match where your
+      # reverse proxy serves the app from the outside world.
+      # Example: PUBLIC_BASE_URL=https://mesh.example.com
+      PUBLIC_BASE_URL: "${PUBLIC_BASE_URL:-}"
+      # Per-file upload cap and total quota (in bytes). Defaults are
+      # 50 MiB per file, 2 GiB total. Override via .env if needed.
+      # ATTACHMENTS_MAX_BYTES: "52428800"
+      # ATTACHMENTS_QUOTA_BYTES: "2147483648"
+      # Per-IP rate limits on the public /s/ and /i/ endpoints.
+      # Defaults are 100 req/min, 1000 req/hour.
+      # ATTACHMENTS_RATE_PER_MIN: "100"
+      # ATTACHMENTS_RATE_PER_HOUR: "1000"
+      # Only enable if you front the app with a reverse proxy you trust:
+      # without this, the rate limit uses the proxy's IP, not the real client.
+      # TRUSTED_PROXY: "1"
     volumes:
       - ./data:/data
       - ./backend/secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
