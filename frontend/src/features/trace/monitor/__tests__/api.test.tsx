@@ -117,8 +117,18 @@ describe("useTraceMonitorStatus", () => {
   })
 })
 
+const IDLE_STATUS = {
+  running: false,
+  session_id: null,
+  target_pubkey: null,
+  interval_s: null,
+  started_at: null,
+  samples_total: null,
+  last_sample_at: null,
+}
+
 describe("useStartTraceMonitor", () => {
-  it("posts to /api/trace/monitor/start with body", async () => {
+  it("posts to /api/trace/monitor/start with body and refetches status", async () => {
     const pubkey = "ab".repeat(32)
     ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       session_id: "sid-1",
@@ -126,35 +136,64 @@ describe("useStartTraceMonitor", () => {
       interval_s: 5,
       started_at: "2026-05-23T12:00:00Z",
     })
-    const { result } = renderHook(() => useStartTraceMonitor(), {
-      wrapper: makeWrapper(),
-    })
-    result.current.mutate({ pubkey, interval_s: 5 })
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    // Status get may be called as part of the post-success invalidation.
+    ;(api.get as ReturnType<typeof vi.fn>).mockResolvedValue(IDLE_STATUS)
+    const { result } = renderHook(
+      () => {
+        const status = useTraceMonitorStatus()
+        const start = useStartTraceMonitor()
+        return { status, start }
+      },
+      { wrapper: makeWrapper() },
+    )
+    await waitFor(() => expect(result.current.status.isSuccess).toBe(true))
+    result.current.start.mutate({ pubkey, interval_s: 5 })
+    await waitFor(() =>
+      expect(result.current.start.isSuccess).toBe(true),
+    )
     expect(api.post).toHaveBeenCalledWith(
       "/api/trace/monitor/start",
       { pubkey, interval_s: 5 },
       expect.anything(),
     )
-    expect(result.current.data?.session_id).toBe("sid-1")
+    expect(result.current.start.data?.session_id).toBe("sid-1")
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(
+        "/api/trace/monitor/status",
+        expect.anything(),
+      )
+    })
   })
 })
 
 describe("useStopTraceMonitor", () => {
-  it("posts to /api/trace/monitor/stop", async () => {
+  it("posts to /api/trace/monitor/stop and refetches status", async () => {
     ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       stopped: true,
     })
-    const { result } = renderHook(() => useStopTraceMonitor(), {
-      wrapper: makeWrapper(),
-    })
-    result.current.mutate()
-    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    ;(api.get as ReturnType<typeof vi.fn>).mockResolvedValue(IDLE_STATUS)
+    const { result } = renderHook(
+      () => {
+        const status = useTraceMonitorStatus()
+        const stop = useStopTraceMonitor()
+        return { status, stop }
+      },
+      { wrapper: makeWrapper() },
+    )
+    await waitFor(() => expect(result.current.status.isSuccess).toBe(true))
+    result.current.stop.mutate()
+    await waitFor(() => expect(result.current.stop.isSuccess).toBe(true))
     expect(api.post).toHaveBeenCalledWith(
       "/api/trace/monitor/stop",
       {},
       expect.anything(),
     )
+    await waitFor(() => {
+      expect(api.get).toHaveBeenCalledWith(
+        "/api/trace/monitor/status",
+        expect.anything(),
+      )
+    })
   })
 })
 
@@ -223,7 +262,7 @@ describe("useTraceMonitorSamples", () => {
     expect(result.current.data?.length).toBe(0)
   })
 
-  it("enforces 600-sample buffer cap", async () => {
+  it("enforces 600-sample buffer cap and retains the newest", async () => {
     ;(api.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       session_id: "sid-x",
       target_pubkey: "ab".repeat(32),
@@ -241,12 +280,20 @@ describe("useTraceMonitorSamples", () => {
           "trace_monitor",
           sample({
             session_id: "sid-x",
-            started_at: `2026-05-23T12:00:${i}Z`,
+            started_at: `2026-05-23T12:00:${i.toString().padStart(3, "0")}Z`,
           }),
         )
       }
     })
     await waitFor(() => expect(result.current.data?.length).toBe(600))
+    // Verify the slice trimmed the OLDEST entries, not the newest. Indices
+    // 0..99 (oldest 100) should be gone, leaving 100..699.
+    expect(result.current.data?.[0].started_at).toBe(
+      "2026-05-23T12:00:100Z",
+    )
+    expect(result.current.data?.at(-1)?.started_at).toBe(
+      "2026-05-23T12:00:699Z",
+    )
   })
 })
 

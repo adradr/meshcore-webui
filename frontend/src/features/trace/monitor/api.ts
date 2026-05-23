@@ -47,14 +47,17 @@ export const TraceSampleSchema = z.object({
   error: z.string().nullable(),
 })
 
+// The backend always emits each lifecycle field (or `null`); `.default(null)`
+// keeps the inferred TS type clean as `string | null` rather than letting a
+// missing field bleed `undefined` into consumers.
 export const TraceStatusSchema = z.object({
   running: z.boolean(),
-  session_id: z.string().nullable().optional(),
-  target_pubkey: z.string().nullable().optional(),
-  interval_s: z.number().nullable().optional(),
-  started_at: z.string().nullable().optional(),
-  samples_total: z.number().nullable().optional(),
-  last_sample_at: z.string().nullable().optional(),
+  session_id: z.string().nullable().default(null),
+  target_pubkey: z.string().nullable().default(null),
+  interval_s: z.number().nullable().default(null),
+  started_at: z.string().nullable().default(null),
+  samples_total: z.number().nullable().default(null),
+  last_sample_at: z.string().nullable().default(null),
 })
 
 export const TraceStartResponseSchema = z.object({
@@ -86,6 +89,7 @@ export const TraceSessionListSchema = z.object({
   items: z.array(TraceSessionSummarySchema),
 })
 
+// Private — shapes are trivial and no consumer needs the inferred type.
 const DeleteResponseSchema = z.object({ deleted: z.number() })
 const StopResponseSchema = z.object({ stopped: z.boolean() })
 
@@ -96,8 +100,6 @@ export type TraceStartResponse = z.infer<typeof TraceStartResponseSchema>
 export type TraceSamplesPage = z.infer<typeof TraceSamplesPageSchema>
 export type TraceSessionSummary = z.infer<typeof TraceSessionSummarySchema>
 export type TraceSessionList = z.infer<typeof TraceSessionListSchema>
-export type DeleteResponse = z.infer<typeof DeleteResponseSchema>
-export type StopResponse = z.infer<typeof StopResponseSchema>
 
 // ---------------------------------------------------------------------------
 // Cache keys — stable arrays so TanStack Query can dedupe / invalidate.
@@ -138,39 +140,35 @@ export interface StartTraceMonitorBody {
 export function useStartTraceMonitor() {
   const qc = useQueryClient()
   return useMutation<TraceStartResponse, Error, StartTraceMonitorBody>({
-    mutationFn: async (body) => {
-      try {
-        const r = await api.post<TraceStartResponse>(
-          "/api/trace/monitor/start",
-          body,
-          TraceStartResponseSchema,
-        )
-        await qc.invalidateQueries({ queryKey: STATUS_KEY })
-        return r
-      } catch (e) {
-        notifyError("Trace monitor start", e)
-        throw e
-      }
+    mutationFn: (body) =>
+      api.post<TraceStartResponse>(
+        "/api/trace/monitor/start",
+        body,
+        TraceStartResponseSchema,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STATUS_KEY })
+    },
+    onError: (e) => {
+      notifyError("Trace monitor start", e)
     },
   })
 }
 
 export function useStopTraceMonitor() {
   const qc = useQueryClient()
-  return useMutation<StopResponse, Error, void>({
-    mutationFn: async () => {
-      try {
-        const r = await api.post<StopResponse>(
-          "/api/trace/monitor/stop",
-          {},
-          StopResponseSchema,
-        )
-        await qc.invalidateQueries({ queryKey: STATUS_KEY })
-        return r
-      } catch (e) {
-        notifyError("Trace monitor stop", e)
-        throw e
-      }
+  return useMutation<{ stopped: boolean }, Error, void>({
+    mutationFn: () =>
+      api.post<{ stopped: boolean }>(
+        "/api/trace/monitor/stop",
+        {},
+        StopResponseSchema,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: STATUS_KEY })
+    },
+    onError: (e) => {
+      notifyError("Trace monitor stop", e)
     },
   })
 }
@@ -184,11 +182,15 @@ export function useStopTraceMonitor() {
 export function useTraceMonitorSamples(sessionId: string | null) {
   const qc = useQueryClient()
   const query = useQuery<TraceSample[]>({
-    queryKey: sessionId
-      ? samplesKey(sessionId)
-      : (["trace-monitor", "samples", "idle"] as const),
+    queryKey: samplesKey(sessionId ?? "disabled"),
     enabled: !!sessionId,
     queryFn: async () => {
+      // Defensive — `enabled: !!sessionId` should prevent this, but a future
+      // direct `qc.fetchQuery` call against the same key shouldn't be able
+      // to produce `/api/trace/monitor/null/samples`.
+      if (!sessionId) {
+        throw new Error("useTraceMonitorSamples: sessionId is required")
+      }
       const r = await api.get<TraceSamplesPage>(
         `/api/trace/monitor/${sessionId}/samples?limit=500`,
         TraceSamplesPageSchema,
@@ -240,23 +242,19 @@ export function useTraceMonitorSessions(
 
 export function useDeleteTraceMonitorSession() {
   const qc = useQueryClient()
-  return useMutation<DeleteResponse, Error, string>({
-    mutationFn: async (sessionId) => {
-      try {
-        const r = await api.delete<DeleteResponse>(
-          `/api/trace/monitor/sessions/${sessionId}`,
-          undefined,
-          DeleteResponseSchema,
-        )
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ["trace-monitor", "sessions"] }),
-          qc.invalidateQueries({ queryKey: samplesKey(sessionId) }),
-        ])
-        return r
-      } catch (e) {
-        notifyError("Trace monitor delete", e)
-        throw e
-      }
+  return useMutation<{ deleted: number }, Error, string>({
+    mutationFn: (sessionId) =>
+      api.delete<{ deleted: number }>(
+        `/api/trace/monitor/sessions/${sessionId}`,
+        undefined,
+        DeleteResponseSchema,
+      ),
+    onSuccess: (_data, sessionId) => {
+      qc.invalidateQueries({ queryKey: ["trace-monitor", "sessions"] })
+      qc.invalidateQueries({ queryKey: samplesKey(sessionId) })
+    },
+    onError: (e) => {
+      notifyError("Trace monitor delete", e)
     },
   })
 }
