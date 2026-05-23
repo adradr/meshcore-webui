@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 _PUBKEY_RE = r"^[0-9a-fA-F]{64}$"
 
@@ -30,7 +30,7 @@ class TraceMonitorStartRequest(BaseModel):
 class TraceMonitorStartResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    session_id: str
+    session_id: str = Field(..., min_length=1)
     target_pubkey: str
     interval_s: int
     started_at: datetime
@@ -40,24 +40,30 @@ class TraceMonitorStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     running: bool
-    session_id: str | None = None
+    session_id: str | None = Field(default=None, min_length=1)
     target_pubkey: str | None = None
     interval_s: int | None = None
     started_at: datetime | None = None
     samples_total: int | None = None
     last_sample_at: datetime | None = None
 
+    @model_validator(mode="after")
+    def _running_requires_session_id(self) -> TraceMonitorStatus:
+        if self.running and self.session_id is None:
+            raise ValueError("session_id must be set when running is True")
+        return self
+
 
 class TraceHop(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    hash: str
+    hash: str = Field(..., pattern=r"^[0-9a-fA-F]{2}$")
     snr: float
 
 
 class TraceSampleOut(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    session_id: str
+    session_id: str = Field(..., min_length=1)
     target_pubkey: str
     started_at: datetime
     finished_at: datetime
@@ -71,23 +77,32 @@ class TraceSampleOut(BaseModel):
 
 class TraceSamplesPage(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    session_id: str
+    session_id: str = Field(..., min_length=1)
     target_pubkey: str
-    count: int
     items: list[TraceSampleOut]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
 
 
 class TraceMonitorSessionSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    session_id: str
+    session_id: str = Field(..., min_length=1)
     target_pubkey: str
     first_sample_at: datetime
     last_sample_at: datetime
-    samples_total: int
-    ok_count: int
-    error_count: int
+    samples_total: int = Field(..., ge=0)
+    ok_count: int = Field(..., ge=0)
+    error_count: int = Field(..., ge=0)
 
 
 class TraceMonitorSessionList(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[TraceMonitorSessionSummary]
+
+    @computed_field
+    @property
+    def count(self) -> int:
+        return len(self.items)
