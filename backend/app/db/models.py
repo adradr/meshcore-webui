@@ -1,9 +1,18 @@
 from __future__ import annotations
+
 import datetime as dt
 from typing import Literal
 
 from sqlalchemy import (
-    BigInteger, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func,
+    BigInteger,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column

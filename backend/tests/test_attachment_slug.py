@@ -1,5 +1,6 @@
-from app.services.attachments.slug import generate_slug, SLUG_PATTERN
 import re
+
+from app.services.attachments.slug import SLUG_PATTERN, generate_slug
 
 
 def test_slug_is_8_chars():
