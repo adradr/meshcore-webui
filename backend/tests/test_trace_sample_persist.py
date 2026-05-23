@@ -32,3 +32,8 @@ async def test_persist_writes_one_row(sessionmaker_for_tests):
         ).scalar_one()
         assert row.snr_there == pytest.approx(-3.0)
         assert json.loads(row.hops_json) == [{"hash": "ab", "snr": -3.0}]
+        assert row.status == "ok"
+        assert row.path_len == 2
+        assert row.snr_back == pytest.approx(-6.0)
+        assert row.target_pubkey == "ab" * 32
+        assert row.error is None
