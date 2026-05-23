@@ -75,3 +75,29 @@ async def test_rx_log_entry_nullable_fields(engine, db):
     assert found.snr is None
     assert found.rssi is None
     assert found.created_at is not None
+
+
+@pytest.mark.asyncio
+async def test_attachment_model_roundtrip(session_factory):
+    from app.db.models import Attachment
+    import datetime as dt
+    Session = session_factory
+    async with Session() as s:
+        a = Attachment(
+            slug="aB3kZ9pX",
+            storage_path="aB/aB3kZ9pX.webp",
+            thumb_path="aB/aB3kZ9pX.thumb.webp",
+            mime="image/webp",
+            size_bytes=12345,
+            width=1920,
+            height=1080,
+            original_filename="photo.jpg",
+            original_size_bytes=42000,
+            uploaded_at=dt.datetime.now(dt.UTC),
+            uploader_fingerprint="abcd1234",
+        )
+        s.add(a)
+        await s.commit()
+        await s.refresh(a)
+        assert a.id is not None
+        assert a.slug == "aB3kZ9pX"
