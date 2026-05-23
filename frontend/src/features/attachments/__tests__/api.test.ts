@@ -6,7 +6,7 @@ import {
   purgeAttachments,
 } from "../api"
 
-const originalFetch = global.fetch
+const originalFetch = globalThis.fetch
 
 function mockJson(body: unknown, init: ResponseInit = { status: 200 }) {
   return Promise.resolve(
@@ -18,17 +18,17 @@ function mockJson(body: unknown, init: ResponseInit = { status: 200 }) {
 }
 
 beforeEach(() => {
-  global.fetch = vi.fn() as unknown as typeof fetch
+  globalThis.fetch = vi.fn() as unknown as typeof fetch
 })
 
 afterEach(() => {
-  global.fetch = originalFetch
+  globalThis.fetch = originalFetch
   vi.restoreAllMocks()
 })
 
 describe("attachments api", () => {
   it("uploadAttachment POSTs multipart with the file field", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
       mockJson({
         slug: "aB3kZ9pX",
         url: "https://x/s/aB3kZ9pX",
@@ -45,7 +45,7 @@ describe("attachments api", () => {
     const out = await uploadAttachment(file)
     expect(out.slug).toBe("aB3kZ9pX")
 
-    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, RequestInit]
     expect(url).toBe("/api/attachments")
     expect(init.method).toBe("POST")
@@ -56,7 +56,7 @@ describe("attachments api", () => {
   })
 
   it("listAttachments builds cursor query when limit + before are set", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
       mockJson({
         items: [],
         next_cursor: null,
@@ -66,14 +66,14 @@ describe("attachments api", () => {
       }),
     )
     await listAttachments({ limit: 50, before: 100 })
-    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
     ]
     expect(url).toBe("/api/attachments?limit=50&before=100")
   })
 
   it("listAttachments omits the query string entirely when no opts are passed", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
       mockJson({
         items: [],
         next_cursor: null,
@@ -83,18 +83,18 @@ describe("attachments api", () => {
       }),
     )
     await listAttachments()
-    const [url] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
+    const [url] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
     ]
     expect(url).toBe("/api/attachments")
   })
 
   it("deleteAttachment uses DELETE without a body", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
       Promise.resolve(new Response(null, { status: 204 })),
     )
     await deleteAttachment("aB3kZ9pX")
-    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, RequestInit]
     expect(url).toBe("/api/attachments/aB3kZ9pX")
     expect(init.method).toBe("DELETE")
@@ -102,11 +102,11 @@ describe("attachments api", () => {
   })
 
   it("purgeAttachments POSTs the PURGE confirm body", async () => {
-    ;(global.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
+    ;(globalThis.fetch as ReturnType<typeof vi.fn>).mockReturnValue(
       mockJson({ deleted_count: 0, freed_bytes: 0 }),
     )
     await purgeAttachments()
-    const [url, init] = (global.fetch as ReturnType<typeof vi.fn>).mock
+    const [url, init] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, RequestInit]
     expect(url).toBe("/api/attachments/purge")
     expect(init.method).toBe("POST")
