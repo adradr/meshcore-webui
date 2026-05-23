@@ -1,7 +1,8 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 import {
   Contact as ContactIcon,
+  Image as ImageIcon,
   MapPin,
   Plus,
   Send,
@@ -15,11 +16,16 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
+import { useUploadAttachment } from "@/features/attachments/queries"
 import { useShareContact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
+import { isApiError } from "@/lib/api"
 import { SharedContactPicker } from "./SharedContactPicker"
 import { ShareLocationMapDialog } from "./ShareLocationMapDialog"
 import { formatLocationSnippet } from "./locationSnippet"
+
+/** Hard client-side cap; the server enforces its own (configurable) cap too. */
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 
 interface Props {
   /** Called with the snippet text to insert into the composer. */
@@ -38,6 +44,7 @@ type View = "menu" | "contact-picker"
  * 2. My current position — browser geolocation → OSM link snippet
  * 3. Share a contact — picker → meshcore:// URI of selected contact
  * 4. Share location on map — modal map → OSM link snippet
+ * 5. Image — pick a photo, upload it, and insert the public URL
  *
  * Each successful action closes the sheet and calls `onInsert` so the
  * parent (`MessageInput`) can append the snippet to the draft.
@@ -47,9 +54,11 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
   const [view, setView] = useState<View>("menu")
   const [mapOpen, setMapOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const selfInfo = useSelfInfo()
   const share = useShareContact()
+  const upload = useUploadAttachment()
 
   const closeAll = () => {
     setOpen(false)
@@ -114,6 +123,45 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
     insertAndClose(formatLocationSnippet(lat, lon))
   }
 
+  const handleImageClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    // Reset the input so the same file can be re-picked later.
+    e.target.value = ""
+    if (!file) return
+
+    if (file.size > MAX_IMAGE_BYTES) {
+      toast.error("Image too large (50 MB max)")
+      return
+    }
+
+    setPendingAction("image")
+    upload.mutate(file, {
+      onSuccess: (data) => insertAndClose(data.url),
+      onError: (err) => {
+        if (isApiError(err) && err.status) {
+          const msg =
+            err.status === 413
+              ? "Image too large"
+              : err.status === 415
+                ? "Unsupported image type"
+                : err.status === 507
+                  ? "Storage quota full"
+                  : err.status === 429
+                    ? "Rate-limited; try again shortly"
+                    : "Upload failed"
+          toast.error(msg)
+        } else {
+          toast.error("Upload failed")
+        }
+        setPendingAction(null)
+      },
+    })
+  }
+
   const handleSheetOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) {
@@ -124,6 +172,16 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
 
   return (
     <>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture
+        hidden
+        aria-hidden
+        data-testid="attachment-image-input"
+        onChange={handleFileSelected}
+      />
       <Button
         type="button"
         variant="ghost"
@@ -178,6 +236,13 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
                     setOpen(false)
                     setMapOpen(true)
                   }}
+                />
+                <MenuRow
+                  icon={<ImageIcon className="h-4 w-4" />}
+                  title="Image"
+                  subtitle="Upload a photo and share a link"
+                  busy={pendingAction === "image"}
+                  onClick={handleImageClick}
                 />
               </div>
             </>

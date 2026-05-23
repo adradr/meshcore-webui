@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 // Hoisted mock state so the vi.mock factories can reference it.
 const mocks = vi.hoisted(() => ({
   shareMutate: vi.fn(),
+  uploadMutate: vi.fn(),
   selfInfoData: undefined as
     | { public_key?: string; adv_lat?: number | null; adv_lon?: number | null }
     | undefined,
@@ -26,6 +27,13 @@ vi.mock("@/features/contacts/queries", () => ({
 
 vi.mock("@/features/device/queries", () => ({
   useSelfInfo: () => ({ data: mocks.selfInfoData }),
+}))
+
+vi.mock("@/features/attachments/queries", () => ({
+  useUploadAttachment: () => ({
+    mutate: mocks.uploadMutate,
+    isPending: false,
+  }),
 }))
 
 vi.mock("sonner", () => ({
@@ -72,6 +80,7 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   mocks.shareMutate.mockReset()
+  mocks.uploadMutate.mockReset()
   mocks.toastError.mockReset()
   mocks.selfInfoData = {
     public_key: "ab".repeat(32),
@@ -211,5 +220,81 @@ describe("AttachmentMenu — Share location on map", () => {
     const snippet = onInsert.mock.calls[0][0] as string
     expect(snippet).toContain("📍 50.12345, 14.54321")
     expect(snippet).toContain("mlat=50.12345")
+  })
+})
+
+describe("AttachmentMenu — Image", () => {
+  it("renders the Image menu row", async () => {
+    render(wrap(<AttachmentMenu onInsert={vi.fn()} />))
+    await userEvent.click(screen.getByLabelText(/attach/i))
+    expect(screen.getByText(/^image$/i)).toBeInTheDocument()
+    expect(
+      screen.getByText(/upload a photo and share a link/i),
+    ).toBeInTheDocument()
+  })
+
+  it("triggers the hidden file input when the row is clicked", async () => {
+    render(wrap(<AttachmentMenu onInsert={vi.fn()} />))
+    await userEvent.click(screen.getByLabelText(/attach/i))
+
+    const input = screen.getByTestId(
+      "attachment-image-input",
+    ) as HTMLInputElement
+    const clickSpy = vi.spyOn(input, "click")
+
+    await userEvent.click(screen.getByText(/^image$/i))
+    expect(clickSpy).toHaveBeenCalled()
+  })
+
+  it("uploads on file pick and inserts the returned URL", async () => {
+    const onInsert = vi.fn()
+    const url = "https://example.test/u/abc123.jpg"
+    mocks.uploadMutate.mockImplementation((_file, opts) => {
+      opts.onSuccess({
+        slug: "abc123",
+        url,
+        mime_type: "image/jpeg",
+        size_bytes: 1024,
+        created_at_epoch_s: 1700000000,
+        public_until_epoch_s: 1700604800,
+      })
+    })
+
+    render(wrap(<AttachmentMenu onInsert={onInsert} />))
+    await userEvent.click(screen.getByLabelText(/attach/i))
+
+    const input = screen.getByTestId(
+      "attachment-image-input",
+    ) as HTMLInputElement
+    const file = new File(["fake-image-bytes"], "photo.jpg", {
+      type: "image/jpeg",
+    })
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(mocks.uploadMutate).toHaveBeenCalled())
+    expect(mocks.uploadMutate.mock.calls[0][0]).toBe(file)
+    await waitFor(() => expect(onInsert).toHaveBeenCalledWith(url))
+  })
+
+  it("rejects files over 50 MB without uploading", async () => {
+    const onInsert = vi.fn()
+    render(wrap(<AttachmentMenu onInsert={onInsert} />))
+    await userEvent.click(screen.getByLabelText(/attach/i))
+
+    const input = screen.getByTestId(
+      "attachment-image-input",
+    ) as HTMLInputElement
+    // Build a 51 MB File without allocating 51 MB of memory — override
+    // the `size` property so the component's guard kicks in.
+    const file = new File(["x"], "huge.jpg", { type: "image/jpeg" })
+    Object.defineProperty(file, "size", { value: 51 * 1024 * 1024 })
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      expect.stringMatching(/too large/i),
+    )
+    expect(mocks.uploadMutate).not.toHaveBeenCalled()
+    expect(onInsert).not.toHaveBeenCalled()
   })
 })
