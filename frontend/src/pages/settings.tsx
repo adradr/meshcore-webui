@@ -17,6 +17,7 @@ import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
 import { MutedList } from "@/features/mutes/MutedList"
 import { PushModeRadio } from "@/features/push/PushModeRadio"
+import { AttachmentsManager } from "@/features/admin/AttachmentsManager"
 import { DangerZone } from "@/features/admin/DangerZone"
 
 const REPO_URL = "https://github.com/adradr/meshcore-webui"
@@ -212,6 +213,11 @@ export function SettingsPage() {
             .
           </p>
         </section>
+
+        {/* Attachments — listed before DangerZone because per-item / purge
+            actions are scoped to image storage, not the broader device reset
+            flow. The header already exposes the destructive "Purge…" entry. */}
+        <AttachmentsManager />
 
         <DangerZone />
       </div>
