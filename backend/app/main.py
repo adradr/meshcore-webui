@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from app.api.los import router as los_router
 from app.api.messages import router as messages_router
 from app.api.mutes import router as mutes_router
 from app.api.noise import router as noise_router
+from app.api.public_attachments import router as public_attachments_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
 from app.api.trace import router as trace_router
@@ -40,6 +42,7 @@ from app.services.push_sender import PushSender
 from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
+
 
 def _configure_logging() -> None:
     """Make sure our `app.*` loggers (including `app.audit`) actually
@@ -108,9 +111,10 @@ async def _ensure_schema() -> None:
     import asyncio
     from pathlib import Path
 
-    from alembic import command
     from alembic.config import Config
     from sqlalchemy import inspect as sa_inspect
+
+    from alembic import command
 
     repo_root = Path(__file__).resolve().parent.parent
     ini = repo_root / "alembic.ini"
@@ -302,6 +306,7 @@ def create_app() -> FastAPI:
     app.include_router(diagnostics_router)
     app.include_router(admin_router)
     app.include_router(attachments_router)
+    app.include_router(public_attachments_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():

@@ -12,8 +12,10 @@ class AttachmentStorage:
     """
 
     def __init__(self, root: Path):
+        # Lazy mkdir: read paths (`GET /s/{slug}`, `GET /api/attachments`) must
+        # not require write access to the storage root. The directory is
+        # created on first write via `_dir_for()`.
         self.root = Path(root)
-        self.root.mkdir(parents=True, exist_ok=True)
 
     def _dir_for(self, slug: str) -> Path:
         d = self.root / slug[:2]
