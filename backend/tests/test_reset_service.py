@@ -146,6 +146,13 @@ async def test_reset_local_trace_samples_clears_trace_samples_only(session_facto
             hops_json="[]",
         ))
         db.add(Message(msg_type="dm", direction="in", text="hi"))
+        db.add(DiagnosticRun(
+            target_pubkey="cd" * 32,
+            started_at=now,
+            finished_at=now,
+            verdict="ok",
+            report_json="{}",
+        ))
         await db.commit()
     async with session_factory() as db:
         n = await reset_local_trace_samples(db)
@@ -154,3 +161,4 @@ async def test_reset_local_trace_samples_clears_trace_samples_only(session_facto
     async with session_factory() as db:
         assert await _count(db, TraceSample) == 0
         assert await _count(db, Message) == 1
+        assert await _count(db, DiagnosticRun) == 1

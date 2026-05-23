@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Message, MutePreference, TraceSample
+from app.db.models import DiagnosticRun, Message, MutePreference, TraceSample
 from app.main import app
 
 
@@ -144,6 +144,13 @@ async def test_reset_local_trace_samples_clears_trace_samples_only(
             hops_json="[]",
         ))
         db.add(Message(msg_type="dm", direction="in", text="hi"))
+        db.add(DiagnosticRun(
+            target_pubkey="cd" * 32,
+            started_at=now,
+            finished_at=now,
+            verdict="ok",
+            report_json="{}",
+        ))
         await db.commit()
 
     r = await client.post(
@@ -167,8 +174,12 @@ async def test_reset_local_trace_samples_clears_trace_samples_only(
         msg_count = (
             await db.execute(select(func.count()).select_from(Message))
         ).scalar()
+        diag_count = (
+            await db.execute(select(func.count()).select_from(DiagnosticRun))
+        ).scalar()
     assert trace_count == 0
     assert msg_count == 1
+    assert diag_count == 1
 
 
 @pytest.mark.asyncio

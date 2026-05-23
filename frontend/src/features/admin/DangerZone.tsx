@@ -189,7 +189,7 @@ interface UnifiedResetDialogProps {
 }
 
 /**
- * Unified reset dialog — 9 checkboxes (6 local + 3 device) plus a typed
+ * Unified reset dialog — 10 checkboxes (7 local + 3 device) plus a typed
  * RESET confirmation. The action label reflects the selected count so users
  * can sanity-check the scope before clicking. Disabled until both at-least-
  * one-target AND typed-confirm gates are satisfied.
