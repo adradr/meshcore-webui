@@ -23,6 +23,7 @@ from app.api.noise import router as noise_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
 from app.api.trace import router as trace_router
+from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
 from app.core.vapid import load_vapid
@@ -33,12 +34,14 @@ from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
-from app.services.meshcore_client import MeshCoreClient
+from app.services.meshcore_client import MeshCoreClient, WireEvent
 from app.services.noise_poller import NoisePoller
 from app.services.push_sender import PushSender
 from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
+from app.services.trace_monitor import TraceMonitor
+from app.services.trace_sample_persist import persist_trace_sample
 
 def _configure_logging() -> None:
     """Make sure our `app.*` loggers (including `app.audit`) actually
@@ -248,6 +251,41 @@ async def lifespan(app: FastAPI):
     app.state.task_pool = pool
     app.state.noise_poller = noise_poller
 
+    # Continuous Trace Monitor — periodic trace_to loop with a single
+    # active session at a time. Persistence is decoupled via the helper;
+    # broadcast piggybacks on the same WS subscriber fan-out the rest of
+    # the app uses (so the SPA's existing WebSocketProvider just sees
+    # ``trace.sample`` events on the ``trace_monitor`` topic).
+    async def _trace_monitor_persist(sample):
+        await persist_trace_sample(SessionLocal, sample)
+
+    def _trace_monitor_broadcast(sample) -> None:
+        # `on_sample` is sync per the service contract, so schedule the
+        # broadcast onto the running loop. ``create_task`` returns
+        # immediately — fire-and-forget is fine: a dropped broadcast
+        # never blocks the next tick, and the sample is still persisted.
+        pool.spawn(
+            client.broadcast_wire_event(WireEvent(
+                type="trace.sample",
+                payload=sample.model_dump(mode="json"),
+                topic="trace_monitor",
+                attributes={
+                    "pubkey": sample.target_pubkey,
+                    "session_id": sample.session_id,
+                },
+            )),
+            name="trace-monitor-broadcast",
+        )
+
+    trace_monitor = TraceMonitor(
+        client=client,
+        on_sample=_trace_monitor_broadcast,
+        on_persist=_trace_monitor_persist,
+        interval_min_s=settings.trace_monitor_min_interval_s,
+        interval_max_s=settings.trace_monitor_max_interval_s,
+    )
+    app.state.trace_monitor = trace_monitor
+
     log.info("Initializing ElevationProvider (%s/%s)",
              settings.elevation_base_url, settings.elevation_dataset)
     async with httpx.AsyncClient(timeout=30.0) as elev_client:
@@ -261,6 +299,7 @@ async def lifespan(app: FastAPI):
         finally:
             log.info("Shutting down")
             app.state.elevation_provider = None
+            await trace_monitor.stop()
             await noise_poller.stop()
             client.unsubscribe(q)
             await client.stop()
@@ -295,6 +334,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(los_router)
     app.include_router(trace_router)
+    app.include_router(trace_monitor_router)
     app.include_router(rx_log_router)
     app.include_router(noise_router)
     app.include_router(mutes_router)
