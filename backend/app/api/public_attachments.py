@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse  # noqa: F401
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -43,6 +43,49 @@ async def view(
         html,
         headers={
             "Content-Security-Policy": CSP_VIEWER,
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
+@router.get("/i/{slug}")
+async def serve_image(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    slug: Annotated[str, Path(pattern=SLUG_PATTERN)],
+):
+    svc = _svc()
+    att = await svc.get(db, slug)
+    if att is None:
+        return PlainTextResponse("gone", status_code=410)
+    full, _thumb = svc.storage.paths(slug)
+    return FileResponse(
+        path=full,
+        media_type="image/webp",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'inline; filename="{slug}.webp"',
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
+@router.get("/i/{slug}/thumb")
+async def serve_thumb(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    slug: Annotated[str, Path(pattern=SLUG_PATTERN)],
+):
+    svc = _svc()
+    att = await svc.get(db, slug)
+    if att is None:
+        return PlainTextResponse("gone", status_code=410)
+    _full, thumb = svc.storage.paths(slug)
+    return FileResponse(
+        path=thumb,
+        media_type="image/webp",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "public, max-age=31536000, immutable",
             "Referrer-Policy": "no-referrer",
         },
     )
