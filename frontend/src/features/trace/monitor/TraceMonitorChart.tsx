@@ -63,23 +63,25 @@ interface HopColumns {
  */
 function buildHopColumns(samples: TraceSample[]): HopColumns {
   const hashes: string[] = []
-  const seen = new Set<string>()
+  const hashToCol = new Map<string, number>()
   for (const s of samples) {
     if (s.status !== "ok") continue
     for (const h of s.hops) {
-      if (!seen.has(h.hash)) {
-        seen.add(h.hash)
+      if (!hashToCol.has(h.hash)) {
+        hashToCol.set(h.hash, hashes.length)
         hashes.push(h.hash)
       }
     }
   }
-  const data: (number | null)[][] = hashes.map(() => new Array(samples.length).fill(null))
+  const data: (number | null)[][] = hashes.map(
+    () => new Array(samples.length).fill(null),
+  )
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i]
     if (s.status !== "ok") continue
     for (const h of s.hops) {
-      const col = hashes.indexOf(h.hash)
-      if (col >= 0) data[col][i] = h.snr
+      const col = hashToCol.get(h.hash)
+      if (col !== undefined) data[col][i] = h.snr
     }
   }
   return { hashes, data }
@@ -143,21 +145,17 @@ export function TraceMonitorChart({
       "rgba(120,120,120,0.6)",
     )
 
-    const hopSeries: uPlot.Series[] = hopColumns.hashes.map((hash, idx) => {
-      const themed =
-        idx === 0
-          ? readColorVar("--chart-4", HOP_FALLBACK_PALETTE[0])
-          : idx === 1
-            ? readColorVar("--chart-5", HOP_FALLBACK_PALETTE[1])
-            : HOP_FALLBACK_PALETTE[idx % HOP_FALLBACK_PALETTE.length]
-      return {
-        label: `hop ${hash.slice(0, 6)}`,
-        stroke: themed,
-        width: 1,
-        points: { show: false },
-        spanGaps: false,
-      }
-    })
+    // Use the HSL fallback palette unconditionally for hops: the design
+    // system's --chart-1..5 are all achromatic grays (zero chroma), so 4+
+    // simultaneous gray series would cluster visually. Primaries keep their
+    // CSS-var lookups since there are only two and the legend disambiguates.
+    const hopSeries: uPlot.Series[] = hopColumns.hashes.map((hash, idx) => ({
+      label: `hop ${hash.slice(0, 6)}`,
+      stroke: HOP_FALLBACK_PALETTE[idx % HOP_FALLBACK_PALETTE.length],
+      width: 1,
+      points: { show: false },
+      spanGaps: false,
+    }))
 
     return {
       width,

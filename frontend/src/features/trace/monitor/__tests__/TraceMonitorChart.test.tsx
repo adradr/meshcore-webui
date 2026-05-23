@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
+import type uPlot from "uplot"
 
 import { type TraceSample } from "../api"
 import { TraceMonitorChart } from "../TraceMonitorChart"
@@ -120,5 +121,41 @@ describe("TraceMonitorChart", () => {
     expect(data[3]).toEqual([1, null]) // aa - only first sample
     expect(data[4]).toEqual([2, 4]) // bb - both
     expect(data[5]).toEqual([null, 5]) // cc - only second
+
+    // Lock the series-count invariant + hop-series styling.
+    const opts = lastUplotProps.options as uPlot.Options
+    // series layout: [time, snrThere, snrBack, ...hopSeries]
+    expect(opts.series).toHaveLength(3 + 3)
+    const firstHopSeries = opts.series![3] as uPlot.Series
+    expect(String(firstHopSeries.label)).toContain("hop ")
+    expect(firstHopSeries.spanGaps).toBe(false)
+    expect(firstHopSeries.points?.show).toBe(false)
+  })
+
+  it("emits null in hop columns for failed samples when showPerHop is true", () => {
+    const samples: TraceSample[] = [
+      makeSample({
+        finished_at: "2026-05-23T10:00:01Z",
+        hops: [{ hash: "aa", snr: 3 }],
+      }),
+      makeSample({
+        finished_at: "2026-05-23T10:00:02Z",
+        status: "timeout",
+        snr_there: null,
+        snr_back: null,
+        hops: [],
+        path_len: null,
+        error: "timeout",
+      }),
+      makeSample({
+        finished_at: "2026-05-23T10:00:03Z",
+        hops: [{ hash: "aa", snr: 5 }],
+      }),
+    ]
+    render(<TraceMonitorChart samples={samples} showPerHop />)
+    const data = lastUplotProps.data as (number | null)[][]
+    // [xs, snrThere, snrBack, hopAA]
+    expect(data).toHaveLength(4)
+    expect(data[3]).toEqual([3, null, 5])
   })
 })
