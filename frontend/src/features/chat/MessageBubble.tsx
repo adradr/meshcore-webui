@@ -29,6 +29,8 @@ import type { Message } from "./queries"
 import { renderMentions } from "./renderMentions"
 import type { MentionContact } from "./MentionInput"
 import { useSendMessage } from "./useSendMessage"
+import { useAuthInfo } from "@/features/auth/api"
+import { parseAttachmentUrls } from "@/features/attachments/parseAttachmentUrls"
 
 interface Props {
   message: Message
@@ -96,6 +98,7 @@ export function MessageBubble({
   const swipeStartXRef = useRef<number | null>(null)
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
+  const { data: authInfo } = useAuthInfo()
   const sendRetry = useSendMessage()
   const isOut = message.direction === "out"
   const isFailed = message.ack_state === "failed"
@@ -117,6 +120,16 @@ export function MessageBubble({
     () => renderMentions(bodyText, mentionContacts),
     [bodyText, mentionContacts],
   )
+
+  // Inline attachment preview — only when the message body contains a
+  // short URL whose host matches our configured public_base_url. The URL
+  // itself is intentionally left in `bodyText` so the recipient can copy
+  // / share it; the thumbnail is layered ABOVE the text render.
+  const baseUrl = authInfo?.public_base_url ?? ""
+  const firstAttachment = useMemo(() => {
+    if (!baseUrl) return undefined
+    return parseAttachmentUrls(message.text, baseUrl)[0]
+  }, [baseUrl, message.text])
 
   const items = useMessageActions({
     message,
@@ -215,6 +228,28 @@ export function MessageBubble({
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className={bubbleClass}>
+            {firstAttachment && (
+              <a
+                href={firstAttachment.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mb-2 block"
+              >
+                <img
+                  src={firstAttachment.thumbUrl}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: 320,
+                    aspectRatio: "4 / 3",
+                    objectFit: "contain",
+                  }}
+                  className="rounded-md"
+                />
+              </a>
+            )}
             <p className="break-words text-sm leading-snug">{renderedText}</p>
             {showStatus && (
               <span className="mt-0.5 flex items-center justify-end gap-1.5" title={message.ack_state}>

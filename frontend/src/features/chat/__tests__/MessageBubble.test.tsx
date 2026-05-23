@@ -13,6 +13,13 @@ vi.mock("@/features/contacts/queries", () => ({
   useDiscoverPath: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+const useAuthInfoMock = vi.fn(() => ({
+  data: { required: true, valid: true, public_base_url: "https://mesh.example.com" },
+}))
+vi.mock("@/features/auth/api", () => ({
+  useAuthInfo: () => useAuthInfoMock(),
+}))
+
 vi.mock("../useSendMessage", () => ({
   useSendMessage: () => ({ mutate: vi.fn(), isPending: false }),
 }))
@@ -194,6 +201,54 @@ describe("MessageBubble — swipe-to-reply", () => {
     fireEvent.pointerMove(root, { clientX: 100, pointerId: 1 })
     fireEvent.pointerUp(root, { clientX: 100, pointerId: 1 })
     expect(onReply).not.toHaveBeenCalled()
+  })
+
+  it("renders inline thumbnail for our /s/ URLs", () => {
+    render(
+      wrap(
+        <MessageBubble
+          message={inboundDmMessage({
+            text: "look: https://mesh.example.com/s/aB3kZ9pX",
+          })}
+          isFirstInGroup
+          isLastInGroup
+          showStatus={false}
+          resolvedSender={null}
+          senderPrefix={null}
+        />,
+      ),
+    )
+    const img = document.querySelector("img") as HTMLImageElement | null
+    expect(img).not.toBeNull()
+    expect(img!.getAttribute("src")).toBe(
+      "https://mesh.example.com/i/aB3kZ9pX/thumb",
+    )
+    // Body text + the URL must still render (recipients copy/share it). The
+    // URL itself is autolinked by `renderMentions` into a separate <a>, so
+    // assert presence of the prefix text and the autolinked anchor independently.
+    expect(screen.getByText(/look:/)).toBeTruthy()
+    const urlAnchor = Array.from(document.querySelectorAll("a")).find(
+      (a) => a.getAttribute("href") === "https://mesh.example.com/s/aB3kZ9pX",
+    )
+    expect(urlAnchor).toBeTruthy()
+  })
+
+  it("does not render thumb for foreign hosts", () => {
+    render(
+      wrap(
+        <MessageBubble
+          message={inboundDmMessage({
+            text: "sketchy: https://evil.com/s/aB3kZ9pX",
+          })}
+          isFirstInGroup
+          isLastInGroup
+          showStatus={false}
+          resolvedSender={null}
+          senderPrefix={null}
+        />,
+      ),
+    )
+    expect(document.querySelector("img")).toBeNull()
   })
 
   it("does NOT initiate swipe when pointerdown originates on a button", () => {
