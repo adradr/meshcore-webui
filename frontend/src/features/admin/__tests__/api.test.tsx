@@ -42,6 +42,7 @@ describe("useReset", () => {
         mutes: null,
         settings: null,
         push_subscribers: null,
+        trace_samples: null,
       },
       device: {
         cleared_channels: 2,
@@ -102,6 +103,7 @@ describe("useReset", () => {
       local: {
         messages: 3, diagnostic_runs: null, rx_log: null,
         mutes: null, settings: null, push_subscribers: null,
+        trace_samples: null,
       },
       device: {
         cleared_channels: null, coords_reset: false,

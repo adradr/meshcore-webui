@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import datetime as dt
 from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models import Message, MutePreference
+from app.db.models import Message, MutePreference, TraceSample
 from app.main import app
 
 
@@ -23,6 +24,7 @@ async def test_reset_local_messages_only_empty_db(client):
     assert body["local"]["mutes"] is None
     assert body["local"]["settings"] is None
     assert body["local"]["push_subscribers"] is None
+    assert body["local"]["trace_samples"] is None
     assert body["device"] == {
         "cleared_channels": None,
         "coords_reset": False,
@@ -122,6 +124,51 @@ async def test_reset_local_messages_and_mutes_clears_both(
         ).scalar()
     assert msg_count == 0
     assert mute_count == 0
+
+
+@pytest.mark.asyncio
+async def test_reset_local_trace_samples_clears_trace_samples_only(
+    client, session_factory,
+):
+    now = dt.datetime.now(dt.timezone.utc)
+    async with session_factory() as db:
+        db.add(TraceSample(
+            session_id="11111111-1111-1111-1111-111111111111",
+            target_pubkey="ab" * 32,
+            started_at=now,
+            finished_at=now,
+            status="ok",
+            path_len=1,
+            snr_there=2.5,
+            snr_back=1.5,
+            hops_json="[]",
+        ))
+        db.add(Message(msg_type="dm", direction="in", text="hi"))
+        await db.commit()
+
+    r = await client.post(
+        "/api/admin/reset",
+        json={"local": {"trace_samples": True}, "confirm": "RESET"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["local"]["trace_samples"] == 1
+    assert body["local"]["messages"] is None
+    assert body["local"]["diagnostic_runs"] is None
+    assert body["local"]["rx_log"] is None
+    assert body["local"]["mutes"] is None
+    assert body["local"]["settings"] is None
+    assert body["local"]["push_subscribers"] is None
+
+    async with session_factory() as db:
+        trace_count = (
+            await db.execute(select(func.count()).select_from(TraceSample))
+        ).scalar()
+        msg_count = (
+            await db.execute(select(func.count()).select_from(Message))
+        ).scalar()
+    assert trace_count == 0
+    assert msg_count == 1
 
 
 @pytest.mark.asyncio

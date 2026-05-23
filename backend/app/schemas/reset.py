@@ -12,11 +12,13 @@ class LocalResetSelector(BaseModel):
     mutes: bool = False
     settings: bool = False
     push_subscribers: bool = False
+    trace_samples: bool = False
 
     def any_selected(self) -> bool:
         return any(
             (self.messages, self.diagnostic_runs, self.rx_log,
-             self.mutes, self.settings, self.push_subscribers)
+             self.mutes, self.settings, self.push_subscribers,
+             self.trace_samples)
         )
 
 

@@ -30,7 +30,7 @@ describe("DangerZone — unified reset dialog", () => {
     render(<DangerZone />)
     openResetDialog()
 
-    // 6 local + 3 device checkboxes, all unchecked.
+    // 7 local + 3 device checkboxes, all unchecked.
     const localKeys = [
       "messages",
       "diagnostic_runs",
@@ -38,6 +38,7 @@ describe("DangerZone — unified reset dialog", () => {
       "mutes",
       "settings",
       "push_subscribers",
+      "trace_samples",
     ]
     for (const k of localKeys) {
       const cb = screen.getByTestId(`reset-local-${k}`) as HTMLInputElement
@@ -102,6 +103,33 @@ describe("DangerZone — unified reset dialog", () => {
     expect(body).toEqual({
       local: { messages: true },
       device: { channels: true },
+      confirm: "RESET",
+    })
+  })
+
+  it("selecting only trace_samples + typing RESET → action click calls useReset.mutate with trace_samples=true", () => {
+    render(<DangerZone />)
+    openResetDialog()
+
+    const cb = screen.getByTestId(
+      "reset-local-trace_samples",
+    ) as HTMLInputElement
+    expect(cb.checked).toBe(false)
+    fireEvent.click(cb)
+    expect(cb.checked).toBe(true)
+
+    const input = screen.getByLabelText(/Confirm by typing RESET/)
+    fireEvent.change(input, { target: { value: "RESET" } })
+
+    const action = screen.getByRole("button", { name: /^Reset 1 target$/ })
+    expect(action).not.toBeDisabled()
+    fireEvent.click(action)
+
+    expect(resetMutate).toHaveBeenCalledTimes(1)
+    const [body] = resetMutate.mock.calls[0]
+    expect(body).toEqual({
+      local: { trace_samples: true },
+      device: {},
       confirm: "RESET",
     })
   })

@@ -4,6 +4,7 @@ from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     Message, DiagnosticRun, MutePreference, Setting, RxLogEntry, PushSubscription,
+    TraceSample,
 )
 
 log = logging.getLogger(__name__)
@@ -38,3 +39,7 @@ async def reset_local_settings(db: AsyncSession) -> int:
 
 async def reset_local_push_subscribers(db: AsyncSession) -> int:
     return await _delete(db, PushSubscription, "push_subscribers")
+
+
+async def reset_local_trace_samples(db: AsyncSession) -> int:
+    return await _delete(db, TraceSample, "trace_samples")

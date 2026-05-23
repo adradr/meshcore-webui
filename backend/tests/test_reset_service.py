@@ -12,6 +12,7 @@ from app.db.models import (
     PushSubscription,
     RxLogEntry,
     Setting,
+    TraceSample,
 )
 from app.services.reset import (
     reset_local_diagnostic_runs,
@@ -20,6 +21,7 @@ from app.services.reset import (
     reset_local_push_subscribers,
     reset_local_rx_log,
     reset_local_settings,
+    reset_local_trace_samples,
 )
 
 
@@ -125,4 +127,30 @@ async def test_reset_local_push_subscribers_clears_push_only(session_factory):
     assert n == 1
     async with session_factory() as db:
         assert await _count(db, PushSubscription) == 0
+        assert await _count(db, Message) == 1
+
+
+@pytest.mark.asyncio
+async def test_reset_local_trace_samples_clears_trace_samples_only(session_factory):
+    now = dt.datetime.now(dt.timezone.utc)
+    async with session_factory() as db:
+        db.add(TraceSample(
+            session_id="11111111-1111-1111-1111-111111111111",
+            target_pubkey="ab" * 32,
+            started_at=now,
+            finished_at=now,
+            status="ok",
+            path_len=2,
+            snr_there=4.5,
+            snr_back=3.0,
+            hops_json="[]",
+        ))
+        db.add(Message(msg_type="dm", direction="in", text="hi"))
+        await db.commit()
+    async with session_factory() as db:
+        n = await reset_local_trace_samples(db)
+        await db.commit()
+    assert n == 1
+    async with session_factory() as db:
+        assert await _count(db, TraceSample) == 0
         assert await _count(db, Message) == 1

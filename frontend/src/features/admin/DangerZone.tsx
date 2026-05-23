@@ -60,6 +60,11 @@ const LOCAL_TARGETS: {
     label: "Push subscribers",
     help: "Every enrolled browser must re-enable notifications.",
   },
+  {
+    key: "trace_samples",
+    label: "Trace monitor history",
+    help: "All persisted trace-monitor samples (per-contact periodic path traces).",
+  },
 ]
 
 const DEVICE_TARGETS: {
