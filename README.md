@@ -35,6 +35,14 @@ It bridges the gaps the official mobile app can't:
 - 🔒 **Optional API key** auth for defense-in-depth behind your reverse proxy
 - 📦 **Single image** — `~435 MB`, healthcheck, runs anywhere
 
+### Image attachment sharing
+
+Tap the `+` button in any chat and pick **Image** to upload a photo. The image is re-encoded (EXIF stripped, downsized to 2560 px on the long edge, served as WebP) and stored locally under `/data/attachments/`. The server returns a short public URL like `https://mesh.example.com/s/aB3kZ9pX` and stages it in your message input so you can add a caption before sending it over LoRa. Recipients open the link from any browser — no API key, no app install. Manage and purge attachments from **Settings → Attachments**.
+
+**Required config:** set `PUBLIC_BASE_URL` to your externally-reachable HTTPS base URL in the container's environment block. Without it, uploads fail with a clear error. The `/s/` (viewer page) and `/i/` (raw image) paths must be reachable from wherever your recipients open links — behind a reverse proxy, expose them alongside the rest of the app.
+
+**Built-in defenses:** 8-char base62 unguessable slugs (~2.18 × 10¹⁴ space) plus per-IP rate limit (100/min, 1000/hour) on the public endpoints; EXIF stripping (incl. GPS); Pillow re-serialization defeats polyglot files; explicit `image/webp` `Content-Type` + `nosniff`; tight CSP on the viewer page.
+
 ### RF tools
 
 - 📶 **Line of Sight calculator** (`/map` → click any node's "Line of sight" button) — terrain profile + Fresnel zone analysis between your device and any contact. Uses [OpenTopoData](https://www.opentopodata.org/) (public or self-hosted) for elevation.
