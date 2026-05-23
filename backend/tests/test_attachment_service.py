@@ -8,6 +8,7 @@ from app.db.models import Attachment
 from app.services.attachments.service import (
     AttachmentService,
     QuotaExceeded,
+    TooLarge,
     UnsupportedImage,
 )
 
@@ -122,3 +123,19 @@ async def test_slug_collision_retries(tmp_path, session_factory, monkeypatch):
                              uploader_fingerprint=None)
         assert b.slug == "ZZZZ9999"
         assert call_count["n"] >= 3
+
+    # Original attachment's files must NOT have been overwritten or deleted
+    # during the collision retry — that would be data corruption.
+    orig_full, orig_thumb = svc.storage.paths(forced_slug)
+    assert orig_full.is_file(), "collision retry destroyed original full file"
+    assert orig_thumb.is_file(), "collision retry destroyed original thumb file"
+
+
+@pytest.mark.asyncio
+async def test_rejects_oversized_file(tmp_path, session_factory):
+    svc = AttachmentService(tmp_path, max_bytes=10, quota_bytes=10_000_000)
+    Session = session_factory
+    async with Session() as s:
+        with pytest.raises(TooLarge):
+            await svc.create(s, data=b"x" * 11, original_filename=None,
+                             uploader_fingerprint=None)

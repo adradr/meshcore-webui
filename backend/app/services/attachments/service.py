@@ -62,6 +62,10 @@ class AttachmentService:
             raise UnsupportedImage(f"image processing failed: {e}") from e
 
         # Quota check against current filesystem usage + this attachment.
+        # v1: quota check is non-atomic; concurrent uploads from a single
+        # operator could race past the cap by O(in-flight requests). The
+        # self-hosted single-operator model accepts this; revisit if we add
+        # multi-user uploads.
         new_size = len(full) + len(thumb)
         current = await asyncio.to_thread(self.storage.total_bytes)
         if current + new_size > self.quota_bytes:
@@ -70,8 +74,22 @@ class AttachmentService:
             )
 
         # Slug + DB insert with retry on collision.
+        #
+        # Critical: storage.write() uses os.rename which atomically OVERWRITES
+        # an existing file on POSIX. If we wrote files before checking the DB,
+        # a slug collision would destroy the existing attachment's bytes, and
+        # the subsequent rollback + unlink would delete what's left. So:
+        # pre-check the DB for an existing row with this slug; only call
+        # storage.write() once we know the slug is free. The IntegrityError
+        # path remains as a safety net for the (vanishingly rare) race where
+        # another request commits the same slug between our SELECT and INSERT.
         for _ in range(MAX_SLUG_RETRIES):
             slug = generate_slug()
+            existing = await session.execute(
+                select(Attachment.id).where(Attachment.slug == slug)
+            )
+            if existing.scalar_one_or_none() is not None:
+                continue
             self.storage.write(slug, full=full, thumb=thumb)
             try:
                 full_path, thumb_path = self.storage.paths(slug)
@@ -93,10 +111,18 @@ class AttachmentService:
                 await session.refresh(att)
                 return att
             except IntegrityError:
-                # Collision: compensating unlink and retry.
+                # Collision race: another request committed the same slug
+                # between our SELECT and INSERT. Compensating unlink and retry.
                 await session.rollback()
                 self.storage.unlink(slug)
                 continue
+            except Exception:
+                # ANY other commit failure (OperationalError, DataError,
+                # programming bug, ...) must also unlink the just-written
+                # files so we don't leak orphan bytes on disk.
+                await session.rollback()
+                self.storage.unlink(slug)
+                raise
         raise RuntimeError("could not generate a unique slug after retries")
 
     async def get(self, session: AsyncSession, slug: str) -> Attachment | None:
@@ -131,11 +157,15 @@ class AttachmentService:
         return list(items), total_count, total_bytes
 
     async def purge_all(self, session: AsyncSession) -> tuple[int, int]:
+        # Mirror delete(): commit the DB removals first, THEN unlink. The
+        # failure mode here is "leaked bytes on disk", which is far less
+        # dangerous than "ghost DB rows pointing at deleted files".
         rows = (await session.execute(select(Attachment))).scalars().all()
-        freed = 0
+        slugs = [r.slug for r in rows]
+        freed = sum(r.size_bytes for r in rows)
         for r in rows:
-            freed += r.size_bytes
-            self.storage.unlink(r.slug)
             await session.delete(r)
         await session.commit()
+        for slug in slugs:
+            self.storage.unlink(slug)
         return len(rows), freed
