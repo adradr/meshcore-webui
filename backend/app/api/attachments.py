@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.schemas.attachments import AttachmentOut
+from app.schemas.attachments import AttachmentListOut, AttachmentOut
 from app.services.attachments.service import (
     AttachmentService,
     QuotaExceeded,
@@ -103,3 +103,25 @@ async def upload(
         raise HTTPException(507, str(e)) from e
 
     return _to_out(att)
+
+
+@router.get("", response_model=AttachmentListOut)
+async def list_attachments(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    before: Annotated[int | None, Query(ge=1)] = None,
+):
+    _require_public_base_url()
+    svc = _service()
+    items, total_count, total_bytes = await svc.list(db, limit=limit, before_id=before)
+    # next_cursor is the LAST item's id when the page is full; the caller
+    # passes `?before=<that_id>` to fetch the next page. None when the page
+    # isn't full — no more rows behind it.
+    next_cursor = items[-1].id if len(items) == limit else None
+    return AttachmentListOut(
+        items=[_to_out(a) for a in items],
+        next_cursor=next_cursor,
+        total_count=total_count,
+        total_bytes=total_bytes,
+        quota_bytes=settings.attachments_quota_bytes,
+    )

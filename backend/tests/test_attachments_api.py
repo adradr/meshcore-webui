@@ -62,3 +62,27 @@ async def test_upload_requires_public_base_url(client, monkeypatch):
     r = await client.post("/api/attachments", files=files)
     assert r.status_code == 500
     assert "PUBLIC_BASE_URL" in r.text
+
+
+@pytest.mark.asyncio
+async def test_list_returns_recent_first(client):
+    for _ in range(3):
+        await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    r = await client.get("/api/attachments")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_count"] == 3
+    assert len(body["items"]) == 3
+    assert body["quota_bytes"] == global_settings.attachments_quota_bytes
+
+
+@pytest.mark.asyncio
+async def test_list_paginates(client):
+    for _ in range(5):
+        await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    r = await client.get("/api/attachments?limit=2")
+    assert len(r.json()["items"]) == 2
+    cursor = r.json()["next_cursor"]
+    assert cursor is not None
+    r2 = await client.get(f"/api/attachments?limit=2&before={cursor}")
+    assert len(r2.json()["items"]) == 2
