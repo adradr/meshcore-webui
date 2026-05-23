@@ -23,6 +23,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from app.schemas.trace_monitor import TraceHop, TraceSampleOut
 from app.services.meshcore_client import (
@@ -31,6 +32,8 @@ from app.services.meshcore_client import (
 )
 
 log = logging.getLogger(__name__)
+
+_ErrorStatus = Literal["timeout", "unreachable", "error"]
 
 
 class AlreadyRunningError(RuntimeError):
@@ -134,6 +137,8 @@ class TraceMonitor:
                 log.exception("trace monitor tick exploded")
             # Sleep OR stop, whichever first — same shape as NoisePoller.
             try:
+                # Safe without _lock: asyncio is cooperative; _session is only
+                # mutated after this task is cancelled+awaited (inside _stop_locked).
                 interval = self._session.interval_s if self._session else 5
                 await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
                 return
@@ -155,8 +160,16 @@ class TraceMonitor:
         except RuntimeError as e:
             sample = self._error_sample(sess, started, "error", str(e))
 
-        await self._on_persist(sample)
+        # Broadcast first — the live chart is the primary feedback loop.
+        # A persist failure must not suppress it.
         self._on_sample(sample)
+        try:
+            await self._on_persist(sample)
+        except Exception:
+            log.exception(
+                "trace monitor: failed to persist sample session=%s",
+                sess.session_id,
+            )
 
     @staticmethod
     def _sample_from_result(
@@ -183,7 +196,7 @@ class TraceMonitor:
     def _error_sample(
         sess: SessionInfo,
         started: datetime,
-        status: str,
+        status: _ErrorStatus,
         msg: str,
     ) -> TraceSampleOut:
         return TraceSampleOut(
@@ -191,7 +204,7 @@ class TraceMonitor:
             target_pubkey=sess.target_pubkey,
             started_at=started,
             finished_at=datetime.now(UTC),
-            status=status,  # type: ignore[arg-type]
+            status=status,
             path_len=None, snr_there=None, snr_back=None,
             hops=[], error=msg,
         )

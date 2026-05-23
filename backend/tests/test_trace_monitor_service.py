@@ -104,13 +104,24 @@ async def test_failed_tick_emits_error_sample_and_keeps_looping():
         _make_result([-4]),
     ]
     collected = []
-    mon = TraceMonitor(client=client,
-                       on_sample=lambda s: collected.append(s),
-                       on_persist=AsyncMock(),
-                       interval_min_s=1, interval_max_s=60)
+    done = asyncio.Event()
+
+    def _collect(s):
+        collected.append(s)
+        if len(collected) >= 2:
+            done.set()
+
+    mon = TraceMonitor(
+        client=client,
+        on_sample=_collect,
+        on_persist=AsyncMock(),
+        interval_min_s=1, interval_max_s=60,
+    )
     await mon.start("ab" * 32, interval_s=1)
-    await asyncio.sleep(1.15)  # > interval_s=1 so the second tick actually fires
+    # Event-driven: fail fast on regression, no false-flake on slow CI.
+    await asyncio.wait_for(done.wait(), timeout=5.0)
     await mon.stop()
+
     statuses = [s.status for s in collected]
     assert statuses[0] == "unreachable"
     assert any(s == "ok" for s in statuses)
@@ -134,3 +145,62 @@ async def test_interval_below_min_rejected():
                        interval_min_s=5, interval_max_s=60)
     with pytest.raises(ValueError):
         await mon.start("ab" * 32, interval_s=2)
+
+
+@pytest.mark.asyncio
+async def test_interval_above_max_rejected():
+    client = AsyncMock()
+    mon = TraceMonitor(client=client, on_sample=lambda _s: None,
+                       on_persist=AsyncMock(),
+                       interval_min_s=5, interval_max_s=300)
+    with pytest.raises(ValueError):
+        await mon.start("ab" * 32, interval_s=400)
+
+
+@pytest.mark.asyncio
+async def test_single_hop_result_has_no_snr_back():
+    """When path_len=1 (single repeater), snr_back must be None."""
+    client = AsyncMock()
+    client.trace_to.side_effect = [_make_result([-3])]
+    collected = []
+    done = asyncio.Event()
+
+    def _collect(s):
+        collected.append(s)
+        done.set()
+
+    mon = TraceMonitor(client=client, on_sample=_collect,
+                       on_persist=AsyncMock(),
+                       interval_min_s=1, interval_max_s=60)
+    await mon.start("ab" * 32, interval_s=1)
+    await asyncio.wait_for(done.wait(), timeout=2.0)
+    await mon.stop()
+
+    assert collected[0].snr_there == -3
+    assert collected[0].snr_back is None
+
+
+@pytest.mark.asyncio
+async def test_stop_mid_tick_does_not_raise():
+    """stop() must be clean even when trace_to is in-flight."""
+    in_tick = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_trace(_pubkey):
+        in_tick.set()
+        await release.wait()  # hang until released
+        return _make_result([-3])
+
+    client = AsyncMock()
+    client.trace_to.side_effect = slow_trace
+
+    mon = TraceMonitor(
+        client=client,
+        on_sample=lambda _s: None,
+        on_persist=AsyncMock(),
+        interval_min_s=1, interval_max_s=60,
+    )
+    await mon.start("ab" * 32, interval_s=1)
+    await asyncio.wait_for(in_tick.wait(), timeout=2.0)
+    await mon.stop()  # must not raise
+    assert mon.session is None
