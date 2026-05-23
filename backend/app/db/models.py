@@ -189,13 +189,13 @@ class TraceSample(Base):
 
     __tablename__ = "trace_samples"
     id: Mapped[int] = mapped_column(primary_key=True)
-    session_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    target_pubkey: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    target_pubkey: Mapped[str] = mapped_column(String(64), nullable=False)
     started_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False,
     )
     finished_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True,
+        DateTime(timezone=True), nullable=False,
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     path_len: Mapped[int | None] = mapped_column(Integer)

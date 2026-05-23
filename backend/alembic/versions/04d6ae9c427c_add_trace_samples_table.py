@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Upgrade schema."""
+    """Add the ``trace_samples`` table for the continuous trace monitor."""
     op.create_table(
         'trace_samples',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -37,18 +37,8 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('trace_samples', schema=None) as batch_op:
         batch_op.create_index(
-            batch_op.f('ix_trace_samples_finished_at'),
-            ['finished_at'],
-            unique=False,
-        )
-        batch_op.create_index(
             'ix_trace_samples_session_finished',
             ['session_id', 'finished_at'],
-            unique=False,
-        )
-        batch_op.create_index(
-            batch_op.f('ix_trace_samples_session_id'),
-            ['session_id'],
             unique=False,
         )
         batch_op.create_index(
@@ -56,20 +46,12 @@ def upgrade() -> None:
             ['target_pubkey', 'finished_at'],
             unique=False,
         )
-        batch_op.create_index(
-            batch_op.f('ix_trace_samples_target_pubkey'),
-            ['target_pubkey'],
-            unique=False,
-        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     with op.batch_alter_table('trace_samples', schema=None) as batch_op:
-        batch_op.drop_index(batch_op.f('ix_trace_samples_target_pubkey'))
         batch_op.drop_index('ix_trace_samples_target_finished')
-        batch_op.drop_index(batch_op.f('ix_trace_samples_session_id'))
         batch_op.drop_index('ix_trace_samples_session_finished')
-        batch_op.drop_index(batch_op.f('ix_trace_samples_finished_at'))
 
     op.drop_table('trace_samples')

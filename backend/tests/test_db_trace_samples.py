@@ -41,3 +41,35 @@ async def test_trace_sample_insert_and_select(engine, db):
     assert json.loads(row.hops_json) == [{"hash": "ab", "snr": -4.5}]
     assert row.error is None
     assert row.id is not None
+
+
+@pytest.mark.asyncio
+async def test_trace_sample_failure_row(engine, db):
+    """A failed trace persists status + error but all numeric fields NULL.
+
+    This is the path the chart will hit most often on a lossy LoRa link, so
+    the column shape must accept it cleanly.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    sample = TraceSample(
+        session_id="sess-fail",
+        target_pubkey="cd" * 32,
+        started_at=datetime.now(UTC),
+        finished_at=datetime.now(UTC),
+        status="timeout",
+        error="radio returned no reply",
+    )
+    db.add(sample)
+    await db.commit()
+
+    row = (await db.execute(
+        select(TraceSample).where(TraceSample.session_id == "sess-fail")
+    )).scalar_one()
+    assert row.status == "timeout"
+    assert row.path_len is None
+    assert row.snr_there is None
+    assert row.snr_back is None
+    assert row.hops_json is None
+    assert row.error == "radio returned no reply"
