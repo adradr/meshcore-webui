@@ -34,6 +34,10 @@ vi.mock("@/features/diagnostics/LinkDiagnosticPanel", () => ({
   LinkDiagnosticPanel: () => null,
 }))
 
+vi.mock("@/features/trace/monitor/TraceMonitorPanel", () => ({
+  TraceMonitorPanel: () => null,
+}))
+
 import { ContactDetailPage } from "../contact-detail"
 
 const PUBKEY =

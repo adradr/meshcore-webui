@@ -37,6 +37,7 @@ import { formatLastSeen } from "@/features/rx_log/format"
 import { ContactAvatar } from "@/components/contact-avatar"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { LinkDiagnosticPanel } from "@/features/diagnostics/LinkDiagnosticPanel"
+import { TraceMonitorPanel } from "@/features/trace/monitor/TraceMonitorPanel"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -609,6 +610,9 @@ export function ContactDetailPage() {
 
         {/* Link diagnostic */}
         {pubKey && <LinkDiagnosticPanel pubkey={pubKey} />}
+
+        {/* Continuous trace monitor */}
+        {pubKey && <TraceMonitorPanel pubkey={pubKey} />}
 
         {/* Danger zone */}
         <Card className="border-destructive/30">
