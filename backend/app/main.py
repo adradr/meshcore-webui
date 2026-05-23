@@ -32,6 +32,7 @@ from app.core.vapid import load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
+from app.middleware.attachment_rate_limit import AttachmentRateLimitMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
@@ -282,7 +283,21 @@ def create_app() -> FastAPI:
     # headers applied to every response (including 401 from auth), so
     # SecurityHeaders is outermost; audit observes the final status
     # code from APIKeyMiddleware which is innermost.
+    #
+    # AttachmentRateLimit sits BETWEEN audit and APIKey: it must short-
+    # circuit before APIKey runs (so the public `/s/`, `/i/` prefixes
+    # actually trigger it — they're auth-exempt anyway), and the audit
+    # log should still record the 429 with proper headers applied by
+    # SecurityHeaders. The middleware receives callables for caps so a
+    # test (or future hot-reload) bumping `settings.attachments_rate_*`
+    # is reflected on the next request without rebuilding the app.
     app.add_middleware(APIKeyMiddleware)
+    app.add_middleware(
+        AttachmentRateLimitMiddleware,
+        per_min=lambda: settings.attachments_rate_per_min,
+        per_hour=lambda: settings.attachments_rate_per_hour,
+        trust_x_forwarded_for=lambda: settings.trusted_proxy,
+    )
     app.add_middleware(RequestAuditMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 

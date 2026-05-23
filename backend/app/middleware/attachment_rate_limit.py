@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 
 from fastapi import Request
 from fastapi.responses import PlainTextResponse
@@ -58,6 +59,11 @@ class RateLimiter:
         while q and q[0] < cutoff:
             q.popleft()
 
+    def reset(self) -> None:
+        """Clear all per-key state. Intended for test isolation."""
+        self._minute.clear()
+        self._hour.clear()
+
 
 class AttachmentRateLimitMiddleware(BaseHTTPMiddleware):
     """Per-IP rate limit for the public `/s/` and `/i/` attachment routes.
@@ -78,18 +84,57 @@ class AttachmentRateLimitMiddleware(BaseHTTPMiddleware):
         self,
         app,
         *,
-        per_min: int,
-        per_hour: int,
-        trust_x_forwarded_for: bool,
+        per_min: int | Callable[[], int],
+        per_hour: int | Callable[[], int],
+        trust_x_forwarded_for: bool | Callable[[], bool],
     ):
         super().__init__(app)
-        self.limiter = RateLimiter(per_min=per_min, per_hour=per_hour)
-        self.trust_xff = trust_x_forwarded_for
+        # Lazy getters so changes to `settings.*` at runtime (e.g. tests
+        # bumping the cap mid-suite) are picked up on every request.
+        # Integer/bool args are wrapped in a constant getter so callers
+        # can still pass values directly when they don't need liveness.
+        self._per_min: Callable[[], int] = (
+            per_min if callable(per_min) else (lambda v=per_min: v)
+        )
+        self._per_hour: Callable[[], int] = (
+            per_hour if callable(per_hour) else (lambda v=per_hour: v)
+        )
+        self._trust_xff: Callable[[], bool] = (
+            trust_x_forwarded_for if callable(trust_x_forwarded_for)
+            else (lambda v=trust_x_forwarded_for: v)
+        )
+        self.limiter = RateLimiter(
+            per_min=self._per_min(), per_hour=self._per_hour(),
+        )
+        _register(self)
+
+    @property
+    def trust_xff(self) -> bool:
+        return bool(self._trust_xff())
+
+    def reset(self) -> None:
+        """Drop all rate-limit state and resync caps from getters.
+
+        Tests call this between cases so per-IP buckets don't bleed
+        across tests. Also re-reads the configured caps so a test that
+        monkeypatches `settings.attachments_rate_per_min` sees the new
+        value on the limiter even though the limiter is constructed
+        once at app startup.
+        """
+        self.limiter.per_min = self._per_min()
+        self.limiter.per_hour = self._per_hour()
+        self.limiter.reset()
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if not any(path.startswith(p) for p in self.PROTECTED_PREFIXES):
             return await call_next(request)
+
+        # Sync caps from getters before every check so live config
+        # changes (e.g. tests, future hot-reload) take effect without
+        # a restart. The cost is two attribute writes per request.
+        self.limiter.per_min = self._per_min()
+        self.limiter.per_hour = self._per_hour()
 
         key = self._client_key(request)
         ok, retry = await self.limiter.check(key)
@@ -107,3 +152,26 @@ class AttachmentRateLimitMiddleware(BaseHTTPMiddleware):
             if xff:
                 return xff.split(",", 1)[0].strip()
         return request.client.host if request.client else "unknown"
+
+
+# Module-level pointer to the instance wired into `app.main:app`. Tests
+# (and code that wants to reset/inspect the limiter) can `import` this
+# rather than walking `app.user_middleware` — Starlette builds middleware
+# instances lazily and there's no stable handle to them otherwise.
+_INSTANCE: AttachmentRateLimitMiddleware | None = None
+
+
+def get_instance() -> AttachmentRateLimitMiddleware | None:
+    return _INSTANCE
+
+
+def _register(instance: AttachmentRateLimitMiddleware) -> None:
+    global _INSTANCE
+    _INSTANCE = instance
+
+
+def reset() -> None:
+    """Reset the wired middleware instance, if any. No-op when unset."""
+    inst = get_instance()
+    if inst is not None:
+        inst.reset()

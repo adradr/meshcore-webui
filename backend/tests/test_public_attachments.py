@@ -4,6 +4,7 @@ import pytest
 from PIL import Image
 
 from app.core.config import settings as global_settings
+from app.middleware import attachment_rate_limit as arl
 
 
 def _jpeg(w=400, h=300) -> bytes:
@@ -17,6 +18,20 @@ def _jpeg(w=400, h=300) -> bytes:
 def _cfg(monkeypatch, tmp_path):
     monkeypatch.setattr(global_settings, "public_base_url", "https://mesh.example.com")
     monkeypatch.setattr(global_settings, "attachments_dir", tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def _reset_attachment_rate_limiter():
+    """Per-test reset of the global attachment limiter.
+
+    The middleware instance is process-global (constructed once at app
+    startup) so per-IP buckets accumulate across tests in the same
+    suite. Resetting before each test guarantees isolation; resetting
+    after restores the pristine state for cross-file ordering safety.
+    """
+    arl.reset()
+    yield
+    arl.reset()
 
 
 @pytest.mark.asyncio
@@ -70,3 +85,31 @@ async def test_i_thumb_smaller_than_full(client):
     thumb = await client.get(f"/i/{slug}/thumb")
     assert thumb.status_code == 200
     assert len(thumb.content) < len(full.content)
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_kicks_in(client, monkeypatch):
+    """Once the per-minute cap is reached, additional `/i/{slug}` hits
+    must return 429 with a Retry-After header — proves the middleware
+    is wired into the app and that runtime config changes take effect."""
+    monkeypatch.setattr(global_settings, "attachments_rate_per_min", 2)
+    # The middleware reads `per_min` lazily on every dispatch, but the
+    # *limiter's* per_min attribute is only refreshed at dispatch entry.
+    # Reset clears any buckets that earlier tests may have seeded and
+    # resyncs the cap from the (now-patched) settings.
+    arl.reset()
+
+    r = await client.post(
+        "/api/attachments",
+        files={"file": ("a.jpg", _jpeg(), "image/jpeg")},
+    )
+    slug = r.json()["slug"]
+
+    ok1 = await client.get(f"/i/{slug}")
+    ok2 = await client.get(f"/i/{slug}")
+    blocked = await client.get(f"/i/{slug}")
+
+    assert ok1.status_code == 200
+    assert ok2.status_code == 200
+    assert blocked.status_code == 429
+    assert "retry-after" in {k.lower() for k in blocked.headers.keys()}
