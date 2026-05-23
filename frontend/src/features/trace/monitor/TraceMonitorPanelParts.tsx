@@ -132,11 +132,20 @@ export function IntervalSlider({
 // ---------------------------------------------------------------------------
 
 interface TakeOverButtonProps {
-  onConfirm: () => void
+  // `onConfirm` may be sync OR async — `Promise<void>` keeps the contract
+  // honest so callers can `await` mutations without a cast.
+  onConfirm: () => void | Promise<void>
   pending: boolean
+  /** Slider's current interval, displayed in the confirmation dialog so the
+   *  operator sees what cadence the new session will lock in. */
+  intervalS: number
 }
 
-export function TakeOverButton({ onConfirm, pending }: TakeOverButtonProps) {
+export function TakeOverButton({
+  onConfirm,
+  pending,
+  intervalS,
+}: TakeOverButtonProps) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -154,7 +163,8 @@ export function TakeOverButton({ onConfirm, pending }: TakeOverButtonProps) {
           <AlertDialogTitle>Take over the trace monitor?</AlertDialogTitle>
           <AlertDialogDescription>
             Another contact is currently being monitored. Taking over stops
-            that session and starts a new one targeting this contact.
+            that session and starts a new one targeting this contact. The
+            new session will use the current interval ({intervalS} s).
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -177,15 +187,25 @@ export function TakeOverButton({ onConfirm, pending }: TakeOverButtonProps) {
 
 interface WipeHistoryButtonProps {
   count: number
-  onConfirm: () => void
+  // Async-friendly — callers typically `await Promise.allSettled(...)` here.
+  onConfirm: () => void | Promise<void>
+  pending: boolean
 }
 
-export function WipeHistoryButton({ count, onConfirm }: WipeHistoryButtonProps) {
+export function WipeHistoryButton({
+  count,
+  onConfirm,
+  pending,
+}: WipeHistoryButtonProps) {
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
-        <Button size="sm" variant="destructive">
-          <Trash2 className="mr-2 h-4 w-4" />
+        <Button size="sm" variant="destructive" disabled={pending}>
+          {pending ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="mr-2 h-4 w-4" />
+          )}
           Wipe history
         </Button>
       </AlertDialogTrigger>
@@ -252,6 +272,9 @@ export function LastSampleSummary({ samples }: LastSampleSummaryProps) {
 }
 
 function formatAgo(deltaMs: number): string {
+  // `Date.parse` returns NaN on a malformed ISO string; surface as "—"
+  // rather than rendering "NaN s ago".
+  if (!Number.isFinite(deltaMs)) return "—"
   const ms = Math.max(0, deltaMs)
   if (ms < 60_000) {
     return `${(ms / 1000).toFixed(1)} s ago`

@@ -281,6 +281,55 @@ describe("TraceMonitorPanel", () => {
     expect(lastChartProps.showPerHop).toBe(true)
   })
 
+  it("renders nothing when pubkey is not 64-hex", () => {
+    setup()
+    const { container } = render(<TraceMonitorPanel pubkey="not-hex" />)
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("clicking Wipe → confirm → del.mutateAsync called per session", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue({ deleted: 1 })
+    ;(useTraceMonitorStatus as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      { data: makeStatus(), isLoading: false },
+    )
+    ;(useTraceMonitorSamples as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      { data: [], isLoading: false },
+    )
+    ;(useTraceMonitorSessions as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      {
+        data: {
+          count: 3,
+          items: [
+            makeSession({ session_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }),
+            makeSession({ session_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" }),
+            makeSession({ session_id: "cccccccc-cccc-cccc-cccc-cccccccccccc" }),
+          ],
+        },
+      },
+    )
+    ;(useStartTraceMonitor as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      { mutate: noopMutate, isPending: false },
+    )
+    ;(useStopTraceMonitor as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      { mutate: noopMutate, isPending: false },
+    )
+    ;(useDeleteTraceMonitorSession as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      { mutate: vi.fn(), mutateAsync, isPending: false },
+    )
+
+    render(<TraceMonitorPanel pubkey={PUBKEY} />)
+    fireEvent.click(screen.getByRole("button", { name: /wipe history/i }))
+    const confirm = await screen.findByRole("button", {
+      name: /confirm wipe history/i,
+    })
+    fireEvent.click(confirm)
+    // mutateAsync is called once per historical session, in parallel.
+    expect(mutateAsync).toHaveBeenCalledTimes(3)
+    expect(mutateAsync).toHaveBeenCalledWith("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    expect(mutateAsync).toHaveBeenCalledWith("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    expect(mutateAsync).toHaveBeenCalledWith("cccccccc-cccc-cccc-cccc-cccccccccccc")
+  })
+
   it("last-sample summary 'ago' text recomputes over time", () => {
     vi.useFakeTimers()
     try {

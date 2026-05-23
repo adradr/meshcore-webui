@@ -72,11 +72,13 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
     [sessionsQ.data],
   )
   // Sessions are ordered DESC by `last_sample_at` on the backend, but we
-  // sort defensively in case future API tweaks change that.
+  // sort defensively in case future API tweaks change that. Compare as
+  // epoch ms so different ISO-8601 UTC-offset representations (`Z` vs
+  // `+00:00`) collate consistently.
   const mostRecentHistorical = useMemo(() => {
     if (historicalSessions.length === 0) return null
-    const sorted = [...historicalSessions].sort((a, b) =>
-      b.last_sample_at.localeCompare(a.last_sample_at),
+    const sorted = [...historicalSessions].sort(
+      (a, b) => Date.parse(b.last_sample_at) - Date.parse(a.last_sample_at),
     )
     return sorted[0]
   }, [historicalSessions])
@@ -99,8 +101,9 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
     start.mutate({ pubkey, interval_s: intervalS, force: true })
   const handleWipeHistory = async () => {
     // Delete every historical session for this contact in parallel. The hook
-    // already toasts errors; we don't need to gather them here.
-    await Promise.all(
+    // already toasts errors per-item; we use `allSettled` so a single
+    // failure doesn't leave the rest of the batch un-deleted.
+    await Promise.allSettled(
       historicalSessions.map((s) => del.mutateAsync(s.session_id)),
     )
   }
@@ -143,6 +146,7 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
             <TakeOverButton
               onConfirm={handleTakeOver}
               pending={start.isPending}
+              intervalS={intervalS}
             />
           ) : (
             <Button size="sm" onClick={handleStart} disabled={start.isPending}>
@@ -158,6 +162,7 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
             <WipeHistoryButton
               count={historicalSessions.length}
               onConfirm={handleWipeHistory}
+              pending={del.isPending}
             />
           )}
         </div>
@@ -170,12 +175,6 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
           </div>
         )}
 
-        <TraceMonitorChart
-          samples={samples}
-          showPerHop={showPerHop}
-          title="Trace SNR (rolling)"
-        />
-
         <div className="flex items-center gap-2">
           <Switch
             id="trace-monitor-per-hop"
@@ -187,6 +186,12 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
             Show per-hop SNR
           </Label>
         </div>
+
+        <TraceMonitorChart
+          samples={samples}
+          showPerHop={showPerHop}
+          title="Trace SNR (rolling)"
+        />
       </CardContent>
     </Card>
   )
