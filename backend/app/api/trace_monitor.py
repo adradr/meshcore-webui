@@ -23,6 +23,7 @@ on ``app.state`` and exercise the routes without rewiring DI.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 from typing import Annotated
@@ -49,11 +50,15 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/trace/monitor", tags=["trace-monitor"])
 
-# UUID4 in canonical hyphenated lowercase form. The TraceMonitor service
-# generates these via ``uuid.uuid4()`` + ``str()``, which yields lowercase
-# hex. Path-level validation keeps malformed input as 422 before any DB
-# work runs.
-_SESSION_ID_PATTERN = r"^[0-9a-f-]{36}$"
+# Strict UUID4 in canonical hyphenated lowercase form. The TraceMonitor
+# service generates these via ``uuid.uuid4()`` + ``str()``, which yields
+# lowercase hex with the version nibble pinned to 4 and the variant
+# nibble in ``[89ab]``. Pattern enforces that exact shape so 36-char
+# garbage like all-dashes is rejected at the Path layer (422), not just
+# obviously-short input.
+_SESSION_ID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 _PUBKEY_PATTERN = r"^[0-9a-fA-F]{64}$"
 
 
@@ -68,14 +73,25 @@ def _get_monitor(request: Request) -> TraceMonitor:
 
 
 def _decode_hops(hops_json: str | None) -> list[TraceHop]:
+    """Decode the JSON-encoded hop list stored in ``trace_samples.hops_json``.
+
+    Defensive against three failure modes that have all happened during
+    development: (1) NULL / empty string, (2) non-JSON text, (3) JSON
+    that parses but isn't a list of hop dicts. Pydantic's
+    ``ValidationError`` is a ``ValueError`` subclass so a row that
+    deserialises to a list-of-bad-hops also falls through to the
+    warning rather than 500ing the samples endpoint.
+    """
     if not hops_json:
         return []
     try:
         raw = json.loads(hops_json)
+        if not isinstance(raw, list):
+            raise ValueError("hops_json is not a JSON array")
+        return [TraceHop(**h) for h in raw]
     except (TypeError, ValueError):
         log.warning("trace_samples row has malformed hops_json")
         return []
-    return [TraceHop(**h) for h in raw]
 
 
 def _row_to_sample(row: TraceSample) -> TraceSampleOut:
@@ -156,14 +172,16 @@ async def monitor_status(
     # Stats are over the LIVE session only; per-session history lives in
     # ``GET /sessions``. We deliberately skip these in the idle response
     # rather than 0-fill them to keep the "no session yet" shape obvious.
-    samples_total = (await db.execute(
-        select(func.count(TraceSample.id))
-        .where(TraceSample.session_id == sess.session_id)
-    )).scalar_one() or 0
-    last_sample_at = (await db.execute(
-        select(func.max(TraceSample.finished_at))
-        .where(TraceSample.session_id == sess.session_id)
-    )).scalar_one()
+    # Status is polled by the SPA — combine the two aggregates into a
+    # single round-trip so we halve DB latency per poll.
+    row = (await db.execute(
+        select(
+            func.count(TraceSample.id).label("total"),
+            func.max(TraceSample.finished_at).label("last_at"),
+        ).where(TraceSample.session_id == sess.session_id)
+    )).one()
+    samples_total = row.total or 0
+    last_sample_at = row.last_at
 
     return TraceMonitorStatus(
         running=True,
@@ -200,7 +218,6 @@ async def session_samples(
     if since_ms is not None:
         # We compare against the python datetime directly; SQLAlchemy
         # translates this into the appropriate dialect-level literal.
-        import datetime as dt
         cutoff = dt.datetime.fromtimestamp(since_ms / 1000.0, tz=dt.UTC)
         stmt = stmt.where(TraceSample.finished_at > cutoff)
 
