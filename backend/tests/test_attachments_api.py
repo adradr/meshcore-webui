@@ -108,3 +108,21 @@ async def test_delete_unknown_returns_404(client):
 async def test_delete_rejects_bad_slug(client):
     r = await client.delete("/api/attachments/has-dashes")
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_purge_requires_confirm_string(client):
+    r = await client.post("/api/attachments/purge", json={"confirm": "nope"})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_purge_clears_everything(client):
+    for _ in range(3):
+        await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    r = await client.post("/api/attachments/purge", json={"confirm": "PURGE"})
+    assert r.status_code == 200
+    assert r.json()["deleted_count"] == 3
+    assert r.json()["freed_bytes"] > 0
+    listing = await client.get("/api/attachments")
+    assert listing.json()["total_count"] == 0

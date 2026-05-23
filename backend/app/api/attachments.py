@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
@@ -7,7 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.schemas.attachments import AttachmentListOut, AttachmentOut
+from app.schemas.attachments import (
+    AttachmentListOut,
+    AttachmentOut,
+    PurgeRequest,
+    PurgeResponse,
+)
 from app.services.attachments.service import (
     AttachmentService,
     QuotaExceeded,
@@ -126,6 +132,21 @@ async def list_attachments(
         total_bytes=total_bytes,
         quota_bytes=settings.attachments_quota_bytes,
     )
+
+
+@router.post("/purge", response_model=PurgeResponse)
+async def purge_all(
+    body: PurgeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    # Constant-time compare — matches the reset-endpoint convention. The
+    # threat model is admittedly thin (operator owns the key), but consistency
+    # with /api/admin/reset's "RESET" handling is worth more than the saved
+    # microseconds.
+    if not hmac.compare_digest(body.confirm, "PURGE"):
+        raise HTTPException(400, "confirm must equal 'PURGE'")
+    deleted, freed = await _service().purge_all(db)
+    return PurgeResponse(deleted_count=deleted, freed_bytes=freed)
 
 
 @router.delete("/{slug}", status_code=204)
