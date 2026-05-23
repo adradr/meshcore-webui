@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -14,6 +14,7 @@ from app.services.attachments.service import (
     TooLarge,
     UnsupportedImage,
 )
+from app.services.attachments.slug import SLUG_PATTERN
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
@@ -125,3 +126,14 @@ async def list_attachments(
         total_bytes=total_bytes,
         quota_bytes=settings.attachments_quota_bytes,
     )
+
+
+@router.delete("/{slug}", status_code=204)
+async def delete_attachment(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    slug: Annotated[str, Path(pattern=SLUG_PATTERN)],
+):
+    ok = await _service().delete(db, slug)
+    if not ok:
+        raise HTTPException(404, "attachment not found")
+    return None

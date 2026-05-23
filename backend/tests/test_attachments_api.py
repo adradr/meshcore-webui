@@ -86,3 +86,25 @@ async def test_list_paginates(client):
     assert cursor is not None
     r2 = await client.get(f"/api/attachments?limit=2&before={cursor}")
     assert len(r2.json()["items"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_delete_removes_attachment(client):
+    r = await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    slug = r.json()["slug"]
+    d = await client.delete(f"/api/attachments/{slug}")
+    assert d.status_code == 204
+    g = await client.get(f"/i/{slug}")  # public endpoint, will 410 once implemented
+    assert g.status_code in (404, 410)
+
+
+@pytest.mark.asyncio
+async def test_delete_unknown_returns_404(client):
+    r = await client.delete("/api/attachments/zzzzzzzz")
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_rejects_bad_slug(client):
+    r = await client.delete("/api/attachments/has-dashes")
+    assert r.status_code == 422
