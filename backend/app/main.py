@@ -29,6 +29,7 @@ from app.api.trace import router as trace_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
+from app.core.logging_filters import SensitiveQueryFilter
 from app.core.vapid import VapidLoadError, load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
@@ -91,6 +92,16 @@ def _configure_logging() -> None:
         if handler not in meshcore_logger.handlers:
             meshcore_logger.addHandler(handler)
         meshcore_logger.propagate = "pytest" in sys.modules
+
+    # Attach the sensitive-query-param redactor to every logger that can
+    # surface request URLs. Filters bound to a logger only run for records
+    # emitted by that logger (not parent/child), so we explicitly cover each
+    # named source: our own app + audit channels and uvicorn's access/error.
+    redactor = SensitiveQueryFilter()
+    for name in ("uvicorn.access", "uvicorn.error", "app", "app.audit"):
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, SensitiveQueryFilter) for f in logger.filters):
+            logger.addFilter(redactor)
 
 
 _configure_logging()
