@@ -19,9 +19,12 @@ The provider:
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import OrderedDict
 
 import httpx
+
+log = logging.getLogger("app.elevation")
 
 # OpenTopoData rejects requests with more than 100 locations per call.
 _MAX_BATCH = 100
@@ -127,8 +130,18 @@ class ElevationProvider:
             if self._rate_limit_s:
                 await asyncio.sleep(self._rate_limit_s)
         if not (200 <= resp.status_code < 300):
+            # Log the raw upstream body at DEBUG for operator forensics, but
+            # NEVER include it in the exception — the exception's ``detail`` is
+            # propagated up to the LoS 502 response, and if the operator ever
+            # points the elevation URL at an internal service the body could
+            # leak stack traces, internal hostnames, or error pages.
+            log.debug(
+                "elevation upstream %s body: %s",
+                resp.status_code,
+                resp.text[:500],
+            )
             raise ElevationLookupError(
-                f"elevation lookup failed: HTTP {resp.status_code} {resp.text[:200]}"
+                f"elevation lookup failed: HTTP {resp.status_code}"
             )
         try:
             payload = resp.json()
