@@ -20,6 +20,7 @@ class TestLocalResetSelector:
         assert sel.mutes is False
         assert sel.settings is False
         assert sel.push_subscribers is False
+        assert sel.trace_samples is False
 
     def test_any_selected_false_when_nothing_set(self):
         assert LocalResetSelector().any_selected() is False
@@ -28,6 +29,7 @@ class TestLocalResetSelector:
         assert LocalResetSelector(messages=True).any_selected() is True
         assert LocalResetSelector(push_subscribers=True).any_selected() is True
         assert LocalResetSelector(settings=True).any_selected() is True
+        assert LocalResetSelector(trace_samples=True).any_selected() is True
 
 
 class TestDeviceResetSelector:

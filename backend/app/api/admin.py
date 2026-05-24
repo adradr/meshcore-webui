@@ -28,6 +28,7 @@ from app.services.reset import (
     reset_local_push_subscribers,
     reset_local_rx_log,
     reset_local_settings,
+    reset_local_trace_samples,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -64,6 +65,7 @@ async def reset_unified(
     local_result: dict = {
         "messages": None, "diagnostic_runs": None, "rx_log": None,
         "mutes": None, "settings": None, "push_subscribers": None,
+        "trace_samples": None,
     }
     if body.local.messages:
         local_result["messages"] = await reset_local_messages(db)
@@ -77,6 +79,8 @@ async def reset_unified(
         local_result["settings"] = await reset_local_settings(db)
     if body.local.push_subscribers:
         local_result["push_subscribers"] = await reset_local_push_subscribers(db)
+    if body.local.trace_samples:
+        local_result["trace_samples"] = await reset_local_trace_samples(db)
     if body.local.any_selected():
         await db.commit()
 

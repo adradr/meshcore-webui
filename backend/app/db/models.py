@@ -171,3 +171,46 @@ class DiagnosticRun(Base):
     )
     verdict: Mapped[str] = mapped_column(String(64), nullable=False)
     report_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class TraceSample(Base):
+    """One periodic trace sample produced by TraceMonitor.
+
+    Rows are typed (not JSON-blob) so the chart endpoint can do
+    ``WHERE session_id=? AND finished_at > ?`` without parsing payloads.
+    ``hops_json`` keeps the full hop list (1-byte hash + per-hop SNR)
+    for the few callers that want the path; aggregated fields
+    ``snr_there`` / ``snr_back`` / ``path_len`` are denormalised so
+    line charts can pull them with a single SQL select.
+
+    ``status`` values: ``"ok"`` (trace returned), ``"timeout"`` (504 at
+    radio layer), ``"unreachable"`` (503), ``"error"`` (502 / unknown).
+    """
+
+    __tablename__ = "trace_samples"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    target_pubkey: Mapped[str] = mapped_column(String(64), nullable=False)
+    started_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    finished_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    path_len: Mapped[int | None] = mapped_column(Integer)
+    snr_there: Mapped[float | None] = mapped_column(Float)
+    snr_back: Mapped[float | None] = mapped_column(Float)
+    hops_json: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+
+    __table_args__ = (
+        Index(
+            "ix_trace_samples_session_finished",
+            "session_id", "finished_at",
+        ),
+        Index(
+            "ix_trace_samples_target_finished",
+            "target_pubkey", "finished_at",
+        ),
+    )

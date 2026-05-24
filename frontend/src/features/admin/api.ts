@@ -10,6 +10,7 @@ export interface LocalResetSelector {
   mutes?: boolean
   settings?: boolean
   push_subscribers?: boolean
+  trace_samples?: boolean
 }
 
 export interface DeviceResetSelector {
@@ -33,6 +34,7 @@ export interface ResetResult {
     mutes: number | null
     settings: number | null
     push_subscribers: number | null
+    trace_samples: number | null
   }
   device: {
     cleared_channels: number | null

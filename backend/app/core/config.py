@@ -63,6 +63,19 @@ class Settings(BaseSettings):
         alias="MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S",
     )
 
+    # Continuous Trace Monitor — clamps the user-requested sample period to a
+    # safe window. The radio's command bus is serialised by MeshCoreClient._lock
+    # so very small intervals would starve other operations; very large ones
+    # would mask radio issues by giving them too little exposure on the chart.
+    trace_monitor_min_interval_s: int = Field(
+        default=5,
+        alias="MESHCORE_WEBUI_TRACE_MONITOR_MIN_INTERVAL_S",
+    )
+    trace_monitor_max_interval_s: int = Field(
+        default=300,
+        alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
+    )
+
 
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]

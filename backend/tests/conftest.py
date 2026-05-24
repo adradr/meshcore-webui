@@ -57,6 +57,16 @@ async def session_factory(engine):
 
 
 @pytest_asyncio.fixture
+async def sessionmaker_for_tests(session_factory):
+    """Alias for `session_factory` used by helpers that take an `async_sessionmaker`.
+
+    Kept as a separate name because consumers (e.g. `persist_trace_sample`)
+    document their parameter as a sessionmaker, not a "session factory".
+    """
+    return session_factory
+
+
+@pytest_asyncio.fixture
 async def client(engine):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
