@@ -1,12 +1,23 @@
 import { CheckCircle2, AlertTriangle, MinusCircle, Loader2, Play, Ban } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import { useLastDiagnostic, useLinkDiagnostic } from "./api"
 import type { DiagnosticReport, StepResult, StepStatusValue } from "./types"
 
 interface Props {
   pubkey: string
 }
+
+const HEADER_DESCRIPTION =
+  "Runs an end-to-end RF probe between your radio and this contact. " +
+  "Each step exercises a different part of the link so you can see exactly where it's weak."
 
 export function LinkDiagnosticPanel({ pubkey }: Props) {
   const last = useLastDiagnostic(pubkey)
@@ -17,21 +28,26 @@ export function LinkDiagnosticPanel({ pubkey }: Props) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-        <CardTitle className="text-base">Link diagnostic</CardTitle>
-        <Button
-          size="sm"
-          onClick={() => run.mutate({})}
-          disabled={run.isPending}
-          aria-label="Run link diagnostic"
-        >
-          {run.isPending ? (
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          ) : (
-            <Play className="mr-2 h-4 w-4" />
-          )}
-          {run.isPending ? "Running…" : report ? "Re-run" : "Run"}
-        </Button>
+      <CardHeader>
+        <div className="flex flex-row items-start justify-between gap-2">
+          <div className="space-y-1.5">
+            <CardTitle className="text-base">Link diagnostic</CardTitle>
+            <CardDescription>{HEADER_DESCRIPTION}</CardDescription>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => run.mutate({})}
+            disabled={run.isPending}
+            aria-label="Run link diagnostic"
+          >
+            {run.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" />
+            )}
+            {run.isPending ? "Running…" : report ? "Re-run" : "Run"}
+          </Button>
+        </div>
       </CardHeader>
       <CardContent>
         {!report ? <EmptyState loading={last.isLoading} /> : <ReportView report={report} />}
@@ -54,13 +70,19 @@ function EmptyState({ loading }: { loading: boolean }) {
 function ReportView({ report }: { report: DiagnosticReport }) {
   return (
     <div className="space-y-3">
-      <VerdictBanner verdict={report.verdict} detail={report.verdict_detail} />
-      <ol className="space-y-2">
+      <VerdictCard report={report} />
+      <ol className="space-y-3">
         {report.steps.map((s) => (
           <li key={s.step} className="flex items-start gap-2 text-sm">
             <StepIcon status={s.status} />
-            <div className="flex-1">
-              <div className="font-medium">{prettyStepName(s.step)}</div>
+            <div className="flex-1 space-y-0.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium">{prettyStepName(s.step)}</div>
+                <StatusChip status={s.status} />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {STEP_DESCRIPTIONS[s.step] ?? ""}
+              </div>
               <StepDetail step={s} />
             </div>
           </li>
@@ -73,17 +95,47 @@ function ReportView({ report }: { report: DiagnosticReport }) {
   )
 }
 
-function VerdictBanner({ verdict, detail }: { verdict: string; detail: string }) {
-  // Healthy = subtle green; everything else = subtle amber. We don't paint
-  // anything red because v1 verdicts are coarse — Phase 2 sharpens this.
-  const cls =
-    verdict === "healthy"
-      ? "border-emerald-500/40 bg-emerald-500/10"
-      : "border-amber-500/40 bg-amber-500/10"
+type VerdictTier = "HEALTHY" | "DEGRADED" | "UNREACHABLE"
+
+export function verdictTier(report: DiagnosticReport): VerdictTier {
+  if (report.verdict === "healthy") return "HEALTHY"
+
+  const attempted = report.steps.filter(
+    (s) => s.status === "responded" || s.status === "no_response",
+  )
+  const responded = attempted.filter((s) => s.status === "responded")
+  const noResponse = attempted.filter((s) => s.status === "no_response")
+
+  // All attempted steps failed (and at least one was attempted) → unreachable.
+  if (attempted.length > 0 && responded.length === 0) return "UNREACHABLE"
+
+  // Mixed responses → degraded.
+  if (responded.length > 0 && noResponse.length > 0) return "DEGRADED"
+
+  return "DEGRADED"
+}
+
+const TIER_CLASSES: Record<VerdictTier, string> = {
+  HEALTHY: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  DEGRADED: "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  UNREACHABLE: "border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-400",
+}
+
+function VerdictCard({ report }: { report: DiagnosticReport }) {
+  const tier = verdictTier(report)
+  const responded = report.steps.filter((s) => s.status === "responded").length
+  const total = report.steps.length
   return (
-    <div className={`rounded-md border ${cls} p-2`}>
-      <div className="text-xs font-semibold uppercase tracking-wide">{verdict}</div>
-      <div className="text-sm">{detail}</div>
+    <div
+      className={`rounded-md border p-3 ${TIER_CLASSES[tier]}`}
+      data-testid="verdict-card"
+      data-tier={tier}
+    >
+      <div className="text-xs font-semibold uppercase tracking-wide">{tier}</div>
+      <div className="text-sm text-foreground">{report.verdict_detail}</div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {responded} of {total} steps responded
+      </div>
     </div>
   )
 }
@@ -99,6 +151,32 @@ function StepIcon({ status }: { status: StepStatusValue }) {
     default:
       return <MinusCircle className="mt-0.5 h-4 w-4 text-muted-foreground" aria-label="not attempted" />
   }
+}
+
+const CHIP_LABEL: Record<StepStatusValue, string> = {
+  responded: "responded",
+  no_response: "no response",
+  skipped: "skipped",
+  not_attempted: "not attempted",
+}
+
+const CHIP_CLASSES: Record<StepStatusValue, string> = {
+  responded:
+    "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  no_response:
+    "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  skipped:
+    "border-muted bg-muted/40 text-muted-foreground",
+  not_attempted:
+    "border-muted bg-muted/20 text-muted-foreground",
+}
+
+function StatusChip({ status }: { status: StepStatusValue }) {
+  return (
+    <Badge variant="outline" className={CHIP_CLASSES[status]}>
+      {CHIP_LABEL[status]}
+    </Badge>
+  )
 }
 
 function StepDetail({ step }: { step: StepResult }) {
@@ -149,6 +227,22 @@ const STEP_LABELS: Record<string, string> = {
   path_discovery: "Path discovery",
   remote_neighbours: "Remote neighbour list",
 }
+
+const STEP_DESCRIPTIONS: Record<string, string> = {
+  local_stats_radio:
+    "Noise floor, last RSSI / SNR, packet timings — your radio's own health snapshot.",
+  local_stats_core: "Firmware uptime, CPU / memory, queue depth.",
+  local_stats_packets: "Tx / Rx / dropped packets since boot.",
+  ping: "Round-trip echo: did this contact respond at all, and how long did it take?",
+  telemetry: "Last telemetry payload (battery, sensors, etc.) the contact reported.",
+  stored_path: "The repeater chain your radio currently uses to reach this contact.",
+  reception: "Most recent advert / message the contact sent us, with its RSSI / SNR.",
+  trace: "Sends a TRACE packet along the stored path and reads back per-hop SNR.",
+  path_discovery: "Re-runs path discovery to find a better route.",
+  remote_neighbours:
+    "Asks this contact who IT can hear — useful for triangulating link asymmetry.",
+}
+
 function prettyStepName(step: string): string {
   return STEP_LABELS[step] ?? step
 }
