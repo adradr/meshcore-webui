@@ -3,7 +3,9 @@ services:
     image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:latest
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      # Loopback-only by default. Change to "8080:8080" (or "0.0.0.0:8080:8080")
+      # for direct LAN access without a reverse proxy.
+      - "127.0.0.1:8080:8080"
     environment:
       # Default is the LilyGo T3-S3 WiFi-firmware default AP address.
       # Set to your device's actual LAN IP.

@@ -11,13 +11,16 @@ services:
     container_name: meshcore-webui
     restart: unless-stopped
     ports:
-      - "8090:8080"   # host 8080 is taken by kubectl; using 8090
+      # Loopback-only by default. Change to "8090:8080" (or "0.0.0.0:8090:8080")
+      # for direct LAN access without a reverse proxy.
+      - "127.0.0.1:8090:8080"
     environment:
       # Point at your MeshCore device's TCP companion port.
       # `192.168.4.1:5000` is the default for the LilyGo T3-S3 WiFi firmware.
       MESHCORE_HOST: "${MESHCORE_HOST:-192.168.4.1}"
       MESHCORE_PORT: "${MESHCORE_PORT:-5000}"
-      VAPID_SUBJECT: mailto:adr@example.com
+      # Web Push abuse-contact email. Some push services log this — set a real address in .env.
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
       # Read from .env (gitignored). To run without auth, remove this line or
       # leave MESHCORE_WEBUI_API_KEY empty in .env.
       MESHCORE_WEBUI_API_KEY: "${MESHCORE_WEBUI_API_KEY:-}"
