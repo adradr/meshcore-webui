@@ -132,6 +132,47 @@ describe("TraceMonitorChart", () => {
     expect(firstHopSeries.points?.show).toBe(false)
   })
 
+  it("renders all-timeouts breakdown instead of the chart when no sample is ok", () => {
+    // Regression: previously the chart still rendered with all-null SNR
+    // series, which uPlot then auto-ranged to [-1, 1] — the user read this
+    // as "negative seconds". Now we surface the failure breakdown so the
+    // root cause (bad link / wrong target) is obvious.
+    const samples: TraceSample[] = [
+      makeSample({
+        finished_at: "2026-05-23T10:00:01Z",
+        status: "timeout",
+        snr_there: null,
+        snr_back: null,
+        hops: [],
+        path_len: null,
+        error: "timeout",
+      }),
+      makeSample({
+        finished_at: "2026-05-23T10:00:02Z",
+        status: "timeout",
+        snr_there: null,
+        snr_back: null,
+        hops: [],
+        path_len: null,
+        error: "timeout",
+      }),
+      makeSample({
+        finished_at: "2026-05-23T10:00:03Z",
+        status: "unreachable",
+        snr_there: null,
+        snr_back: null,
+        hops: [],
+        path_len: null,
+        error: "no path",
+      }),
+    ]
+    render(<TraceMonitorChart samples={samples} />)
+    expect(screen.queryByTestId("uplot-canvas")).not.toBeInTheDocument()
+    expect(screen.getByText(/3 attempts, none successful/i)).toBeInTheDocument()
+    expect(screen.getByText(/timeout/)).toBeInTheDocument()
+    expect(screen.getByText(/unreachable/)).toBeInTheDocument()
+  })
+
   it("emits null in hop columns for failed samples when showPerHop is true", () => {
     const samples: TraceSample[] = [
       makeSample({

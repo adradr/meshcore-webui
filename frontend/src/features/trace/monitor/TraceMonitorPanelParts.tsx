@@ -85,7 +85,12 @@ export function PanelHeader({
 }
 
 // ---------------------------------------------------------------------------
-// Interval slider
+// Interval picker — big value readout + preset chips + slider for fine-tune.
+//
+// The bare shadcn slider made the cadence opaque ("what does the dot at 60%
+// even mean?") and required precise dragging on mobile. The chips cover the
+// realistic cadences operators want (5/10/30 s, 1/5 min) with a single tap;
+// the slider stays for anything in between.
 // ---------------------------------------------------------------------------
 
 interface IntervalSliderProps {
@@ -94,21 +99,75 @@ interface IntervalSliderProps {
   disabled: boolean
 }
 
+const INTERVAL_PRESETS: { label: string; seconds: number }[] = [
+  { label: "5s", seconds: 5 },
+  { label: "10s", seconds: 10 },
+  { label: "30s", seconds: 30 },
+  { label: "1m", seconds: 60 },
+  { label: "5m", seconds: 300 },
+]
+
+function formatInterval(s: number): { value: string; unit: string } {
+  if (s < 60) return { value: String(s), unit: "sec" }
+  if (s % 60 === 0) return { value: String(s / 60), unit: s === 60 ? "min" : "min" }
+  // Display mixed values as e.g. "1m 30s"
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return { value: `${m}m ${r}s`, unit: "" }
+}
+
 export function IntervalSlider({
   value,
   onChange,
   disabled,
 }: IntervalSliderProps) {
+  const { value: vStr, unit } = formatInterval(value)
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between">
         <Label htmlFor="trace-monitor-interval" className="text-sm">
           Interval
         </Label>
-        <span className="text-sm tabular-nums text-muted-foreground">
-          {value} s
-        </span>
+        <div className="flex items-baseline gap-1">
+          <span
+            className="text-2xl font-semibold tabular-nums"
+            aria-live="polite"
+          >
+            {vStr}
+          </span>
+          {unit && (
+            <span className="text-sm text-muted-foreground">{unit}</span>
+          )}
+        </div>
       </div>
+
+      <div
+        role="radiogroup"
+        aria-label="Trace monitor interval presets"
+        className="flex flex-wrap gap-1.5"
+      >
+        {INTERVAL_PRESETS.map((p) => {
+          const active = p.seconds === value
+          return (
+            <button
+              type="button"
+              key={p.seconds}
+              role="radio"
+              aria-checked={active}
+              disabled={disabled}
+              onClick={() => onChange(p.seconds)}
+              className={`rounded-md border px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
+                active
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-background text-foreground hover:bg-muted"
+              } disabled:cursor-not-allowed disabled:opacity-50`}
+            >
+              {p.label}
+            </button>
+          )
+        })}
+      </div>
+
       <Slider
         id="trace-monitor-interval"
         min={MIN_INTERVAL_S}

@@ -125,6 +125,19 @@ export function TraceMonitorChart({
     [samples, showPerHop],
   )
 
+  const okCount = useMemo(
+    () => samples.filter((s) => s.status === "ok").length,
+    [samples],
+  )
+  const errorBreakdown = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const s of samples) {
+      if (s.status === "ok") continue
+      c[s.status] = (c[s.status] ?? 0) + 1
+    }
+    return c
+  }, [samples])
+
   const aligned: uPlot.AlignedData = useMemo(() => {
     const xs = samples.map((s) => Date.parse(s.finished_at) / 1000)
     const snrThere = samples.map((s) =>
@@ -160,7 +173,22 @@ export function TraceMonitorChart({
     return {
       width,
       height,
-      scales: { x: { time: true } },
+      // Pin y to a meaningful SNR window so the axis doesn't auto-collapse
+      // to [-1, 1] when every sample is a timeout (reads as "negative
+      // seconds" to a user looking at a sub-second-tick axis). uPlot still
+      // expands the range outward if real data exceeds these bounds — the
+      // ``auto: true`` and explicit ``range`` cooperate this way.
+      scales: {
+        x: { time: true },
+        y: {
+          range: (_u: uPlot, dataMin: number, dataMax: number): [number, number] => {
+            if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax)) {
+              return [-20, 10]
+            }
+            return [Math.min(dataMin, -20), Math.max(dataMax, 10)]
+          },
+        },
+      },
       series: [
         {},
         {
@@ -205,6 +233,26 @@ export function TraceMonitorChart({
             <p className="text-sm text-muted-foreground">
               Waiting for first sample…
             </p>
+          ) : okCount === 0 ? (
+            // All attempts are non-ok (timeout/unreachable/error). Plotting
+            // the SNR axis is misleading — the y range collapses and the
+            // chart reads as "negative seconds" to a confused user. Show
+            // the failure breakdown instead and let them fix the link.
+            <div className="space-y-1 py-4 text-sm text-muted-foreground">
+              <p>
+                {samples.length} attempt{samples.length === 1 ? "" : "s"}, none
+                successful yet.
+              </p>
+              <ul className="text-xs">
+                {(Object.entries(errorBreakdown) as [string, number][]).map(
+                  ([k, v]) => (
+                    <li key={k}>
+                      · {v} × <span className="font-mono">{k}</span>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
           ) : (
             <UplotReact options={opts} data={aligned} />
           )}

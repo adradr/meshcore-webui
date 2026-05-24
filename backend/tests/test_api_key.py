@@ -43,13 +43,20 @@ async def test_health_always_public_even_when_api_key_set(client, monkeypatch):
 
 
 @pytest.mark.parametrize("path", ["/s/abc12345", "/i/abc12345", "/i/abc12345/thumb"])
-def test_public_attachment_paths_are_exempt_from_api_key(monkeypatch, path):
+@pytest.mark.asyncio
+async def test_public_attachment_paths_are_exempt_from_api_key(
+    client, monkeypatch, path,
+):
     # Even with an API key set, /s/ and /i/ must not require auth.
-    from app.core.config import settings
-    monkeypatch.setattr(settings, "api_key", "secret")
-    from fastapi.testclient import TestClient
-    from app.main import app
-    client = TestClient(app)
-    r = client.get(path)
-    # Whatever the response (410 or 200), it must not be 401.
+    #
+    # Use the conftest ``client`` fixture rather than a bare ``TestClient`` so
+    # the in-memory DB has the ``attachments`` table created — otherwise the
+    # handler raises ``no such table: attachments`` before the middleware
+    # exemption is ever exercised, and TestClient (sync) re-raises that
+    # exception instead of returning the 500 response we'd want to assert
+    # against.
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    r = await client.get(path)
+    # Whatever the response (404/410/500), it must not be 401 — the
+    # api-key middleware must let the request through to the handler.
     assert r.status_code != 401

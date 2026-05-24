@@ -17,7 +17,11 @@ interface TraceHopsDrawerProps {
 }
 
 /**
- * Per-hop SNR/RSSI detail drawer for an active trace.
+ * Per-hop SNR detail drawer for an active trace.
+ *
+ * Note: the MeshCore TRACE_DATA packet carries only SNR per hop — no RSSI.
+ * RSSI exists for ADV and CHANNEL_MSG packets, not trace responses, so we
+ * deliberately do not surface an RSSI column here.
  *
  * v1: no "ping this hop" action — that requires a higher-level orchestrator
  * (trace ➜ pick hop ➜ direct probe) that we haven't wired yet.
@@ -79,7 +83,6 @@ function HopRow({ hop, index }: HopRowProps) {
       </div>
       <div className="text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5">
         <span>SNR: {hop.snr.toFixed(1)} dB</span>
-        <span>RSSI: —</span>
       </div>
       {hop.lat != null && hop.lon != null && (
         <div className="text-muted-foreground flex items-center gap-1 font-mono">

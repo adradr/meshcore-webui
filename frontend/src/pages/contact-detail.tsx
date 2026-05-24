@@ -217,17 +217,21 @@ function SkeletonView() {
 
 function NotFoundView({ pubkey }: { pubkey?: string }) {
   const navigate = useNavigate()
+  const backButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => navigate(-1)}
+      aria-label="Back"
+    >
+      <ArrowLeft className="h-5 w-5" />
+    </Button>
+  )
   return (
-    <PageShell header={<PageHeader title="Contact (not found)" />}>
+    <PageShell
+      header={<PageHeader title="Contact (not found)" leftAction={backButton} />}
+    >
       <div className="mx-auto max-w-3xl space-y-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(-1)}
-          className="-ml-2"
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back
-        </Button>
         <Card>
           <CardHeader>
             <CardTitle className="text-lg">Contact not found</CardTitle>
@@ -326,19 +330,28 @@ export function ContactDetailPage() {
     </>
   )
 
+  const backButton = (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => navigate(-1)}
+      aria-label="Back"
+    >
+      <ArrowLeft className="h-5 w-5" />
+    </Button>
+  )
+
   return (
     <PageShell
-      header={<PageHeader title={displayName} actions={headerActions} />}
+      header={
+        <PageHeader
+          title={displayName}
+          leftAction={backButton}
+          actions={headerActions}
+        />
+      }
     >
       <div className="mx-auto max-w-3xl space-y-4">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(-1)}
-          className="-ml-2"
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" /> Back
-        </Button>
 
         {/* Hero card */}
         <Card className="overflow-hidden">
