@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { List, X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
 import { TracePathLayer } from "@/components/map/TracePathLayer"
+import { TraceMonitorMapLayer } from "@/components/map/TraceMonitorMapLayer"
 import type { ContactMarker } from "@/components/map/MarkersLayer"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
@@ -10,7 +11,11 @@ import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
 import { LineOfSightModal } from "@/features/los/LineOfSightModal"
 import { useTracePath, type TraceOut } from "@/features/trace/api"
-import { useStartTraceMonitor } from "@/features/trace/monitor/api"
+import {
+  useStartTraceMonitor,
+  useTraceMonitorStatus,
+  useTraceMonitorSamples,
+} from "@/features/trace/monitor/api"
 import { TraceHopsDrawer } from "@/features/trace/TraceHopsDrawer"
 import { Button } from "@/components/ui/button"
 
@@ -71,6 +76,12 @@ export function MapPage() {
   // non-overriding choice lives on contact-detail.
   const navigate = useNavigate()
   const startMonitor = useStartTraceMonitor()
+  // Continuous trace-monitor overlay — green polyline + hop dots painted on
+  // the same map as the one-shot trace. We only mount it while a session is
+  // actually running so we don't keep dangling samples queries warm forever.
+  const monitorStatus = useTraceMonitorStatus()
+  const monitorSamples =
+    useTraceMonitorSamples(monitorStatus.data?.session_id ?? null).data ?? []
   // No in-flight spinner / state on the map — `useStartTraceMonitor`
   // already toasts on failure via `notifyError`, and the success path
   // navigates immediately, so a button-level spinner would only flash
@@ -150,6 +161,13 @@ export function MapPage() {
       >
         {activeTrace && (
           <TracePathLayer hops={activeTrace.hops} origin={self} />
+        )}
+        {monitorStatus.data?.running && data && (
+          <TraceMonitorMapLayer
+            samples={monitorSamples}
+            contacts={data}
+            self={self}
+          />
         )}
       </ClusteredContactMap>
       <LineOfSightModal

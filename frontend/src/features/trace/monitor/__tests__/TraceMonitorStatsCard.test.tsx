@@ -32,6 +32,7 @@ describe("TraceMonitorStatsCard", () => {
     )
     expect(screen.getByText(/success rate/i)).toBeInTheDocument()
     expect(screen.getByText(/67%/)).toBeInTheDocument()
+    expect(screen.getByText(/2\s*\/\s*3\s+samples/i)).toBeInTheDocument()
     expect(screen.getByText(/SNR there/i)).toBeInTheDocument()
     expect(screen.getByText(/SNR back/i)).toBeInTheDocument()
     expect(screen.getByText(/Path stability/i)).toBeInTheDocument()
