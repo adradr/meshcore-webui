@@ -31,6 +31,14 @@ RUN uv pip install --system --no-cache -e .
 COPY backend/ /app/
 COPY --from=frontend-builder /app/dist /app/static
 
+# Run as non-root. /data is the bind-mount target — operators upgrading from
+# the old root-owned layout need to: `sudo chown -R 1001:1001 ./data ./backend/secrets/`
+RUN groupadd --gid 1001 meshcore \
+ && useradd --uid 1001 --gid 1001 --no-create-home --home /app meshcore \
+ && mkdir -p /data \
+ && chown -R meshcore:meshcore /app /data
+USER meshcore
+
 ENV PYTHONUNBUFFERED=1 \
     STATIC_DIR=/app/static \
     DATABASE_URL=sqlite+aiosqlite:////data/meshcore.db \

@@ -93,3 +93,11 @@ def test_dockerfile_does_not_baked_in_proxy_trust():
     text = df.read_text()
     assert "--forwarded-allow-ips=*" not in text
     assert "--proxy-headers" not in text  # default off; operators opt in via env
+
+
+def test_dockerfile_runs_as_non_root():
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert "useradd" in text or "adduser" in text, "no non-root user created"
+    assert "\nUSER " in text or text.startswith("USER "), "no USER directive"
+    assert "USER root" not in text, "USER root must not appear"
