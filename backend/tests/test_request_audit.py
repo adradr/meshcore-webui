@@ -148,3 +148,29 @@ def test_key_fingerprint_is_stable_and_short():
     assert len(key_fingerprint("abc")) == 8
     assert key_fingerprint(None) == "none"
     assert key_fingerprint("") == "none"
+
+
+@pytest.mark.asyncio
+async def test_request_id_strips_control_chars_and_caps_length(caplog):
+    """A caller-supplied X-Request-ID must not be able to forge fake
+    audit lines via newline injection or balloon the value with a
+    multi-kilobyte string. Control chars are stripped before the value
+    reaches the log line OR the echoed response header, and the value
+    is capped at 64 chars."""
+    caplog.set_level(logging.INFO, logger="app.audit")
+    bad = "evil\nmethod=DELETE\rstatus=999 x" * 4
+    async with AsyncClient(
+        transport=ASGITransport(app=_app()), base_url="http://t",
+    ) as c:
+        r = await c.get("/api/echo", headers={"X-Request-ID": bad})
+
+    audit_lines = [rec.getMessage() for rec in caplog.records if rec.name == "app.audit"]
+    line = next((line for line in audit_lines if "req_id=" in line), None)
+    assert line is not None, audit_lines
+    assert "\n" not in line and "\r" not in line
+
+    echoed = r.headers.get("x-request-id", "")
+    assert "\n" not in echoed and "\r" not in echoed
+    assert len(echoed) <= 64
+    # Stripping must leave only safe opaque-token chars.
+    assert re.fullmatch(r"[A-Za-z0-9._-]+", echoed)

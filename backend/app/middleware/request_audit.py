@@ -1,6 +1,7 @@
 from __future__ import annotations
 import hashlib
 import logging
+import re
 import time
 import uuid
 
@@ -10,6 +11,13 @@ from starlette.responses import Response
 
 
 audit = logging.getLogger("app.audit")
+
+# Only allow opaque token characters in X-Request-ID. Anything outside
+# this set (notably CR/LF) is stripped before the value reaches the log
+# line or the echoed response header, so a caller can't forge fake
+# audit records by injecting newlines into the header value.
+_REQ_ID_RE = re.compile(r"[^A-Za-z0-9._-]")
+_REQ_ID_MAX_LEN = 64
 
 
 def key_fingerprint(api_key: str | None) -> str:
@@ -39,7 +47,8 @@ class RequestAuditMiddleware(BaseHTTPMiddleware):
     QUIET_PATHS = ("/api/health",)
 
     async def dispatch(self, request: Request, call_next):
-        req_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+        raw_req_id = request.headers.get("x-request-id", "")
+        req_id = _REQ_ID_RE.sub("", raw_req_id)[:_REQ_ID_MAX_LEN] or uuid.uuid4().hex[:12]
         # Deeper handlers can `request.state.request_id` to tag their
         # own logs with the same id and let operators stitch traces.
         request.state.request_id = req_id
