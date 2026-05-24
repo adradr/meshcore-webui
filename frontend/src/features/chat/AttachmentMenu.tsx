@@ -172,11 +172,17 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
 
   return (
     <>
+      {/*
+        No `capture` attribute — its presence (even valueless) makes iOS
+        Safari jump straight to the camera, hiding the Photo Library
+        option. Omitting it lets iOS present its native action sheet with
+        "Take Photo", "Photo Library", and "Choose File" so operators can
+        share an already-taken screenshot.
+      */}
       <input
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        capture
         hidden
         aria-hidden
         data-testid="attachment-image-input"
