@@ -123,6 +123,23 @@
   * {
     @apply border-border outline-ring/50;
     }
+  /*
+   * Lock the window viewport so ONLY inner overflow containers scroll
+   * (`<main>` in Layout, MessageList in chat, the scrollable PageShell
+   * children, etc.). Without this iOS Safari standalone PWA rubber-bands
+   * the entire document when an inner scroll hits its edge, or if a flex
+   * child measures taller than its parent — visible to the user as the
+   * sticky page header and bottom nav scrolling out of view together with
+   * the chat history.
+   *
+   * `overscroll-behavior: contain` is the secondary defence — even with
+   * overflow:hidden, some iOS versions still propagate rubber-band scrolls
+   * up to the document root.
+   */
+  html, body {
+    @apply h-full overflow-hidden;
+    overscroll-behavior: none;
+    }
   body {
     @apply bg-background text-foreground;
     }
