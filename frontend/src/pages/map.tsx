@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { List, X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
 import { TracePathLayer } from "@/components/map/TracePathLayer"
+import type { ContactMarker } from "@/components/map/MarkersLayer"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
 import { useTheme } from "@/components/theme-provider"
 import type { NodeType } from "@/components/map/nodeIcons"
 import { LineOfSightModal } from "@/features/los/LineOfSightModal"
 import { useTracePath, type TraceOut } from "@/features/trace/api"
+import { useStartTraceMonitor } from "@/features/trace/monitor/api"
 import { TraceHopsDrawer } from "@/features/trace/TraceHopsDrawer"
 import { Button } from "@/components/ui/button"
+
+// 10 s is the default cadence we kick off with from the map. Operators can
+// re-tune via the slider on the contact-detail page once the chart is in
+// view. Must stay within the backend's settings.trace_monitor_min_interval_s
+// (default 5 s) — if you change this, double-check the live setting.
+const MAP_MONITOR_DEFAULT_INTERVAL_S = 10
 
 function nodeTypeFor(type: number | undefined): NodeType {
   if (type === 1) return "CLI"
@@ -55,6 +64,25 @@ export function MapPage() {
   // marker popup can decide whether to spin (itself) or merely grey out (other
   // nodes) — see MarkerPopupBody for the per-marker rendering logic.
   const [tracingPubkey, setTracingPubkey] = useState<string | null>(null)
+
+  // Monitor entry point — starts a continuous trace session and routes the
+  // user to the contact-detail panel where the chart + stats live. `force:
+  // true` because the map is the fast-switching surface; the deliberate
+  // non-overriding choice lives on contact-detail.
+  const navigate = useNavigate()
+  const startMonitor = useStartTraceMonitor()
+  // No in-flight spinner / state on the map — `useStartTraceMonitor`
+  // already toasts on failure via `notifyError`, and the success path
+  // navigates immediately, so a button-level spinner would only flash
+  // for the few hundred ms before the route change.
+  const handleMonitorRequest = (c: ContactMarker) => {
+    startMonitor.mutate(
+      { pubkey: c.id, interval_s: MAP_MONITOR_DEFAULT_INTERVAL_S, force: true },
+      {
+        onSuccess: () => navigate(`/contact/${c.id}`),
+      },
+    )
+  }
 
   const self =
     selfInfo &&
@@ -118,6 +146,7 @@ export function MapPage() {
         selfHasGps={self !== null}
         onTraceRequest={handleTraceRequest}
         traceInFlightPubkey={tracingPubkey}
+        onMonitorRequest={handleMonitorRequest}
       >
         {activeTrace && (
           <TracePathLayer hops={activeTrace.hops} origin={self} />

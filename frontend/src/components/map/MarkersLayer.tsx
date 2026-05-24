@@ -24,6 +24,8 @@ interface Props {
    * and every other Trace button greys out.
    */
   traceInFlightPubkey: string | null
+  /** Emitted when the user clicks "Monitor" (continuous trace) on a popup. */
+  onMonitorRequest?: (c: ContactMarker) => void
 }
 
 export function MarkersLayer({
@@ -32,6 +34,7 @@ export function MarkersLayer({
   selfHasGps,
   onTraceRequest,
   traceInFlightPubkey,
+  onMonitorRequest,
 }: Props) {
   return (
     <>
@@ -49,6 +52,7 @@ export function MarkersLayer({
               isSelf={c.id === "__self__"}
               onTraceRequest={onTraceRequest}
               traceInFlightPubkey={traceInFlightPubkey}
+              onMonitorRequest={onMonitorRequest}
             />
           </Popup>
         </Marker>

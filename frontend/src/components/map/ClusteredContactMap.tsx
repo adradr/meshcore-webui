@@ -30,6 +30,8 @@ interface Props {
    * but does not spin.
    */
   traceInFlightPubkey?: string | null
+  /** Emitted when the user clicks "Monitor" on a non-self marker popup. */
+  onMonitorRequest?: (c: ContactMarker) => void
   /**
    * Rendered inside the `<MapContainer>` (after markers, before fit button).
    * Use this to mount react-leaflet overlays like `TracePathLayer` that
@@ -59,6 +61,7 @@ export function ClusteredContactMap({
   selfHasGps,
   onTraceRequest,
   traceInFlightPubkey = null,
+  onMonitorRequest,
   children,
 }: Props) {
   // Include self in fitBounds + center so the camera respects your own pin
@@ -89,6 +92,7 @@ export function ClusteredContactMap({
           selfHasGps={selfHasGps}
           onTraceRequest={onTraceRequest}
           traceInFlightPubkey={traceInFlightPubkey}
+          onMonitorRequest={onMonitorRequest}
         />
       </MarkerClusterGroup>
       {/* Self marker rendered OUTSIDE the cluster so it always shows distinctly */}

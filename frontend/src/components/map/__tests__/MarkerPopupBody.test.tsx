@@ -281,6 +281,68 @@ describe("MarkerPopupBody", () => {
     expect(btn.querySelector(".animate-spin")).toBeNull()
   })
 
+  it("shows a Monitor button on every non-self node popup and emits onMonitorRequest with the contact", () => {
+    const onMonitorRequest = vi.fn()
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={{
+            id: "ab".repeat(32),
+            name: "HU-PE-PILISMETEOR",
+            lat: 47.5,
+            lon: 19.0,
+            nodeType: "REP",
+          }}
+          selfHasGps={true}
+          isSelf={false}
+          onMonitorRequest={onMonitorRequest}
+        />
+      </MemoryRouter>,
+    )
+    const monitor = screen.getByRole("button", {
+      name: /monitor hu-pe-pilismeteor/i,
+    })
+    fireEvent.click(monitor)
+    expect(onMonitorRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "ab".repeat(32) }),
+    )
+  })
+
+  it("renders Monitor button as disabled when onMonitorRequest is not provided", () => {
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={{
+            id: "ab".repeat(32),
+            name: "HU-PE-PILISMETEOR",
+            lat: 47.5,
+            lon: 19.0,
+            nodeType: "REP",
+          }}
+          selfHasGps={true}
+          isSelf={false}
+          // onMonitorRequest intentionally omitted
+        />
+      </MemoryRouter>,
+    )
+    expect(
+      screen.getByRole("button", { name: /monitor hu-pe-pilismeteor/i }),
+    ).toBeDisabled()
+  })
+
+  it("does NOT show the Monitor button on the self popup", () => {
+    render(
+      <MemoryRouter>
+        <MarkerPopupBody
+          contact={{ id: "__self__", name: "me", lat: 0, lon: 0, nodeType: "SELF" }}
+          isSelf={true}
+          selfHasGps={true}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole("button", { name: /monitor/i })).not.toBeInTheDocument()
+  })
+
   it("shows spinner only on the node whose trace is in flight; disables others", () => {
     const tracingId = "aaaa1111"
     const otherId = "bbbb2222"

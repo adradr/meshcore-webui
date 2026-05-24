@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { ArrowRight, Loader2, MessageCircle, Radio, Route, User } from "lucide-react"
+import { Activity, ArrowRight, Loader2, MessageCircle, Radio, Route, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ContactMarker } from "./MarkersLayer"
 import type { NodeType } from "./nodeIcons"
@@ -29,6 +29,15 @@ interface Props {
    * so the user isn't misled into thinking they're waiting on unrelated nodes.
    */
   traceInFlightPubkey?: string | null
+  /**
+   * Emitted when the user clicks the "Monitor" (continuous trace) button.
+   * Available on every non-self popup. Disabled when no handler is provided.
+   *
+   * Continuous trace monitor — RF signal strength, NOT geometry. Unlike
+   * the LoS button (which needs self GPS to compute), Monitor works for
+   * every non-self node regardless of GPS state.
+   */
+  onMonitorRequest?: (c: ContactMarker) => void
 }
 
 /** Node types where the "Trace path" button makes sense (multi-hop targets). */
@@ -60,6 +69,7 @@ export function MarkerPopupBody({
   isSelf,
   onTraceRequest,
   traceInFlightPubkey = null,
+  onMonitorRequest,
 }: Props) {
   const losDisabled = !selfHasGps || !onLosRequest
   const losTitle = selfHasGps
@@ -143,6 +153,25 @@ export function MarkerPopupBody({
               )}
             </Button>
           )}
+          {/*
+            Monitor (continuous trace) — available on every non-self popup.
+            Placed after the Trace button when present, otherwise after LoS
+            for CLI/UNKNOWN nodes. `force: true` is wired by the parent so
+            the map is a fast-switching surface; the contact-detail panel is
+            where deliberate non-overriding decisions are made.
+          */}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-9 p-0"
+            title="Monitor (continuous trace)"
+            aria-label={`Monitor ${contact.name}`}
+            disabled={!onMonitorRequest}
+            onClick={() => onMonitorRequest?.(contact)}
+          >
+            <Activity className="h-3.5 w-3.5" />
+          </Button>
         </div>
       )}
     </div>
