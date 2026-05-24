@@ -5,6 +5,13 @@ import { MemoryRouter } from "react-router-dom"
 
 import { SettingsPage } from "@/pages/settings"
 import { ThemeProvider } from "@/components/theme-provider"
+import { HapticProvider, HAPTIC_STORAGE_KEY } from "@/haptics/HapticProvider"
+
+// web-haptics' `useWebHaptics` hits navigator APIs jsdom doesn't have. Stub
+// the hook so HapticProvider can be exercised in tests without errors.
+vi.mock("web-haptics/react", () => ({
+  useWebHaptics: () => ({ trigger: vi.fn() }),
+}))
 
 // SettingsPage pulls in feature widgets that hit network/WS. Stub them so the
 // page renders in jsdom without side effects — the only surface we're testing
@@ -43,7 +50,9 @@ function renderSettings() {
     <QueryClientProvider client={qc}>
       <MemoryRouter>
         <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-          <SettingsPage />
+          <HapticProvider>
+            <SettingsPage />
+          </HapticProvider>
         </ThemeProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -158,5 +167,38 @@ describe("ThemeProvider — live OS preference listener", () => {
 
     expect(document.documentElement.classList.contains("dark")).toBe(true)
     expect(document.documentElement.classList.contains("light")).toBe(false)
+  })
+})
+
+describe("SettingsPage — Haptics toggle", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia
+  })
+
+  it("flipping the switch persists the new preference to localStorage", () => {
+    renderSettings()
+    const toggle = screen.getByLabelText(/enable haptic feedback/i)
+    // Default is ON (HapticProvider treats missing key as enabled), so the
+    // first click flips it OFF and writes "false".
+    expect(toggle).toHaveAttribute("aria-checked", "true")
+
+    fireEvent.click(toggle)
+    expect(localStorage.getItem(HAPTIC_STORAGE_KEY)).toBe("false")
+    expect(toggle).toHaveAttribute("aria-checked", "false")
+
+    // Flipping back ON writes "true" and triggers the sample tap path.
+    fireEvent.click(toggle)
+    expect(localStorage.getItem(HAPTIC_STORAGE_KEY)).toBe("true")
+    expect(toggle).toHaveAttribute("aria-checked", "true")
   })
 })

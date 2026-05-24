@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Monitor, Moon, Sun } from "lucide-react"
+import { Activity, Monitor, Moon, Sun } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils"
 import { notifyError } from "@/lib/notify"
 import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { MutedList } from "@/features/mutes/MutedList"
 import { PushModeRadio } from "@/features/push/PushModeRadio"
 import { AttachmentsManager } from "@/features/admin/AttachmentsManager"
@@ -34,6 +35,7 @@ const THEME_OPTIONS: ReadonlyArray<{
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme()
+  const haptic = useHaptic()
   const [apiKey, setApiKey] = useState(
     typeof localStorage !== "undefined"
       ? (localStorage.getItem("apiKey") ?? "")
@@ -120,6 +122,38 @@ export function SettingsPage() {
               </Label>
             ))}
           </RadioGroup>
+        </section>
+        <Separator />
+
+        {/* Haptics — Android-only vibration confirmations. iOS Safari/PWA
+            does not expose the haptics API to web apps, so on iOS this
+            toggle simply has no effect. */}
+        <section className="space-y-2">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold">
+              <Activity className="h-4 w-4" aria-hidden />
+              Haptics
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Small vibration confirmations when you send a message, copy a
+              link, or receive a notification. Android only — iOS Safari/PWA
+              does not expose the haptics API to web apps.
+            </p>
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="haptics-toggle" className="text-sm">
+              Enable haptic feedback
+            </Label>
+            <Switch
+              id="haptics-toggle"
+              checked={haptic.enabled}
+              onCheckedChange={(v) => {
+                haptic.setEnabled(v)
+                // Fire a sample tap so the user feels the change confirm.
+                if (v) haptic.tap()
+              }}
+            />
+          </div>
         </section>
         <Separator />
 
