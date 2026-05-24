@@ -10,7 +10,6 @@ from app.core.config import settings
 
 
 class APIKeyMiddleware(BaseHTTPMiddleware):
-    EXEMPT_PATHS = ("/", "/manifest.webmanifest", "/sw.js", "/registerSW.js", "/assets")
     # Endpoints exempt from the bearer-token check even when an API key is
     # configured. Anything here MUST be safe to expose to the open internet.
     #
@@ -32,6 +31,12 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     # `/i/<slug>[/thumb]` inline image previews) that must be openable by
     # recipients who don't have the operator's API key.
     EXEMPT_PREFIXES = ("/s/", "/i/")
+    # Path prefixes gated by the bearer-token check. `/api` and `/ws` are the
+    # product surface; `/docs`, `/redoc`, and `/openapi.json` are FastAPI's
+    # auto-generated docs which would otherwise leak the full route inventory
+    # to anyone who can reach the container.
+    GATED_PREFIXES = ("/api", "/ws", "/docs", "/redoc")
+    GATED_EXACT_PATHS = ("/openapi.json",)
 
     async def dispatch(self, request: Request, call_next):
         if settings.api_key is None:
@@ -41,7 +46,14 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         if any(path.startswith(p) for p in self.EXEMPT_PREFIXES):
             return await call_next(request)
-        if not path.startswith("/api") and not path.startswith("/ws"):
+        is_gated = (
+            path in self.GATED_EXACT_PATHS
+            or any(
+                path == p or path.startswith(p + "/")
+                for p in self.GATED_PREFIXES
+            )
+        )
+        if not is_gated:
             return await call_next(request)
         auth = request.headers.get("authorization", "")
         expected = f"Bearer {settings.api_key}"
