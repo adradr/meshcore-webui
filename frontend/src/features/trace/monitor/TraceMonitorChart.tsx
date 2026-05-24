@@ -138,6 +138,11 @@ export function TraceMonitorChart({
     return c
   }, [samples])
 
+  // Failure-rail Y constant. Sits below the SNR working range so the markers
+  // are clearly separated from real data. Y scale is forced to include this
+  // value (see `scales.y.range` below) so the markers are always on-screen.
+  const FAILURE_RAIL_Y = -25
+
   const aligned: uPlot.AlignedData = useMemo(() => {
     const xs = samples.map((s) => Date.parse(s.finished_at) / 1000)
     const snrThere = samples.map((s) =>
@@ -146,7 +151,14 @@ export function TraceMonitorChart({
     const snrBack = samples.map((s) =>
       s.status === "ok" ? s.snr_back : null,
     )
-    return [xs, snrThere, snrBack, ...hopColumns.data] as uPlot.AlignedData
+    // Failure rail: a Y value at the chart bottom for each non-ok sample,
+    // null for ok ones. Rendered as red X markers (no line), points-only.
+    // This makes it obvious WHEN a failure happened without forcing the
+    // user to hover every grid column.
+    const failures = samples.map((s) =>
+      s.status === "ok" ? null : FAILURE_RAIL_Y,
+    )
+    return [xs, snrThere, snrBack, failures, ...hopColumns.data] as uPlot.AlignedData
   }, [samples, hopColumns])
 
   const opts: uPlot.Options = useMemo(() => {
@@ -182,10 +194,17 @@ export function TraceMonitorChart({
         x: { time: true },
         y: {
           range: (_u: uPlot, dataMin: number, dataMax: number): [number, number] => {
-            if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax)) {
-              return [-20, 10]
-            }
-            return [Math.min(dataMin, -20), Math.max(dataMax, 10)]
+            // Always include the failure-rail floor; without that, the rail
+            // markers would clip below the y-axis on a healthy link.
+            const lo = Math.min(
+              Number.isFinite(dataMin) ? dataMin : 0,
+              FAILURE_RAIL_Y - 2,
+            )
+            const hi = Math.max(
+              Number.isFinite(dataMax) ? dataMax : 0,
+              10,
+            )
+            return [lo, hi]
           },
         },
       },
@@ -194,15 +213,36 @@ export function TraceMonitorChart({
         {
           label: "SNR there",
           stroke: thereColor,
+          // points.show=true makes each ok sample a visible dot — otherwise
+          // the line draws through gaps and individual samples are only
+          // findable by hovering. Stable circle markers + slightly larger
+          // hit area than the default so they read on a 600px-wide chart.
+          points: { show: true, size: 5 },
           width: 2,
-          points: { show: false },
           spanGaps: false,
         },
         {
           label: "SNR back",
           stroke: backColor,
+          points: { show: true, size: 5 },
           width: 2,
-          points: { show: false },
+          spanGaps: false,
+        },
+        {
+          // Failure rail — drawn as red X markers with NO connecting line so
+          // each failed tick reads as a discrete point on the time axis.
+          // Width=0 + points.show=true achieves that; the points fill is
+          // overridden via `points.fill` to match the destructive colour.
+          label: "Failures",
+          stroke: "rgb(239, 68, 68)", // red-500
+          fill: "rgb(239, 68, 68)",
+          width: 0,
+          points: {
+            show: true,
+            size: 7,
+            fill: "rgb(239, 68, 68)",
+            stroke: "rgb(239, 68, 68)",
+          },
           spanGaps: false,
         },
         ...hopSeries,

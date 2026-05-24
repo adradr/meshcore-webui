@@ -29,6 +29,7 @@ import {
   useTraceMonitorSessions,
   useTraceMonitorStatus,
 } from "./api"
+import { RecordingsList } from "./RecordingsList"
 import { TraceMonitorChart } from "./TraceMonitorChart"
 import {
   DEFAULT_INTERVAL_S,
@@ -192,6 +193,8 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
           showPerHop={showPerHop}
           title="Trace SNR (rolling)"
         />
+
+        <RecordingsList sessions={historicalSessions} />
       </CardContent>
     </Card>
   )

@@ -27,6 +27,18 @@ vi.mock("../TraceMonitorChart", () => ({
   },
 }))
 
+// Stub RecordingsList — it depends on TanStack Query's QueryClient which
+// these panel tests don't set up. The list's behaviour is covered by its
+// own test file; here we only need to know it received the right session
+// array (and didn't blow up).
+const lastRecordingsProps: { sessions: unknown } = { sessions: null }
+vi.mock("../RecordingsList", () => ({
+  RecordingsList: (props: { sessions: unknown }) => {
+    lastRecordingsProps.sessions = props.sessions
+    return <div data-testid="recordings-list" />
+  },
+}))
+
 import {
   useTraceMonitorStatus,
   useStartTraceMonitor,
