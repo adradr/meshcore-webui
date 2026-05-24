@@ -1,3 +1,5 @@
+import pathlib
+
 from app.core.config import Settings
 
 
@@ -87,7 +89,6 @@ def test_attachments_env_overrides(monkeypatch):
 def test_dockerfile_does_not_baked_in_proxy_trust():
     """The runtime image must not unconditionally trust X-Forwarded-* from any client.
     Operators behind a real proxy can re-enable via UVICORN_FORWARDED_ALLOW_IPS."""
-    import pathlib
     df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
     text = df.read_text()
     assert "--forwarded-allow-ips=*" not in text
