@@ -63,14 +63,21 @@ function DialogContent({
           className
         )}
         {...props}
+        style={{
+          paddingTop: "calc(1rem + env(safe-area-inset-top, 0px))",
+          ...props.style,
+        }}
       >
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-2 right-2"
+              className="absolute right-2"
               size="icon-sm"
+              style={{
+                top: "calc(env(safe-area-inset-top, 0px) + 0.5rem)",
+              }}
             >
               <XIcon
               />

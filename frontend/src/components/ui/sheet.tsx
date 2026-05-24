@@ -66,14 +66,22 @@ function SheetContent({
           className
         )}
         {...props}
+        style={{
+          paddingTop: "calc(env(safe-area-inset-top, 0px))",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px))",
+          ...props.style,
+        }}
       >
         {children}
         {showCloseButton && (
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button
               variant="ghost"
-              className="absolute top-3 right-3"
+              className="absolute right-3"
               size="icon-sm"
+              style={{
+                top: "calc(env(safe-area-inset-top, 0px) + 0.75rem)",
+              }}
             >
               <XIcon
               />
