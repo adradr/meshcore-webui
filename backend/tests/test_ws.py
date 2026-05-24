@@ -80,3 +80,19 @@ async def test_writer_is_cancelled_when_reader_returns_first():
         )
     finally:
         del app.state.meshcore_client
+
+
+def test_ws_auth_failure_is_logged(caplog, monkeypatch):
+    """A rejected WS connection emits a warning on app.audit so brute-force
+    attempts against the websocket endpoint are visible (the HTTP audit
+    middleware doesn't see WebSocket scopes)."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    from starlette.websockets import WebSocketDisconnect
+
+    with caplog.at_level("WARNING", logger="app.audit"):
+        with pytest.raises(WebSocketDisconnect):
+            with TestClient(app).websocket_connect("/ws?token=wrong") as ws:
+                ws.receive_json()
+
+    messages = [r.getMessage() for r in caplog.records if r.name == "app.audit"]
+    assert any("ws_auth_fail" in m for m in messages), messages

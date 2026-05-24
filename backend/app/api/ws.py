@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
+audit_log = logging.getLogger("app.audit")
 router = APIRouter()
 
 # BaseHTTPMiddleware doesn't see WebSocket scopes, so auth is enforced here.
@@ -31,6 +32,9 @@ def _authenticate(websocket: WebSocket) -> bool:
 @router.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     if not _authenticate(websocket):
+        client_host = websocket.client.host if websocket.client else "?"
+        ua = (websocket.headers.get("user-agent") or "?")[:60]
+        audit_log.warning("ws_auth_fail ip=%s ua=%s", client_host, ua)
         await websocket.close(code=_WS_POLICY_VIOLATION)
         return
 
