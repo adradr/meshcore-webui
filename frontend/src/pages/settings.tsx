@@ -214,9 +214,9 @@ export function SettingsPage() {
           </p>
         </section>
 
-        {/* Attachments — listed before DangerZone because per-item / purge
-            actions are scoped to image storage, not the broader device reset
-            flow. The header already exposes the destructive "Purge…" entry. */}
+        {/* Attachments summary — links out to /attachments for the full grid.
+            Keeping the list off Settings stops the attachments query from
+            firing every time the user opens this page. */}
         <AttachmentsManager />
 
         <DangerZone />

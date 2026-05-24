@@ -7,6 +7,7 @@ import { ChannelsPage } from "@/pages/channels"
 import { MapPage } from "@/pages/map"
 import { SettingsPage } from "@/pages/settings"
 import { DevicePage } from "@/pages/device"
+import { AttachmentsPage } from "@/pages/attachments"
 
 const router = createBrowserRouter([
   {
@@ -26,6 +27,7 @@ const router = createBrowserRouter([
       { path: "rx-log", element: <Navigate to="/device?tab=rx-log" replace /> },
       { path: "noise", element: <Navigate to="/device?tab=noise" replace /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "attachments", element: <AttachmentsPage /> },
     ],
   },
 ])
