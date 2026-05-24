@@ -1,10 +1,10 @@
 from __future__ import annotations
 import asyncio
-import hmac
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.core.bearer import constant_time_bearer_equal, constant_time_token_equal
 from app.core.config import settings
 
 log = logging.getLogger(__name__)
@@ -20,13 +20,14 @@ def _authenticate(websocket: WebSocket) -> bool:
     if expected is None:
         return True
     auth_header = websocket.headers.get("authorization", "")
-    if auth_header and hmac.compare_digest(auth_header, f"Bearer {expected}"):
-        return True
+    header_ok = constant_time_bearer_equal(auth_header, expected)
     # Browsers can't set headers on `new WebSocket(...)`, so accept ?token= too.
     token = websocket.query_params.get("token", "")
-    if token and hmac.compare_digest(token, expected):
-        return True
-    return False
+    token_ok = constant_time_token_equal(token, expected)
+    # Run BOTH comparisons before short-circuiting so the WS handshake's
+    # timing doesn't distinguish "wrong header" from "wrong query token"
+    # (or "neither presented" from "one presented but wrong").
+    return header_ok or token_ok
 
 
 @router.websocket("/ws")

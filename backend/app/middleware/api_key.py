@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hmac
-
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.bearer import constant_time_bearer_equal
 from app.core.config import settings
 
 
@@ -56,7 +55,6 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         if not is_gated:
             return await call_next(request)
         auth = request.headers.get("authorization", "")
-        expected = f"Bearer {settings.api_key}"
-        if not hmac.compare_digest(auth, expected):
+        if not constant_time_bearer_equal(auth, settings.api_key):
             return JSONResponse({"detail": "unauthorized"}, status_code=401)
         return await call_next(request)

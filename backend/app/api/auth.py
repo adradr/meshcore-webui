@@ -21,11 +21,10 @@ next action.
 """
 from __future__ import annotations
 
-import hmac
-
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from app.core.bearer import constant_time_bearer_equal
 from app.core.config import settings
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -53,7 +52,7 @@ async def auth_info(request: Request) -> AuthInfoResponse:
             public_base_url=settings.public_base_url,
         )
     header = request.headers.get("authorization", "")
-    valid = bool(header) and hmac.compare_digest(header, f"Bearer {expected}")
+    valid = constant_time_bearer_equal(header, expected)
     return AuthInfoResponse(
         required=True,
         valid=valid,
