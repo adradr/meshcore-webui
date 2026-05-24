@@ -50,3 +50,35 @@ def test_settings_reads_advanced_rf_env(monkeypatch):
     assert s.rx_log_persist is True
     assert s.rx_log_buffer_size == 5000
     assert s.noise_poll_interval_s == 0.5
+
+
+def test_attachments_defaults(monkeypatch):
+    # ensure no leftover env from previous tests
+    for v in (
+        "PUBLIC_BASE_URL", "ATTACHMENTS_DIR", "ATTACHMENTS_MAX_BYTES",
+        "ATTACHMENTS_QUOTA_BYTES", "ATTACHMENTS_RATE_PER_MIN",
+        "ATTACHMENTS_RATE_PER_HOUR", "TRUSTED_PROXY",
+    ):
+        monkeypatch.delenv(v, raising=False)
+    from app.core.config import Settings
+    s = Settings()  # type: ignore[call-arg]
+    assert s.public_base_url is None
+    assert str(s.attachments_dir).endswith("attachments")
+    assert s.attachments_max_bytes == 52_428_800
+    assert s.attachments_quota_bytes == 2_147_483_648
+    assert s.attachments_rate_per_min == 100
+    assert s.attachments_rate_per_hour == 1000
+    assert s.trusted_proxy is False
+
+
+def test_attachments_env_overrides(monkeypatch):
+    monkeypatch.setenv("PUBLIC_BASE_URL", "https://mesh.example.com")
+    monkeypatch.setenv("ATTACHMENTS_QUOTA_BYTES", "500000000")
+    monkeypatch.setenv("ATTACHMENTS_RATE_PER_MIN", "30")
+    monkeypatch.setenv("TRUSTED_PROXY", "1")
+    from app.core.config import Settings
+    s = Settings()  # type: ignore[call-arg]
+    assert s.public_base_url == "https://mesh.example.com"
+    assert s.attachments_quota_bytes == 500_000_000
+    assert s.attachments_rate_per_min == 30
+    assert s.trusted_proxy is True

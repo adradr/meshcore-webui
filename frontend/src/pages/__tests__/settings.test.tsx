@@ -21,6 +21,10 @@ vi.mock("@/features/admin/DangerZone", () => ({
   DangerZone: () => <div data-testid="danger-zone" />,
 }))
 
+vi.mock("@/features/admin/AttachmentsManager", () => ({
+  AttachmentsManager: () => <div data-testid="attachments-manager" />,
+}))
+
 vi.mock("@/pwa/PWAInstallPrompt", () => ({
   PWAInstallPrompt: () => <div data-testid="pwa-install" />,
 }))

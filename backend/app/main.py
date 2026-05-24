@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.admin import router as admin_router
+from app.api.attachments import router as attachments_router
 from app.api.auth import router as auth_router
 from app.api.channels import router as channels_router
 from app.api.contacts import router as contacts_router
@@ -20,6 +22,7 @@ from app.api.los import router as los_router
 from app.api.messages import router as messages_router
 from app.api.mutes import router as mutes_router
 from app.api.noise import router as noise_router
+from app.api.public_attachments import router as public_attachments_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
 from app.api.trace import router as trace_router
@@ -30,6 +33,7 @@ from app.core.vapid import load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
+from app.middleware.attachment_rate_limit import AttachmentRateLimitMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
@@ -42,6 +46,7 @@ from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
 from app.services.trace_monitor import TraceMonitor
 from app.services.trace_sample_persist import persist_trace_sample
+
 
 def _configure_logging() -> None:
     """Make sure our `app.*` loggers (including `app.audit`) actually
@@ -110,9 +115,10 @@ async def _ensure_schema() -> None:
     import asyncio
     from pathlib import Path
 
-    from alembic import command
     from alembic.config import Config
     from sqlalchemy import inspect as sa_inspect
+
+    from alembic import command
 
     repo_root = Path(__file__).resolve().parent.parent
     ini = repo_root / "alembic.ini"
@@ -316,7 +322,21 @@ def create_app() -> FastAPI:
     # headers applied to every response (including 401 from auth), so
     # SecurityHeaders is outermost; audit observes the final status
     # code from APIKeyMiddleware which is innermost.
+    #
+    # AttachmentRateLimit sits BETWEEN audit and APIKey: it must short-
+    # circuit before APIKey runs (so the public `/s/`, `/i/` prefixes
+    # actually trigger it — they're auth-exempt anyway), and the audit
+    # log should still record the 429 with proper headers applied by
+    # SecurityHeaders. The middleware receives callables for caps so a
+    # test (or future hot-reload) bumping `settings.attachments_rate_*`
+    # is reflected on the next request without rebuilding the app.
     app.add_middleware(APIKeyMiddleware)
+    app.add_middleware(
+        AttachmentRateLimitMiddleware,
+        per_min=lambda: settings.attachments_rate_per_min,
+        per_hour=lambda: settings.attachments_rate_per_hour,
+        trust_x_forwarded_for=lambda: settings.trusted_proxy,
+    )
     app.add_middleware(RequestAuditMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
 
@@ -340,6 +360,8 @@ def create_app() -> FastAPI:
     app.include_router(mutes_router)
     app.include_router(diagnostics_router)
     app.include_router(admin_router)
+    app.include_router(attachments_router)
+    app.include_router(public_attachments_router)
 
     static_dir = Path(settings.static_dir)
     if static_dir.exists():

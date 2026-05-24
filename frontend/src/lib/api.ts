@@ -21,7 +21,14 @@ async function request<T>(
   schema?: z.ZodType<T>,
 ): Promise<T> {
   const headers = new Headers(opts.headers)
-  if (!headers.has("content-type") && opts.body)
+  // For FormData bodies, the browser must set `content-type: multipart/form-data;
+  // boundary=...` itself — setting it manually would strip the boundary and the
+  // request would 422 at the server. Only default to JSON for non-FormData bodies.
+  if (
+    !headers.has("content-type") &&
+    opts.body &&
+    !(opts.body instanceof FormData)
+  )
     headers.set("content-type", "application/json")
   const apiKey = getApiKey()
   if (apiKey) headers.set("authorization", `Bearer ${apiKey}`)
@@ -90,4 +97,6 @@ export const api = {
       { method: "DELETE", body: body ? JSON.stringify(body) : undefined },
       schema,
     ),
+  upload: <T>(path: string, formData: FormData, schema?: z.ZodType<T>) =>
+    request<T>(path, { method: "POST", body: formData }, schema),
 }

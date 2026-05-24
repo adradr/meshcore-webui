@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import hmac
 
 from fastapi import Request
@@ -26,12 +27,19 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
         "/api/push/vapid-public-key",
         "/api/auth/info",
     )
+    # Path prefixes that are always public, even when an API key is configured.
+    # Used for shareable attachment URLs (`/s/<slug>` short links and
+    # `/i/<slug>[/thumb]` inline image previews) that must be openable by
+    # recipients who don't have the operator's API key.
+    EXEMPT_PREFIXES = ("/s/", "/i/")
 
     async def dispatch(self, request: Request, call_next):
         if settings.api_key is None:
             return await call_next(request)
         path = request.url.path
         if path in self.EXEMPT_API_PATHS:
+            return await call_next(request)
+        if any(path.startswith(p) for p in self.EXEMPT_PREFIXES):
             return await call_next(request)
         if not path.startswith("/api") and not path.startswith("/ws"):
             return await call_next(request)

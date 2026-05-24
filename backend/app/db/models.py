@@ -1,9 +1,18 @@
 from __future__ import annotations
+
 import datetime as dt
 from typing import Literal
 
 from sqlalchemy import (
-    BigInteger, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, func,
+    BigInteger,
+    DateTime,
+    Float,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -214,3 +223,21 @@ class TraceSample(Base):
             "target_pubkey", "finished_at",
         ),
     )
+
+
+class Attachment(Base):
+    __tablename__ = "attachments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    slug: Mapped[str] = mapped_column(String(8), unique=True, nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    thumb_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    mime: Mapped[str] = mapped_column(String(32), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String(255))
+    original_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    uploaded_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True,
+    )
+    uploader_fingerprint: Mapped[str | None] = mapped_column(String(8))

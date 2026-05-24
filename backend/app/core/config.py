@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -75,6 +77,28 @@ class Settings(BaseSettings):
         default=300,
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
     )
+
+    # Attachments / public image sharing
+    public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
+    attachments_dir: Path = Field(
+        default=Path("/data/attachments"),
+        alias="ATTACHMENTS_DIR",
+    )
+    attachments_max_bytes: int = Field(
+        default=52_428_800,  # 50 MiB
+        alias="ATTACHMENTS_MAX_BYTES",
+    )
+    attachments_quota_bytes: int = Field(
+        default=2_147_483_648,  # 2 GiB
+        alias="ATTACHMENTS_QUOTA_BYTES",
+    )
+    attachments_rate_per_min: int = Field(
+        default=100, alias="ATTACHMENTS_RATE_PER_MIN",
+    )
+    attachments_rate_per_hour: int = Field(
+        default=1000, alias="ATTACHMENTS_RATE_PER_HOUR",
+    )
+    trusted_proxy: bool = Field(default=False, alias="TRUSTED_PROXY")
 
 
 def get_settings() -> Settings:

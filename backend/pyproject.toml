@@ -17,6 +17,7 @@ dependencies = [
   "meshcore>=2.3.7",
   "python-multipart>=0.0.9",
   "httpx>=0.27",
+  "Pillow>=10.4,<12",
 ]
 
 [project.optional-dependencies]

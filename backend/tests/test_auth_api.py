@@ -22,7 +22,9 @@ async def test_auth_info_when_no_key_required(client, monkeypatch):
     monkeypatch.setattr("app.core.config.settings.api_key", None)
     r = await client.get("/api/auth/info")
     assert r.status_code == 200
-    assert r.json() == {"required": False, "valid": True}
+    body = r.json()
+    assert body["required"] is False
+    assert body["valid"] is True
 
     # Also true when a bogus header is present — the answer doesn't depend
     # on the request when no key is configured.
@@ -30,7 +32,9 @@ async def test_auth_info_when_no_key_required(client, monkeypatch):
         "/api/auth/info", headers={"Authorization": "Bearer anything"}
     )
     assert r2.status_code == 200
-    assert r2.json() == {"required": False, "valid": True}
+    body2 = r2.json()
+    assert body2["required"] is False
+    assert body2["valid"] is True
 
 
 @pytest.mark.asyncio
@@ -39,7 +43,9 @@ async def test_auth_info_required_no_header(client, monkeypatch):
     monkeypatch.setattr("app.core.config.settings.api_key", "secret")
     r = await client.get("/api/auth/info")
     assert r.status_code == 200
-    assert r.json() == {"required": True, "valid": False}
+    body = r.json()
+    assert body["required"] is True
+    assert body["valid"] is False
 
 
 @pytest.mark.asyncio
@@ -50,7 +56,9 @@ async def test_auth_info_required_wrong_header(client, monkeypatch):
         "/api/auth/info", headers={"Authorization": "Bearer wrong"}
     )
     assert r.status_code == 200
-    assert r.json() == {"required": True, "valid": False}
+    body = r.json()
+    assert body["required"] is True
+    assert body["valid"] is False
 
 
 @pytest.mark.asyncio
@@ -61,7 +69,9 @@ async def test_auth_info_required_correct_header(client, monkeypatch):
         "/api/auth/info", headers={"Authorization": "Bearer secret"}
     )
     assert r.status_code == 200
-    assert r.json() == {"required": True, "valid": True}
+    body = r.json()
+    assert body["required"] is True
+    assert body["valid"] is True
 
 
 @pytest.mark.asyncio
@@ -78,4 +88,36 @@ async def test_auth_info_exempt_from_middleware(client, monkeypatch):
     assert r.status_code == 200
     # Stronger than just status — verify it returned the actual state info,
     # not some other 200 (e.g. the SPA fallback HTML).
-    assert r.json() == {"required": True, "valid": False}
+    body = r.json()
+    assert body["required"] is True
+    assert body["valid"] is False
+
+
+@pytest.mark.asyncio
+async def test_auth_info_includes_public_base_url(client, monkeypatch):
+    """SPA reads ``public_base_url`` on boot to know the share-link origin.
+
+    Surfacing it on ``/api/auth/info`` keeps the boot probe to a single
+    request — no second round-trip just to learn the public origin.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "public_base_url", "https://mesh.example.com")
+    r = await client.get("/api/auth/info")
+    assert r.status_code == 200
+    assert r.json()["public_base_url"] == "https://mesh.example.com"
+
+
+@pytest.mark.asyncio
+async def test_auth_info_public_base_url_defaults_to_none(client, monkeypatch):
+    """When operators haven't configured a public base URL the field is null.
+
+    The SPA treats this as "share links aren't available" — never as a
+    missing key, so the response must still carry the field explicitly.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "public_base_url", None)
+    r = await client.get("/api/auth/info")
+    assert r.status_code == 200
+    assert r.json()["public_base_url"] is None
