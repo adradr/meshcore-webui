@@ -34,6 +34,7 @@ from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
 from app.middleware.attachment_rate_limit import AttachmentRateLimitMiddleware
+from app.middleware.auth_rate_limit import AuthRateLimitMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
@@ -334,7 +335,17 @@ def create_app() -> FastAPI:
     # SecurityHeaders. The middleware receives callables for caps so a
     # test (or future hot-reload) bumping `settings.attachments_rate_*`
     # is reflected on the next request without rebuilding the app.
+    #
+    # AuthRateLimit sits BETWEEN AttachmentRateLimit and APIKey: it must
+    # be OUTSIDE APIKeyMiddleware so it can see the 401 status APIKey
+    # emits on a wrong bearer (count failures), and INSIDE RequestAudit
+    # so a 429 short-circuit is still audited.
     app.add_middleware(APIKeyMiddleware)
+    app.add_middleware(
+        AuthRateLimitMiddleware,
+        per_min=lambda: settings.auth_rate_per_min,
+        trust_x_forwarded_for=lambda: settings.trusted_proxy,
+    )
     app.add_middleware(
         AttachmentRateLimitMiddleware,
         per_min=lambda: settings.attachments_rate_per_min,

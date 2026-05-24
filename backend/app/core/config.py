@@ -98,6 +98,20 @@ class Settings(BaseSettings):
     attachments_rate_per_hour: int = Field(
         default=1000, alias="ATTACHMENTS_RATE_PER_HOUR",
     )
+    # Per-IP cap on bearer-auth failures (`401` from APIKeyMiddleware) per
+    # 60-second sliding window. Exceeding the cap short-circuits further
+    # requests from that IP with `429 Retry-After: 60`. Set conservatively:
+    # 30 is comfortably above any reasonable interactive typo rate but
+    # tight enough to make online brute-force impractical for tokens of
+    # the recommended length.
+    auth_rate_per_min: int = Field(
+        default=30,
+        ge=1,
+        alias="AUTH_RATE_PER_MIN",
+        description=(
+            "Per-IP cap on /api/* and /ws bearer auth failures per minute."
+        ),
+    )
     trusted_proxy: bool = Field(default=False, alias="TRUSTED_PROXY")
 
 
