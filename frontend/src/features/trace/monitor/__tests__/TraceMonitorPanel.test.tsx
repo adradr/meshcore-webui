@@ -202,7 +202,10 @@ describe("TraceMonitorPanel", () => {
     render(<TraceMonitorPanel pubkey={PUBKEY} />)
     expect(screen.getByRole("button", { name: /^stop$/i })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /take over/i })).toBeNull()
-    expect(screen.getByText(/SNR there/i)).toBeInTheDocument()
+    // "SNR there" appears in BOTH the LastSampleSummary line and the
+    // StatsCard column header — assert exactly 2 so a future refactor that
+    // accidentally removes one source fails loudly.
+    expect(screen.getAllByText(/SNR there/i)).toHaveLength(2)
     expect(screen.getByText(/3 hops/i)).toBeInTheDocument()
   })
 

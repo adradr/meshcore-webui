@@ -31,6 +31,7 @@ import {
 } from "./api"
 import { RecordingsList } from "./RecordingsList"
 import { TraceMonitorChart } from "./TraceMonitorChart"
+import { TraceMonitorStatsCard } from "./TraceMonitorStatsCard"
 import {
   DEFAULT_INTERVAL_S,
   IntervalSlider,
@@ -194,6 +195,7 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
           title="Trace SNR (rolling)"
         />
 
+        <TraceMonitorStatsCard samples={samples} />
         <RecordingsList sessions={historicalSessions} />
       </CardContent>
     </Card>
