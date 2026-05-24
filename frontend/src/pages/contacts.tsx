@@ -101,13 +101,7 @@ function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
             onChange={(e) => setValue(e.target.value)}
             placeholder="meshcore://..."
             rows={4}
-            // `break-all` is required because the Textarea inherits
-            // `field-sizing: content` from the shadcn primitive, which
-            // grows the box horizontally for unbreakable text. A
-            // meshcore:// URI has no spaces, so without character-level
-            // wrapping the line overflows the Dialog and bleeds the
-            // Import button past the right edge on a 360 px iPhone.
-            className="font-mono text-xs break-all"
+            className="font-mono text-xs"
           />
         </div>
         <DialogFooter>
