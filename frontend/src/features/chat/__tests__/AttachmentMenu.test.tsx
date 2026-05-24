@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 const mocks = vi.hoisted(() => ({
   shareMutate: vi.fn(),
   uploadMutate: vi.fn(),
+  uploadIsPending: false,
   selfInfoData: undefined as
     | { public_key?: string; adv_lat?: number | null; adv_lon?: number | null }
     | undefined,
@@ -32,7 +33,9 @@ vi.mock("@/features/device/queries", () => ({
 vi.mock("@/features/attachments/queries", () => ({
   useUploadAttachment: () => ({
     mutate: mocks.uploadMutate,
-    isPending: false,
+    get isPending() {
+      return mocks.uploadIsPending
+    },
   }),
 }))
 
@@ -81,6 +84,7 @@ function wrap(ui: React.ReactNode) {
 beforeEach(() => {
   mocks.shareMutate.mockReset()
   mocks.uploadMutate.mockReset()
+  mocks.uploadIsPending = false
   mocks.toastError.mockReset()
   mocks.selfInfoData = {
     public_key: "ab".repeat(32),
@@ -249,7 +253,7 @@ describe("AttachmentMenu — Image", () => {
   it("uploads on file pick and inserts the returned URL", async () => {
     const onInsert = vi.fn()
     const url = "https://example.test/u/abc123.jpg"
-    mocks.uploadMutate.mockImplementation((_file, opts) => {
+    mocks.uploadMutate.mockImplementation((_vars, opts) => {
       opts.onSuccess({
         slug: "abc123",
         url,
@@ -258,6 +262,7 @@ describe("AttachmentMenu — Image", () => {
         created_at_epoch_s: 1700000000,
         public_until_epoch_s: 1700604800,
       })
+      opts.onSettled?.()
     })
 
     render(wrap(<AttachmentMenu onInsert={onInsert} />))
@@ -272,8 +277,28 @@ describe("AttachmentMenu — Image", () => {
     fireEvent.change(input, { target: { files: [file] } })
 
     await waitFor(() => expect(mocks.uploadMutate).toHaveBeenCalled())
-    expect(mocks.uploadMutate.mock.calls[0][0]).toBe(file)
+    // The composer now passes `{ file, onProgress }` so the upload
+    // helper can forward byte progress to the inline spinner.
+    const vars = mocks.uploadMutate.mock.calls[0][0] as {
+      file: File
+      onProgress?: (pct: number) => void
+    }
+    expect(vars.file).toBe(file)
+    expect(typeof vars.onProgress).toBe("function")
     await waitFor(() => expect(onInsert).toHaveBeenCalledWith(url))
+  })
+
+  it("renders the spinner + 0% on the attach button while uploading", async () => {
+    mocks.uploadIsPending = true
+    render(wrap(<AttachmentMenu onInsert={vi.fn()} />))
+    // While isPending the trigger flips to spinner mode — the aria-label
+    // reflects the in-flight upload and the button is disabled.
+    const trigger = await screen.findByLabelText(/uploading 0%/i)
+    expect(trigger).toBeDisabled()
+    expect(
+      screen.getByTestId("attachment-upload-spinner"),
+    ).toBeInTheDocument()
+    expect(screen.getByText("0%")).toBeInTheDocument()
   })
 
   it("rejects files over 50 MB without uploading", async () => {

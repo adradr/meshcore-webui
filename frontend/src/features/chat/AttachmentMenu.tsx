@@ -3,6 +3,7 @@ import { toast } from "sonner"
 import {
   Contact as ContactIcon,
   Image as ImageIcon,
+  Loader2,
   MapPin,
   Plus,
   Send,
@@ -54,6 +55,7 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
   const [view, setView] = useState<View>("menu")
   const [mapOpen, setMapOpen] = useState(false)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const selfInfo = useSelfInfo()
@@ -139,27 +141,32 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
     }
 
     setPendingAction("image")
-    upload.mutate(file, {
-      onSuccess: (data) => insertAndClose(data.url),
-      onError: (err) => {
-        if (isApiError(err) && err.status) {
-          const msg =
-            err.status === 413
-              ? "Image too large"
-              : err.status === 415
-                ? "Unsupported image type"
-                : err.status === 507
-                  ? "Storage quota full"
-                  : err.status === 429
-                    ? "Rate-limited; try again shortly"
-                    : "Upload failed"
-          toast.error(msg)
-        } else {
-          toast.error("Upload failed")
-        }
-        setPendingAction(null)
+    setUploadProgress(0)
+    upload.mutate(
+      { file, onProgress: setUploadProgress },
+      {
+        onSuccess: (data) => insertAndClose(data.url),
+        onError: (err) => {
+          if (isApiError(err) && err.status) {
+            const msg =
+              err.status === 413
+                ? "Image too large"
+                : err.status === 415
+                  ? "Unsupported image type"
+                  : err.status === 507
+                    ? "Storage quota full"
+                    : err.status === 429
+                      ? "Rate-limited; try again shortly"
+                      : "Upload failed"
+            toast.error(msg)
+          } else {
+            toast.error("Upload failed")
+          }
+          setPendingAction(null)
+        },
+        onSettled: () => setUploadProgress(null),
       },
-    })
+    )
   }
 
   const handleSheetOpenChange = (next: boolean) => {
@@ -188,17 +195,37 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
         data-testid="attachment-image-input"
         onChange={handleFileSelected}
       />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className="h-9 w-9 shrink-0"
-        aria-label="Attach"
-        disabled={disabled}
-        onClick={() => setOpen(true)}
-      >
-        <Plus className="h-4 w-4" />
-      </Button>
+      {(() => {
+        const isUploading = uploadProgress !== null || upload.isPending
+        const pctLabel = `${Math.round(uploadProgress ?? 0)}%`
+        return (
+          <Button
+            type="button"
+            variant="ghost"
+            size={isUploading ? "sm" : "icon"}
+            className={
+              isUploading
+                ? "h-9 shrink-0 gap-1 px-2"
+                : "h-9 w-9 shrink-0"
+            }
+            aria-label={isUploading ? `Uploading ${pctLabel}` : "Attach"}
+            disabled={disabled || isUploading}
+            onClick={() => setOpen(true)}
+          >
+            {isUploading ? (
+              <>
+                <Loader2
+                  className="h-4 w-4 animate-spin"
+                  data-testid="attachment-upload-spinner"
+                />
+                <span className="text-xs tabular-nums">{pctLabel}</span>
+              </>
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+          </Button>
+        )
+      })()}
       <Sheet open={open} onOpenChange={handleSheetOpenChange}>
         <SheetContent
           side="bottom"

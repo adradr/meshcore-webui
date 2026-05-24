@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   uploadAttachment,
+  uploadAttachmentWithProgress,
   listAttachments,
   deleteAttachment,
   purgeAttachments,
@@ -99,6 +100,63 @@ describe("attachments api", () => {
     expect(url).toBe("/api/attachments/aB3kZ9pX")
     expect(init.method).toBe("DELETE")
     expect(init.body).toBeUndefined()
+  })
+
+  it("uploadAttachmentWithProgress forwards xhr.upload.onprogress events", async () => {
+    // Mock just enough of XMLHttpRequest to capture the registered
+    // handlers, fire a progress event, then resolve the request with a
+    // valid AttachmentOut payload.
+    const responseBody = {
+      slug: "aB3kZ9pX",
+      url: "https://x/s/aB3kZ9pX",
+      thumb_url: "https://x/i/aB3kZ9pX/thumb",
+      mime: "image/webp",
+      size_bytes: 1,
+      width: 1,
+      height: 1,
+      original_filename: null,
+      uploaded_at: "2026-05-23T00:00:00Z",
+    }
+
+    class FakeXHR {
+      status = 0
+      statusText = ""
+      responseText = ""
+      readonly upload: { onprogress: ((e: ProgressEvent) => void) | null } = {
+        onprogress: null,
+      }
+      onload: (() => void) | null = null
+      onerror: (() => void) | null = null
+      onabort: (() => void) | null = null
+      private headers: Record<string, string> = {}
+      open(_method: string, _url: string, _async: boolean) {}
+      setRequestHeader(name: string, value: string) {
+        this.headers[name.toLowerCase()] = value
+      }
+      send(_body: FormData) {
+        // Fire one progress tick then complete.
+        this.upload.onprogress?.({
+          lengthComputable: true,
+          loaded: 50,
+          total: 100,
+        } as unknown as ProgressEvent)
+        this.status = 200
+        this.statusText = "OK"
+        this.responseText = JSON.stringify(responseBody)
+        this.onload?.()
+      }
+    }
+
+    vi.stubGlobal("XMLHttpRequest", FakeXHR)
+    try {
+      const file = new File(["dummy"], "x.jpg", { type: "image/jpeg" })
+      const onProgress = vi.fn()
+      const out = await uploadAttachmentWithProgress(file, onProgress)
+      expect(out.slug).toBe("aB3kZ9pX")
+      expect(onProgress).toHaveBeenCalledWith(50)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("purgeAttachments POSTs the PURGE confirm body", async () => {

@@ -4,14 +4,30 @@ import {
   listAttachments,
   purgeAttachments,
   uploadAttachment,
+  uploadAttachmentWithProgress,
 } from "./api"
 
 export const ATTACHMENTS_KEY = ["attachments"] as const
 
+/**
+ * Variables accepted by the upload mutation. Callers can pass either a
+ * bare `File` (legacy callsites) or `{ file, onProgress }` to opt into
+ * upload-progress events. `onProgress` receives a 0–100 percentage.
+ */
+export type UploadAttachmentVars =
+  | File
+  | { file: File; onProgress?: (pct: number) => void }
+
 export function useUploadAttachment() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (file: File) => uploadAttachment(file),
+    mutationFn: (vars: UploadAttachmentVars) => {
+      if (vars instanceof File) return uploadAttachment(vars)
+      const { file, onProgress } = vars
+      return onProgress
+        ? uploadAttachmentWithProgress(file, onProgress)
+        : uploadAttachment(file)
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ATTACHMENTS_KEY }),
   })
 }
