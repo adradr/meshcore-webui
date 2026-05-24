@@ -163,3 +163,63 @@ async def test_los_compute_respects_explicit_sample_count(client, flat_sea_overr
     )
     assert r.status_code == 200, r.text
     assert len(r.json()["samples"]) == 128
+
+
+class _CountingProvider:
+    """Records the number of coordinates passed to ``lookup``."""
+
+    def __init__(self) -> None:
+        self.last_n = 0
+
+    async def lookup(self, coords):
+        self.last_n = len(coords)
+        return [0.0] * len(coords)
+
+
+@pytest.mark.asyncio
+async def test_los_caps_samples_at_512_in_endpoint_body():
+    """An explicit ``samples`` value must not cause more than 512 elevation
+    lookups, even if the request schema is bypassed — protects against DoS
+    amplification when a caller asks for the upper bound (the elevation
+    provider holds a 1 s lock per HTTP batch and the OpenTopoData batch size
+    is 100, so 2048 samples would be ~21 sequential upstream calls per
+    request). Defense-in-depth: schema rejects values > 512 (separate test),
+    but the runtime cap in ``compute_los`` is the last line of defense if a
+    future refactor loosens the schema.
+    """
+    # Bypass FastAPI request validation by calling the handler directly with a
+    # ``LosIn`` model that we construct with ``model_construct`` (skips field
+    # validators, so ``samples=2048`` is allowed for this test).
+    from app.api.los import compute_los
+    from app.schemas.los import LosIn, Point
+
+    payload = LosIn.model_construct(
+        a=Point(lat=0.0, lon=0.0, height_m=30),
+        b=Point(lat=0.0, lon=0.0898, height_m=30),
+        freq_hz=868e6,
+        samples=2048,
+    )
+    provider = _CountingProvider()
+    out = await compute_los(payload, elevation=provider)  # type: ignore[arg-type]
+    assert provider.last_n <= 512, (
+        f"expected <=512 elevation lookups, got {provider.last_n}"
+    )
+    assert len(out.samples) <= 512
+
+
+@pytest.mark.asyncio
+async def test_los_rejects_samples_above_512_at_schema_layer(
+    client, flat_sea_override
+):
+    """The schema must reject samples > 512 with 422 (defense in depth alongside
+    the runtime cap in the endpoint body)."""
+    r = await client.post(
+        "/api/los/compute",
+        json={
+            "a": {"lat": 0.0, "lon": 0.0, "height_m": 30},
+            "b": {"lat": 0.0, "lon": 0.0898, "height_m": 30},
+            "freq_hz": 868e6,
+            "samples": 513,
+        },
+    )
+    assert r.status_code == 422

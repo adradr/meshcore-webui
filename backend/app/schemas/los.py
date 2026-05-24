@@ -27,7 +27,7 @@ class LosIn(BaseModel):
     a: Point
     b: Point
     freq_hz: float = Field(default=868e6, gt=0, le=10e9)
-    samples: int | None = Field(default=None, ge=8, le=2048)
+    samples: int | None = Field(default=None, ge=8, le=512)
 
 
 class LosSample(BaseModel):
