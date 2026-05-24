@@ -379,11 +379,18 @@ export function ContactDetailPage() {
           </CardHeader>
         </Card>
 
-        {/* Quick actions */}
-        {/* 2-col on phones (each tile ≥150px wide → label never wraps),
-            4-col on sm+ when there's room. min-h keeps icon+label centred
-            comfortably even when the label fits on one line. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {/* Quick actions
+            When Message is hidden (REP/ROOM contacts) we have 3 tiles, not
+            4 — `grid-cols-2` would leave Share alone on a second row. Switch
+            to `grid-cols-3` in that case so all three fit on one row.
+            min-h keeps icon+label centred when the label is a single word. */}
+        <div
+          className={
+            isMessageableContact(contact.type)
+              ? "grid grid-cols-2 gap-2 sm:grid-cols-4"
+              : "grid grid-cols-3 gap-2"
+          }
+        >
           {isMessageableContact(contact.type) && (
             <ActionTile
               icon={MessageCircle}
