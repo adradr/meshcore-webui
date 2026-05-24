@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { List, X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
@@ -95,36 +95,47 @@ export function MapPage() {
     )
   }
 
-  const self =
-    selfInfo &&
-    typeof selfInfo.adv_lat === "number" &&
-    typeof selfInfo.adv_lon === "number" &&
-    !(Math.abs(selfInfo.adv_lat) < 0.0001 && Math.abs(selfInfo.adv_lon) < 0.0001)
-      ? {
-          name: (selfInfo.name as string | undefined) ?? "This device",
-          lat: selfInfo.adv_lat as number,
-          lon: selfInfo.adv_lon as number,
-        }
-      : null
+  // ``self`` and ``contacts`` are memoised on their source data refs so the
+  // 5 s ``useTraceMonitorStatus`` poll (which re-renders MapPage on every
+  // tick) doesn't keep producing fresh array/object identities. Without the
+  // memo, react-leaflet-cluster sees a new ``contacts`` array prop every
+  // 5 s, re-runs its clustering pass, and closes any open marker popup —
+  // visible to the user as a popup that flickers shut every 5 seconds.
+  const self = useMemo(() => {
+    if (
+      !selfInfo ||
+      typeof selfInfo.adv_lat !== "number" ||
+      typeof selfInfo.adv_lon !== "number" ||
+      (Math.abs(selfInfo.adv_lat) < 0.0001 && Math.abs(selfInfo.adv_lon) < 0.0001)
+    ) {
+      return null
+    }
+    return {
+      name: (selfInfo.name as string | undefined) ?? "This device",
+      lat: selfInfo.adv_lat as number,
+      lon: selfInfo.adv_lon as number,
+    }
+  }, [selfInfo])
 
-  const contacts = data
-    ? Object.entries(data)
-        .map(([pubKey, c]: [string, Contact]) => ({ pubKey, c }))
-        // Many MeshCore nodes broadcast 0,0 as a "no GPS" sentinel — hide those
-        // (they'd otherwise pile up in the Atlantic off the West African coast).
-        .filter(({ c }) => {
-          if (c.adv_lat == null || c.adv_lon == null) return false
-          if (Math.abs(c.adv_lat) < 0.0001 && Math.abs(c.adv_lon) < 0.0001) return false
-          return true
-        })
-        .map(({ pubKey, c }) => ({
-          id: c.public_key ?? pubKey,
-          name: c.adv_name ?? pubKey.slice(0, 8),
-          lat: c.adv_lat as number,
-          lon: c.adv_lon as number,
-          nodeType: nodeTypeFor(c.type),
-        }))
-    : []
+  const contacts = useMemo(() => {
+    if (!data) return []
+    return Object.entries(data)
+      .map(([pubKey, c]: [string, Contact]) => ({ pubKey, c }))
+      // Many MeshCore nodes broadcast 0,0 as a "no GPS" sentinel — hide those
+      // (they'd otherwise pile up in the Atlantic off the West African coast).
+      .filter(({ c }) => {
+        if (c.adv_lat == null || c.adv_lon == null) return false
+        if (Math.abs(c.adv_lat) < 0.0001 && Math.abs(c.adv_lon) < 0.0001) return false
+        return true
+      })
+      .map(({ pubKey, c }) => ({
+        id: c.public_key ?? pubKey,
+        name: c.adv_name ?? pubKey.slice(0, 8),
+        lat: c.adv_lat as number,
+        lon: c.adv_lon as number,
+        nodeType: nodeTypeFor(c.type),
+      }))
+  }, [data])
 
   const handleTraceRequest = (c: { id: string; name: string }) => {
     setTracingPubkey(c.id)
