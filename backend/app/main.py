@@ -29,7 +29,7 @@ from app.api.trace import router as trace_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
-from app.core.vapid import load_vapid
+from app.core.vapid import VapidLoadError, load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
@@ -191,7 +191,11 @@ async def lifespan(app: FastAPI):
     await _ensure_schema()
 
     log.info("Loading VAPID")
-    vapid = load_vapid(settings.vapid_private_key_path)
+    try:
+        vapid = load_vapid(settings.vapid_private_key_path)
+    except VapidLoadError as e:
+        log.error("VAPID load failed: %s", e)
+        raise
     sender = PushSender(vapid=vapid, subject=settings.vapid_subject)
     pool = TaskPool()
 
