@@ -11,6 +11,7 @@ import {
 } from "@/features/attachments/queries"
 import type { AttachmentOut } from "@/features/attachments/types"
 import { PurgeConfirmModal } from "@/features/admin/PurgeConfirmModal"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 const PAGE_SIZE = 24
 
@@ -110,6 +111,7 @@ function AttachmentTile({ item, onCopy, onDelete, copied, deleting }: TileProps)
 
 export function AttachmentsPage() {
   const navigate = useNavigate()
+  const haptic = useHaptic()
   const list = useAttachments()
   const del = useDeleteAttachment()
   const [visible, setVisible] = useState(PAGE_SIZE)
@@ -151,6 +153,10 @@ export function AttachmentsPage() {
     const url = publicUrl(item)
     try {
       await navigator.clipboard.writeText(url)
+      // Light tap pairs with the inline ✓ overlay swap — `toast.success`
+      // stays bare (no `success` chord) so a power-user copy spree doesn't
+      // turn into a buzz cascade.
+      haptic.tap()
       toast.success("URL copied")
       setCopiedSlug(item.slug)
       window.setTimeout(() => {

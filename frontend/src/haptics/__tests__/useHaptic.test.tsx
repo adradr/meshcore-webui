@@ -7,7 +7,12 @@ vi.mock("web-haptics/react", () => ({
   useWebHaptics: () => ({ trigger: triggerSpy }),
 }))
 
-import { HapticProvider, useHaptic, HAPTIC_STORAGE_KEY } from "../HapticProvider"
+import {
+  HapticProvider,
+  useHaptic,
+  getGlobalHaptic,
+  HAPTIC_STORAGE_KEY,
+} from "../HapticProvider"
 
 function wrap({ children }: { children: ReactNode }) {
   return <HapticProvider>{children}</HapticProvider>
@@ -41,6 +46,19 @@ describe("useHaptic", () => {
     act(() => result.current.success())
     act(() => result.current.error())
     expect(triggerSpy).not.toHaveBeenCalled()
+  })
+
+  it("getGlobalHaptic returns the live handle while the provider is mounted and null after unmount", () => {
+    expect(getGlobalHaptic()).toBeNull()
+    const { unmount, result } = renderHook(() => useHaptic(), { wrapper: wrap })
+    expect(getGlobalHaptic()).not.toBeNull()
+    // Calling via the global handle hits the same `trigger` underneath.
+    act(() => getGlobalHaptic()?.success())
+    expect(triggerSpy).toHaveBeenCalledTimes(1)
+    // Sanity — hook-returned handle and global handle agree.
+    expect(getGlobalHaptic()?.enabled).toBe(result.current.enabled)
+    unmount()
+    expect(getGlobalHaptic()).toBeNull()
   })
 
   it("exposes setEnabled which persists to localStorage AND gates trigger live", () => {

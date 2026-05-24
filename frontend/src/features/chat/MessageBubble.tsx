@@ -31,6 +31,7 @@ import type { MentionContact } from "./MentionInput"
 import { useSendMessage } from "./useSendMessage"
 import { useAuthInfo } from "@/features/auth/api"
 import { parseAttachmentUrls } from "@/features/attachments/parseAttachmentUrls"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 interface Props {
   message: Message
@@ -96,6 +97,10 @@ export function MessageBubble({
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [dx, setDx] = useState(0)
   const swipeStartXRef = useRef<number | null>(null)
+  // Latches once per gesture so the user feels exactly one tick when
+  // crossing the threshold (not 60Hz worth of buzz while dragging).
+  const thresholdFiredRef = useRef(false)
+  const haptic = useHaptic()
   const navigate = useNavigate()
   const { data: contactsMap } = useContacts()
   const { data: authInfo } = useAuthInfo()
@@ -163,6 +168,7 @@ export function MessageBubble({
       return
     }
     swipeStartXRef.current = e.clientX
+    thresholdFiredRef.current = false
     try {
       e.currentTarget.setPointerCapture(e.pointerId)
     } catch {
@@ -177,6 +183,12 @@ export function MessageBubble({
       setDx(0)
       return
     }
+    // Fire a single select tick the instant the drag crosses the trigger
+    // threshold — same beat as the reply hint icon reaching full opacity.
+    if (!thresholdFiredRef.current && raw >= SWIPE_THRESHOLD) {
+      thresholdFiredRef.current = true
+      haptic.select()
+    }
     setDx(Math.min(raw, SWIPE_MAX))
   }
 
@@ -184,6 +196,7 @@ export function MessageBubble({
     if (swipeStartXRef.current == null) return
     const finalDx = e.clientX - swipeStartXRef.current
     swipeStartXRef.current = null
+    thresholdFiredRef.current = false
     setDx(0)
     try {
       e.currentTarget.releasePointerCapture(e.pointerId)

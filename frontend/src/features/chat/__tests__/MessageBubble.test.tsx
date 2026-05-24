@@ -24,6 +24,16 @@ vi.mock("../useSendMessage", () => ({
   useSendMessage: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+const selectSpy = vi.fn()
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: vi.fn(), select: selectSpy, success: vi.fn(),
+    warn: vi.fn(), error: vi.fn(), nudge: vi.fn(),
+    enabled: true, setEnabled: vi.fn(),
+  }),
+  getGlobalHaptic: () => null,
+}))
+
 vi.mock("../queries", async () => {
   const actual = await vi.importActual<Record<string, unknown>>("../queries")
   return {
@@ -249,6 +259,55 @@ describe("MessageBubble — swipe-to-reply", () => {
       ),
     )
     expect(document.querySelector("img")).toBeNull()
+  })
+
+  it("fires haptic.select() exactly once when swipe crosses 50px threshold", () => {
+    const onReply = vi.fn()
+    render(
+      wrap(
+        <MessageBubble
+          message={inboundChannelMessage()}
+          isFirstInGroup
+          isLastInGroup
+          showStatus={false}
+          resolvedSender={aliceSender}
+          senderPrefix={null}
+          displayText="hello"
+          onReply={onReply}
+        />,
+      ),
+    )
+    const root = getSwipeRoot()
+    fireEvent.pointerDown(root, { clientX: 0, pointerId: 1 })
+    // Two consecutive moves past the threshold must NOT double-buzz —
+    // the latch ref keeps it to one tick per gesture.
+    fireEvent.pointerMove(root, { clientX: 60, pointerId: 1 })
+    fireEvent.pointerMove(root, { clientX: 75, pointerId: 1 })
+    fireEvent.pointerUp(root, { clientX: 75, pointerId: 1 })
+    expect(selectSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT fire haptic.select() when swipe never crosses the threshold", () => {
+    const onReply = vi.fn()
+    render(
+      wrap(
+        <MessageBubble
+          message={inboundChannelMessage()}
+          isFirstInGroup
+          isLastInGroup
+          showStatus={false}
+          resolvedSender={aliceSender}
+          senderPrefix={null}
+          displayText="hello"
+          onReply={onReply}
+        />,
+      ),
+    )
+    const root = getSwipeRoot()
+    fireEvent.pointerDown(root, { clientX: 0, pointerId: 1 })
+    fireEvent.pointerMove(root, { clientX: 30, pointerId: 1 })
+    fireEvent.pointerUp(root, { clientX: 30, pointerId: 1 })
+    expect(selectSpy).not.toHaveBeenCalled()
   })
 
   it("does NOT initiate swipe when pointerdown originates on a button", () => {

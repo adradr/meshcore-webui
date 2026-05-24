@@ -35,6 +35,16 @@ vi.mock("../useSendMessage", () => ({
   useSendMessage: () => ({ mutate: sendMutate, isPending: false }),
 }))
 
+const tapSpy = vi.fn()
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: tapSpy, select: vi.fn(), success: vi.fn(),
+    warn: vi.fn(), error: vi.fn(), nudge: vi.fn(),
+    enabled: true, setEnabled: vi.fn(),
+  }),
+  getGlobalHaptic: () => null,
+}))
+
 // Import AFTER mocks.
 import { MessageInput } from "../MessageInput"
 
@@ -49,6 +59,7 @@ function wrap(ui: React.ReactNode) {
 
 beforeEach(() => {
   sendMutate.mockReset()
+  tapSpy.mockReset()
 })
 
 describe("MessageInput — uncontrolled (default) behaviour", () => {
@@ -57,6 +68,25 @@ describe("MessageInput — uncontrolled (default) behaviour", () => {
     const textarea = screen.getByPlaceholderText(/Message/i) as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: "hi there" } })
     expect(textarea.value).toBe("hi there")
+  })
+
+  it("fires haptic.tap() exactly once when submit runs", () => {
+    render(wrap(<MessageInput channelIdx={0} />))
+    const textarea = screen.getByPlaceholderText(/Message/i) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "hi" } })
+    const sendBtn = screen.getByRole("button", { name: /send/i })
+    fireEvent.click(sendBtn)
+    expect(tapSpy).toHaveBeenCalledTimes(1)
+    expect(sendMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT fire haptic.tap() when submit is blocked by empty text", () => {
+    render(wrap(<MessageInput channelIdx={0} />))
+    const sendBtn = screen.getByRole("button", { name: /send/i })
+    // Button is disabled while text is empty — click is a no-op, no haptic.
+    fireEvent.click(sendBtn)
+    expect(tapSpy).not.toHaveBeenCalled()
+    expect(sendMutate).not.toHaveBeenCalled()
   })
 })
 

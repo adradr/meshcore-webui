@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import { useWebSocket, type WSStatus } from "./useWebSocket"
 import { parseWireEvent, parseWSMessage } from "./wsSchema"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export type TopicHandler = (payload: unknown) => void
 
@@ -119,6 +120,7 @@ export function WebSocketProvider({
   children: React.ReactNode
 }) {
   const qc = useQueryClient()
+  const haptic = useHaptic()
   const subscribers = useRef(new Map<string, Set<TopicHandler>>())
 
   const subscribe = useCallback(
@@ -180,6 +182,15 @@ export function WebSocketProvider({
           // `ack_state` and stable `pubkey_prefix`) so the optimistic row gets
           // replaced rather than living forever as a synthetic.
           qc.invalidateQueries({ queryKey: key })
+          // Foreground nudge — only when the tab is actually visible, so a
+          // backgrounded PWA doesn't double-buzz alongside the OS push
+          // notification.
+          if (
+            typeof document !== "undefined" &&
+            document.visibilityState === "visible"
+          ) {
+            haptic.nudge()
+          }
           break
         }
         case "channel_message": {

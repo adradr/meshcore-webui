@@ -1,10 +1,20 @@
 // frontend/src/haptics/HapticProvider.tsx
-import { createContext, useCallback, useContext, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { useWebHaptics } from "web-haptics/react"
 import type { HapticHandle } from "./types"
 
 export const HAPTIC_STORAGE_KEY = "meshcore.haptics.enabled"
+
+// Module-scope reference to the current provider handle so non-React
+// modules (e.g. lib/notify.ts) can fire haptics without using the hook.
+// Set/cleared by the provider's mount effect — at most one HapticProvider
+// is mounted at a time (see main.tsx), so this is single-writer by design.
+let _globalHandle: HapticHandle | null = null
+
+export function getGlobalHaptic(): HapticHandle | null {
+  return _globalHandle
+}
 
 function loadInitialEnabled(): boolean {
   if (typeof window === "undefined") return true
@@ -26,7 +36,7 @@ export function HapticProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const handle: HapticHandle = useMemo(() => {
+  const handle: HapticHandle = useMemo<HapticHandle>(() => {
     const gate = (fn: () => void) => () => {
       if (!enabled) return
       fn()
@@ -42,6 +52,15 @@ export function HapticProvider({ children }: { children: ReactNode }) {
       setEnabled,
     }
   }, [trigger, enabled, setEnabled])
+
+  // Expose the live handle to non-React callers (lib/notify.ts) for as
+  // long as this provider is mounted.
+  useEffect(() => {
+    _globalHandle = handle
+    return () => {
+      if (_globalHandle === handle) _globalHandle = null
+    }
+  }, [handle])
 
   return <Ctx.Provider value={handle}>{children}</Ctx.Provider>
 }

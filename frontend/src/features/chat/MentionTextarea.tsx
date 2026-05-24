@@ -12,6 +12,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export interface MentionContact {
   adv_name: string
@@ -74,6 +75,7 @@ export function MentionTextarea({
   const [query, setQuery] = useState("")
   const [tokenStart, setTokenStart] = useState<number | null>(null)
   const [selected, setSelected] = useState(0)
+  const haptic = useHaptic()
 
   useEffect(() => {
     if (ref.current) resize(ref.current)
@@ -123,6 +125,9 @@ export function MentionTextarea({
 
   const insertMention = (c: MentionContact) => {
     if (tokenStart == null || !ref.current) return
+    // Picker selection — same beat as the suggestion popover closing and
+    // the mention chip appearing in the textarea.
+    haptic.select()
     const el = ref.current
     const caret = el.selectionStart ?? value.length
     const before = value.slice(0, tokenStart)

@@ -21,6 +21,16 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }))
 
+const startSuccessSpy = vi.fn()
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: vi.fn(), select: vi.fn(), success: startSuccessSpy,
+    warn: vi.fn(), error: vi.fn(), nudge: vi.fn(),
+    enabled: true, setEnabled: vi.fn(),
+  }),
+  getGlobalHaptic: () => null,
+}))
+
 import { api } from "@/lib/api"
 import {
   useDeleteTraceMonitorSession,
@@ -163,6 +173,9 @@ describe("useStartTraceMonitor", () => {
         expect.anything(),
       )
     })
+    // Haptic fires the moment the mutation resolves successfully — same
+    // instant the panel flips into the "running" state.
+    expect(startSuccessSpy).toHaveBeenCalledTimes(1)
   })
 })
 

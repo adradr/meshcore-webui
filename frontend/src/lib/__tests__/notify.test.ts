@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { friendlyMessage, notifyError } from "@/lib/notify"
+import { friendlyMessage, notifyError, notifySuccess } from "@/lib/notify"
 import { toast } from "sonner"
+import * as HapticProvider from "@/haptics/HapticProvider"
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn() },
 }))
 
 function apiError(opts: {
@@ -107,5 +108,41 @@ describe("notifyError", () => {
     expect(arg).not.toMatch(/504/)
     expect(arg).not.toMatch(/ee10f91c/)
     expect(arg).not.toMatch(/15s/)
+  })
+
+  it("fires haptic.error() at the same instant as the toast", () => {
+    const errorSpy = vi.fn()
+    vi.spyOn(HapticProvider, "getGlobalHaptic").mockReturnValue({
+      tap: () => {}, select: () => {}, success: () => {},
+      warn: () => {}, error: errorSpy, nudge: () => {},
+      enabled: true, setEnabled: () => {},
+    })
+    notifyError("Send", apiError({ status: 500 }))
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(toast.error).toHaveBeenCalled()
+  })
+
+  it("no-ops haptic when no provider is mounted (getGlobalHaptic → null)", () => {
+    vi.spyOn(HapticProvider, "getGlobalHaptic").mockReturnValue(null)
+    // Should NOT throw — the optional-chained call swallows the null.
+    expect(() => notifyError("Send", apiError({ status: 500 }))).not.toThrow()
+  })
+})
+
+describe("notifySuccess", () => {
+  beforeEach(() => {
+    vi.mocked(toast.success).mockClear()
+  })
+
+  it("fires haptic.success() and toast.success() with the message", () => {
+    const successSpy = vi.fn()
+    vi.spyOn(HapticProvider, "getGlobalHaptic").mockReturnValue({
+      tap: () => {}, select: () => {}, success: successSpy,
+      warn: () => {}, error: () => {}, nudge: () => {},
+      enabled: true, setEnabled: () => {},
+    })
+    notifySuccess("Ping received")
+    expect(successSpy).toHaveBeenCalledTimes(1)
+    expect(toast.success).toHaveBeenCalledWith("Ping received")
   })
 })

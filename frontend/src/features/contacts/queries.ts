@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { api } from "@/lib/api"
-import { notifyError } from "@/lib/notify"
+import { notifyError, notifySuccess } from "@/lib/notify"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { z } from "zod"
 
 const ContactSchema = z.looseObject({
@@ -73,7 +73,7 @@ export function useImportContact() {
       return api.post("/api/contacts/import", { uri }, ImportResponse)
     },
     onSuccess: () => {
-      toast.success("Contact imported")
+      notifySuccess("Contact imported")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
     onError: (e) => notifyError("Import", e),
@@ -86,7 +86,7 @@ export function useDeleteContact() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.delete(`/api/contacts/${pubkey}`),
     onSuccess: () => {
-      toast.success("Contact removed")
+      notifySuccess("Contact removed")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
     onError: (e) => notifyError("Remove", e),
@@ -94,9 +94,13 @@ export function useDeleteContact() {
 }
 
 export function useShareContact() {
+  const haptic = useHaptic()
   return useMutation({
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.get(`/api/contacts/${pubkey}/share`, ShareResponse),
+    // Pair with the URI dialog appearing — light tap, not a "success"
+    // chord, because nothing was sent over the radio.
+    onSuccess: () => haptic.tap(),
     onError: (e) => notifyError("Share", e),
   })
 }
@@ -143,7 +147,7 @@ export function useRequestTelemetry() {
   return useMutation({
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/telemetry`, {}, TelemetryResponse),
-    onSuccess: () => toast.success("Telemetry received"),
+    onSuccess: () => notifySuccess("Telemetry received"),
     onError: (e) => notifyError("Telemetry", e),
   })
 }
@@ -152,7 +156,7 @@ export function usePingContact() {
   return useMutation({
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/ping`, {}, PingResponse),
-    onSuccess: () => toast.success("Ping received"),
+    onSuccess: () => notifySuccess("Ping received"),
     onError: (e) => notifyError("Ping", e),
   })
 }
@@ -161,7 +165,7 @@ export function useRequestACL() {
   return useMutation({
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/acl`, {}, AclResponse),
-    onSuccess: () => toast.success("ACL received"),
+    onSuccess: () => notifySuccess("ACL received"),
     onError: (e) => notifyError("ACL request", e),
   })
 }
@@ -172,7 +176,7 @@ export function useDiscoverPath() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/path/discover`, {}),
     onSuccess: () => {
-      toast.success("Path discovery sent")
+      notifySuccess("Path discovery sent")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
     onError: (e) => notifyError("Path discover", e),
@@ -185,7 +189,7 @@ export function useResetPath() {
     mutationFn: ({ pubkey }: { pubkey: string }) =>
       api.post(`/api/contacts/${pubkey}/path/reset`, {}),
     onSuccess: () => {
-      toast.success("Path reset to flood")
+      notifySuccess("Path reset to flood")
       qc.invalidateQueries({ queryKey: ["contacts"] })
     },
     onError: (e) => notifyError("Path reset", e),

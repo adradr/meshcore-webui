@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
 import { api } from "@/lib/api"
-import { notifyError } from "@/lib/notify"
+import { notifyError, notifySuccess } from "@/lib/notify"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export interface LocalResetSelector {
   messages?: boolean
@@ -80,10 +80,16 @@ function totalTargetsRun(r: ResetResult): number {
  */
 export function useReset() {
   const qc = useQueryClient()
+  const haptic = useHaptic()
   return useMutation<ResetResult, Error, ResetRequest>({
     mutationFn: (body) => api.post<ResetResult>("/api/admin/reset", body),
+    // Destructive confirmation kicked off — warn buzz pairs with the
+    // confirm-modal closing and the network request flying.
+    onMutate: () => {
+      haptic.warn()
+    },
     onSuccess: (r) => {
-      toast.success(`Reset complete — ${totalTargetsRun(r)} target(s) cleared`)
+      notifySuccess(`Reset complete — ${totalTargetsRun(r)} target(s) cleared`)
       // Cancel any in-flight reads that started against the pre-reset
       // state so they don't overwrite the post-reset fetch.
       qc.cancelQueries()
@@ -125,7 +131,7 @@ export function useDeviceFactoryReset() {
         confirm: body.confirm,
       }),
     onSuccess: () => {
-      toast.success("Factory reset accepted — device is rebooting.")
+      notifySuccess("Factory reset accepted — device is rebooting.")
     },
     onError: (e) => notifyError("Factory reset device", e),
   })

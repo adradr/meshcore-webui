@@ -6,6 +6,7 @@ import { useChannels } from "@/features/channels/queries"
 import { MentionTextarea, type MentionContact } from "./MentionTextarea"
 import { AttachmentMenu } from "./AttachmentMenu"
 import { Send } from "lucide-react"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 interface Props {
   contactPubKey?: string
@@ -52,6 +53,7 @@ export function MessageInput({
     textareaHandleRef.current?.focus()
   }, [seedKey])
   const { mutate, isPending } = useSendMessage()
+  const haptic = useHaptic()
   const { data: contactsMap } = useContacts()
   const { contact } = useContact(contactPubKey)
   const { data: channels } = useChannels()
@@ -79,6 +81,11 @@ export function MessageInput({
 
   const submit = () => {
     if (!text.trim()) return
+    // Paired with the send-button press / Enter-on-keyboard — a light tap
+    // confirms intent BEFORE the network round-trip. Ack from the radio is
+    // a separate visual (the bubble's check icon) and gets no haptic, so
+    // this is the user's only tactile feedback that submit ran.
+    haptic.tap()
     mutate(
       { contactPubKey, channelIdx, text },
       { onSuccess: () => setText("") },

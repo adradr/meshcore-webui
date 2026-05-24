@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { isApiError, type ApiError } from "@/lib/api"
+import { getGlobalHaptic } from "@/haptics/HapticProvider"
 
 // A user-facing toast should answer "what happened, what now?" — not echo
 // HTTP status codes, hex pubkeys, or timeout figures. Those go to
@@ -59,6 +60,10 @@ export function notifyError(
   opts: NotifyOptions = {},
 ): void {
   const friendly = friendlyMessage(prefix, err)
+  // Fire the haptic at the exact instant the error toast appears — paired
+  // visual + tactile cue per Apple HIG. Safe across SSR / tests: the
+  // global handle is null when no HapticProvider is mounted.
+  getGlobalHaptic()?.error()
   toast.error(friendly)
   const raw = (err as ApiError | Error | undefined) ?? null
   console.debug("[notify]", {
@@ -69,4 +74,15 @@ export function notifyError(
     message: raw?.message,
     ...(opts.context ?? {}),
   })
+}
+
+/**
+ * Surface a success toast paired with the `success` haptic. Use for
+ * high-signal moments — completed mutations, "received" acks — and prefer
+ * the bare `toast.success(...)` for low-stakes UI feedback (e.g. "URL
+ * copied") that doesn't deserve a buzz on every keystroke.
+ */
+export function notifySuccess(message: string): void {
+  getGlobalHaptic()?.success()
+  toast.success(message)
 }

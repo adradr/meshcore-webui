@@ -12,6 +12,22 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }))
 
+const warnSpy = vi.fn()
+const successSpy = vi.fn()
+const errorSpy = vi.fn()
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: vi.fn(), select: vi.fn(), success: successSpy,
+    warn: warnSpy, error: errorSpy, nudge: vi.fn(),
+    enabled: true, setEnabled: vi.fn(),
+  }),
+  getGlobalHaptic: () => ({
+    tap: vi.fn(), select: vi.fn(), success: successSpy,
+    warn: warnSpy, error: errorSpy, nudge: vi.fn(),
+    enabled: true, setEnabled: vi.fn(),
+  }),
+}))
+
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import { useReset, useDeviceFactoryReset, type ResetResult } from "../api"
@@ -148,6 +164,35 @@ describe("useReset", () => {
 
     expect(removeSpy).toHaveBeenCalled()
     expect(invalidateSpy).toHaveBeenCalled()
+  })
+})
+
+describe("useReset — haptic wiring", () => {
+  it("fires warn on mutate (kickoff) and success on settle (success path)", async () => {
+    const response: ResetResult = {
+      local: {
+        messages: 1, diagnostic_runs: null, rx_log: null,
+        mutes: null, settings: null, push_subscribers: null,
+        trace_samples: null,
+      },
+      device: {
+        cleared_channels: null, coords_reset: false,
+        removed_contacts: null, rebooted: false, reconnected: false,
+      },
+    }
+    ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response)
+
+    const qc = makeClient()
+    const { result } = renderHook(() => useReset(), {
+      wrapper: makeWrapper(qc),
+    })
+    result.current.mutate({ local: { messages: true }, confirm: "RESET" })
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    // warn must fire EXACTLY ONCE at the start (destructive confirm) —
+    // success comes via notifySuccess from the toast helper, which is
+    // covered separately in notify.test.ts.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(successSpy).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -21,6 +21,7 @@ import { z } from "zod"
 
 import { api } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { useWsTopic } from "@/realtime/useWsTopic"
 
 // ---------------------------------------------------------------------------
@@ -139,6 +140,7 @@ export interface StartTraceMonitorBody {
 
 export function useStartTraceMonitor() {
   const qc = useQueryClient()
+  const haptic = useHaptic()
   return useMutation<TraceStartResponse, Error, StartTraceMonitorBody>({
     mutationFn: (body) =>
       api.post<TraceStartResponse>(
@@ -147,6 +149,9 @@ export function useStartTraceMonitor() {
         TraceStartResponseSchema,
       ),
     onSuccess: () => {
+      // Pair with the panel flipping into the "running" state — meaningful
+      // mutation completed, so `success` is the right semantic.
+      haptic.success()
       qc.invalidateQueries({ queryKey: STATUS_KEY })
     },
     onError: (e) => {
