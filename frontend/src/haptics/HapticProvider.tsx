@@ -2,9 +2,23 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { useWebHaptics } from "web-haptics/react"
+import { haptic as iosHaptic } from "ios-haptics"
 import type { HapticHandle } from "./types"
 
 export const HAPTIC_STORAGE_KEY = "meshcore.haptics.enabled"
+
+/**
+ * Whether the browser exposes the Web Vibration API (`navigator.vibrate`).
+ * Android Chrome / Edge / Firefox say yes; iOS Safari (any version) says no.
+ * Evaluated at provider-build time (not module load) so tests can stub
+ * navigator per case with `vi.stubGlobal`.
+ */
+function isVibrateSupported(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    typeof (navigator as Navigator).vibrate === "function"
+  )
+}
 
 // Module-scope reference to the current provider handle so non-React
 // modules (e.g. lib/notify.ts) can fire haptics without using the hook.
@@ -41,13 +55,41 @@ export function HapticProvider({ children }: { children: ReactNode }) {
       if (!enabled) return
       fn()
     }
+    // Route to the platform-appropriate backend:
+    //
+    //   Android (navigator.vibrate present): rich `web-haptics` patterns
+    //     with millisecond durations + named presets.
+    //
+    //   iOS Safari/PWA (no navigator.vibrate): the `ios-haptics` checkbox-
+    //     switch trick — supports single / double / triple tap only. Works
+    //     on iOS 17.4–26.4; silently no-ops on iOS 26.5+ (Apple patched
+    //     the programmatic-click path in May 2026) and on any version
+    //     below 17.4 (the switch HTML attribute didn't exist).
+    //
+    //   Neither (older browsers, server-side): everything no-ops.
+    if (isVibrateSupported()) {
+      return {
+        tap: gate(() => { void trigger(15) }),
+        select: gate(() => { void trigger(25) }),
+        success: gate(() => { void trigger("success") }),
+        warn: gate(() => { void trigger([60, 40, 60]) }),
+        error: gate(() => { void trigger("error") }),
+        nudge: gate(() => { void trigger("nudge") }),
+        enabled,
+        setEnabled,
+      }
+    }
+    // iOS path. `ios-haptics` only exposes three distinct sensations
+    // (single / double / triple click on the hidden switch); map the six
+    // semantic methods down by intent — subtle confirmations collapse to
+    // single, success collapses to double, warn/error to triple.
     return {
-      tap: gate(() => { void trigger(15) }),
-      select: gate(() => { void trigger(25) }),
-      success: gate(() => { void trigger("success") }),
-      warn: gate(() => { void trigger([60, 40, 60]) }),
-      error: gate(() => { void trigger("error") }),
-      nudge: gate(() => { void trigger("nudge") }),
+      tap: gate(() => { iosHaptic() }),
+      select: gate(() => { iosHaptic() }),
+      success: gate(() => { iosHaptic.confirm() }),
+      warn: gate(() => { iosHaptic.error() }),
+      error: gate(() => { iosHaptic.error() }),
+      nudge: gate(() => { iosHaptic.confirm() }),
       enabled,
       setEnabled,
     }

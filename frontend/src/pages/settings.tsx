@@ -125,9 +125,11 @@ export function SettingsPage() {
         </section>
         <Separator />
 
-        {/* Haptics — Android-only vibration confirmations. iOS Safari/PWA
-            does not expose the haptics API to web apps, so on iOS this
-            toggle simply has no effect. */}
+        {/* Haptics — vibration confirmations routed per-platform:
+              Android Chrome/PWA → rich web-haptics patterns (richest)
+              iOS 17.4–26.4 Safari/PWA → ios-haptics switch trick (3 sensations)
+              iOS 26.5+ → no-op (Apple patched the trick in May 2026)
+              Older browsers → no-op */}
         <section className="space-y-2">
           <div>
             <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -136,8 +138,10 @@ export function SettingsPage() {
             </h3>
             <p className="text-xs text-muted-foreground">
               Small vibration confirmations when you send a message, copy a
-              link, or receive a notification. Android only — iOS Safari/PWA
-              does not expose the haptics API to web apps.
+              link, or receive a notification. Works on Android (full
+              patterns) and iOS 17.4–26.4 (three sensations). iOS 26.5+
+              currently has no programmable haptic path — Apple removed
+              the workaround in May 2026.
             </p>
           </div>
           <div className="flex items-center justify-between">

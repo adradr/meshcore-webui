@@ -41,6 +41,9 @@ importers:
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
+      ios-haptics:
+        specifier: ^0.1.5
+        version: 0.1.5
       leaflet:
         specifier: ^1.9.4
         version: 1.9.4
@@ -3308,6 +3311,9 @@ packages:
   internmap@2.0.3:
     resolution: {integrity: sha512-5Hh7Y1wQbvY5ooGgPbDaL5iYLAPzMTUrjMulskHLH6wnv/A+1q5rgEaiuqEjB+oxGXIVZs1FF+R/KPN3ZSQYYg==}
     engines: {node: '>=12'}
+
+  ios-haptics@0.1.5:
+    resolution: {integrity: sha512-quSSgC4pKFkXV0SzKPRB8jOh7GYl9nYvgIYYcmFMqOkk2WSJ/ocfN5O0F/w8cqzUxKP2z+4tiJRO3eGE3qU05g==}
 
   ip-address@10.2.0:
     resolution: {integrity: sha512-/+S6j4E9AHvW9SWMSEY9Xfy66O5PWvVEJ08O0y5JGyEKQpojb0K0GKpz/v5HJ/G0vi3D2sjGK78119oXZeE0qA==}
@@ -8311,6 +8317,8 @@ snapshots:
       side-channel: 1.1.0
 
   internmap@2.0.3: {}
+
+  ios-haptics@0.1.5: {}
 
   ip-address@10.2.0: {}
 
