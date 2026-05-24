@@ -82,3 +82,13 @@ def test_attachments_env_overrides(monkeypatch):
     assert s.attachments_quota_bytes == 500_000_000
     assert s.attachments_rate_per_min == 30
     assert s.trusted_proxy is True
+
+
+def test_dockerfile_does_not_baked_in_proxy_trust():
+    """The runtime image must not unconditionally trust X-Forwarded-* from any client.
+    Operators behind a real proxy can re-enable via UVICORN_FORWARDED_ALLOW_IPS."""
+    import pathlib
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert "--forwarded-allow-ips=*" not in text
+    assert "--proxy-headers" not in text  # default off; operators opt in via env
