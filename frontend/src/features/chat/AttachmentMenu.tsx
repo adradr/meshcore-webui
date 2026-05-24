@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { useUploadAttachment } from "@/features/attachments/queries"
 import { useShareContact } from "@/features/contacts/queries"
 import { useSelfInfo } from "@/features/device/queries"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { isApiError } from "@/lib/api"
 import { SharedContactPicker } from "./SharedContactPicker"
 import { ShareLocationMapDialog } from "./ShareLocationMapDialog"
@@ -61,6 +62,7 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
   const selfInfo = useSelfInfo()
   const share = useShareContact()
   const upload = useUploadAttachment()
+  const haptic = useHaptic()
 
   const closeAll = () => {
     setOpen(false)
@@ -140,12 +142,16 @@ export function AttachmentMenu({ onInsert, disabled }: Props) {
       return
     }
 
+    haptic.select()
     setPendingAction("image")
     setUploadProgress(0)
     upload.mutate(
       { file, onProgress: setUploadProgress },
       {
-        onSuccess: (data) => insertAndClose(data.url),
+        onSuccess: (data) => {
+          haptic.success()
+          insertAndClose(data.url)
+        },
         onError: (err) => {
           if (isApiError(err) && err.status) {
             const msg =

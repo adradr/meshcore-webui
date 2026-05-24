@@ -8,6 +8,7 @@
 import { Bell, BellOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { notifyError } from "@/lib/notify"
 import { useIsMuted, useToggleMute, type MuteKind } from "./queries"
 
@@ -31,6 +32,7 @@ export function MuteToggle({
 }: Props) {
   const muted = useIsMuted(kind, targetKey)
   const toggle = useToggleMute()
+  const haptic = useHaptic()
   const Icon = muted ? BellOff : Bell
   const label = muted ? "Unmute notifications" : "Mute notifications"
 
@@ -48,6 +50,7 @@ export function MuteToggle({
         // Stop propagation so the toggle inside clickable cards doesn't
         // navigate (e.g. on the channels list).
         e.stopPropagation()
+        haptic.tap()
         toggle.mutate(
           { kind, key: targetKey, muted: !muted },
           {

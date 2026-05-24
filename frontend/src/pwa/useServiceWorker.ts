@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { useRegisterSW } from "virtual:pwa-register/react"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export interface ServiceWorkerState {
   needRefresh: boolean
@@ -11,6 +12,7 @@ export interface ServiceWorkerState {
 export function useServiceWorker(): ServiceWorkerState {
   const [needRefresh, setNeedRefresh] = useState(false)
   const [offlineReady, setOfflineReady] = useState(false)
+  const haptic = useHaptic()
 
   const {
     needRefresh: [nr, setNr],
@@ -36,7 +38,10 @@ export function useServiceWorker(): ServiceWorkerState {
 
   useEffect(() => {
     setNeedRefresh(nr)
-  }, [nr])
+    // Nudge the user when an update is available so the prompt isn't
+    // missed in their peripheral vision. Fire on the rising edge only.
+    if (nr) haptic.select()
+  }, [nr, haptic])
 
   useEffect(() => {
     setOfflineReady(or)

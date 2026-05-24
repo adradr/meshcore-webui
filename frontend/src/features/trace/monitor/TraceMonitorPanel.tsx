@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 import {
   useDeleteTraceMonitorSession,
@@ -62,6 +63,7 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
   const start = useStartTraceMonitor()
   const stop = useStopTraceMonitor()
   const del = useDeleteTraceMonitorSession()
+  const haptic = useHaptic()
 
   const status = statusQ.data
   const isRunning = !!status?.running
@@ -99,9 +101,12 @@ export function TraceMonitorPanel({ pubkey }: TraceMonitorPanelProps) {
   const handleStart = () =>
     start.mutate({ pubkey, interval_s: intervalS })
   const handleStop = () => stop.mutate()
-  const handleTakeOver = () =>
+  const handleTakeOver = () => {
+    haptic.warn()
     start.mutate({ pubkey, interval_s: intervalS, force: true })
+  }
   const handleWipeHistory = async () => {
+    haptic.warn()
     // Delete every historical session for this contact in parallel. The hook
     // already toasts errors per-item; we use `allSettled` so a single
     // failure doesn't leave the rest of the batch un-deleted.

@@ -8,9 +8,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { useTheme } from "@/components/theme-provider"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export function ModeToggle() {
   const { setTheme } = useTheme()
+  const haptic = useHaptic()
+
+  const pick = (theme: "light" | "dark" | "system") => {
+    haptic.tap()
+    setTheme(theme)
+  }
 
   return (
     <DropdownMenu>
@@ -22,13 +29,13 @@ export function ModeToggle() {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
+        <DropdownMenuItem onClick={() => pick("light")}>
           Light
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
+        <DropdownMenuItem onClick={() => pick("dark")}>
           Dark
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
+        <DropdownMenuItem onClick={() => pick("system")}>
           System
         </DropdownMenuItem>
       </DropdownMenuContent>

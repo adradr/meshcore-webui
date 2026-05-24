@@ -19,6 +19,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { api } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 
@@ -79,6 +80,7 @@ export function RecordingsList({
   downloader = defaultCsvDownloader,
 }: RecordingsListProps) {
   const qc = useQueryClient()
+  const haptic = useHaptic()
   // Track which session is currently downloading so the row can spin and
   // a second click on the same row is ignored.
   const [busy, setBusy] = useState<string | null>(null)
@@ -89,6 +91,7 @@ export function RecordingsList({
 
   const handleDownload = async (s: TraceSessionSummary) => {
     if (busy) return
+    haptic.tap()
     setBusy(s.session_id)
     try {
       // Use the same cache key shape the live-chart hook uses

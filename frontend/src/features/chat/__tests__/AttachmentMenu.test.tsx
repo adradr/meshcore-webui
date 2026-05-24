@@ -16,6 +16,21 @@ const mocks = vi.hoisted(() => ({
     { public_key?: string; adv_name?: string; type?: number }
   >,
   toastError: vi.fn(),
+  hapticSelect: vi.fn(),
+  hapticSuccess: vi.fn(),
+}))
+
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: vi.fn(),
+    select: mocks.hapticSelect,
+    success: mocks.hapticSuccess,
+    warn: vi.fn(),
+    error: vi.fn(),
+    nudge: vi.fn(),
+    enabled: true,
+    setEnabled: vi.fn(),
+  }),
 }))
 
 vi.mock("@/features/contacts/queries", () => ({
@@ -86,6 +101,8 @@ beforeEach(() => {
   mocks.uploadMutate.mockReset()
   mocks.uploadIsPending = false
   mocks.toastError.mockReset()
+  mocks.hapticSelect.mockReset()
+  mocks.hapticSuccess.mockReset()
   mocks.selfInfoData = {
     public_key: "ab".repeat(32),
     adv_lat: 47.5,
@@ -299,6 +316,36 @@ describe("AttachmentMenu — Image", () => {
       screen.getByTestId("attachment-upload-spinner"),
     ).toBeInTheDocument()
     expect(screen.getByText("0%")).toBeInTheDocument()
+  })
+
+  it("fires haptic.select when a valid file is picked and haptic.success after upload", async () => {
+    const onInsert = vi.fn()
+    const url = "https://example.test/u/xyz.jpg"
+    mocks.uploadMutate.mockImplementation((_vars, opts) => {
+      opts.onSuccess({
+        slug: "xyz",
+        url,
+        mime_type: "image/jpeg",
+        size_bytes: 1024,
+        created_at_epoch_s: 1700000000,
+        public_until_epoch_s: 1700604800,
+      })
+      opts.onSettled?.()
+    })
+
+    render(wrap(<AttachmentMenu onInsert={onInsert} />))
+    await userEvent.click(screen.getByLabelText(/attach/i))
+
+    const input = screen.getByTestId(
+      "attachment-image-input",
+    ) as HTMLInputElement
+    const file = new File(["fake"], "photo.jpg", { type: "image/jpeg" })
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() => expect(mocks.uploadMutate).toHaveBeenCalled())
+    expect(mocks.hapticSelect).toHaveBeenCalledTimes(1)
+    expect(mocks.hapticSuccess).toHaveBeenCalledTimes(1)
   })
 
   it("rejects files over 50 MB without uploading", async () => {

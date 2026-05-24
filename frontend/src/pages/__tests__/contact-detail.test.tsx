@@ -1,10 +1,29 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 
+const tapSpy = vi.fn()
+vi.mock("web-haptics/react", () => ({
+  useWebHaptics: () => ({ trigger: vi.fn() }),
+}))
+vi.mock("@/haptics/HapticProvider", () => ({
+  useHaptic: () => ({
+    tap: tapSpy,
+    select: vi.fn(),
+    success: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    nudge: vi.fn(),
+    enabled: true,
+    setEnabled: vi.fn(),
+  }),
+}))
+
 // Per-test contacts table the mocked `useContacts` reads from.
 const contactsByPubkey: Record<string, Record<string, unknown>> = {}
+const setFlagsMutate = vi.fn()
 
 vi.mock("@/features/contacts/queries", () => ({
   useContact: (pubkey: string | undefined) => ({
@@ -18,7 +37,7 @@ vi.mock("@/features/contacts/queries", () => ({
   useRequestACL: () => ({ mutate: vi.fn(), isPending: false }),
   useRequestTelemetry: () => ({ mutate: vi.fn(), isPending: false }),
   useResetPath: () => ({ mutate: vi.fn(), isPending: false }),
-  useSetFlags: () => ({ mutate: vi.fn(), isPending: false }),
+  useSetFlags: () => ({ mutate: setFlagsMutate, isPending: false }),
   useShareContact: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
@@ -73,6 +92,8 @@ function seedContact(pubkey: string, type: number | null | undefined) {
 describe("ContactDetailPage Message action gating", () => {
   beforeEach(() => {
     for (const k of Object.keys(contactsByPubkey)) delete contactsByPubkey[k]
+    tapSpy.mockClear()
+    setFlagsMutate.mockClear()
     cleanup()
   })
 
@@ -114,5 +135,16 @@ describe("ContactDetailPage Message action gating", () => {
     expect(
       screen.getByRole("button", { name: /^message$/i }),
     ).toBeInTheDocument()
+  })
+
+  it("fires haptic.tap and toggles the starred flag when the star button is clicked", async () => {
+    seedContact(PUBKEY, 1)
+    render(wrap(PUBKEY))
+    await userEvent.click(screen.getByRole("button", { name: /star contact/i }))
+    expect(tapSpy).toHaveBeenCalledTimes(1)
+    expect(setFlagsMutate).toHaveBeenCalledWith({
+      pubkey: PUBKEY,
+      starred: true,
+    })
   })
 })

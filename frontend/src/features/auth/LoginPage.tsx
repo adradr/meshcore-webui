@@ -8,9 +8,11 @@ import {
   CardContent,
   CardHeader,
 } from "@/components/ui/card"
+import { useHaptic } from "@/haptics/HapticProvider"
 
 export function LoginPage() {
   const setApiKey = useSetApiKey()
+  const haptic = useHaptic()
   const [value, setValue] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
@@ -22,6 +24,8 @@ export function LoginPage() {
       const info = await setApiKey(value)
       if (!info.valid) {
         setError("API key didn't authenticate — try again.")
+      } else {
+        haptic.success()
       }
       // On valid=true the AuthGate above us re-renders; nothing else to do.
     } catch (err) {

@@ -35,6 +35,7 @@ import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
 import { formatLastSeen } from "@/features/rx_log/format"
 import { ContactAvatar } from "@/components/contact-avatar"
+import { useHaptic } from "@/haptics/HapticProvider"
 import { MuteToggle } from "@/features/mutes/MuteToggle"
 import { LinkDiagnosticPanel } from "@/features/diagnostics/LinkDiagnosticPanel"
 import { TraceMonitorPanel } from "@/features/trace/monitor/TraceMonitorPanel"
@@ -279,6 +280,7 @@ export function ContactDetailPage() {
   const acl = useRequestACL()
   const discoverPath = useDiscoverPath()
   const resetPath = useResetPath()
+  const haptic = useHaptic()
 
   if (isLoading) return <SkeletonView />
   if (!contact || !pubKey) return <NotFoundView pubkey={pubKey} />
@@ -315,9 +317,10 @@ export function ContactDetailPage() {
         size="icon"
         aria-label={isStarred ? "Unstar contact" : "Star contact"}
         aria-pressed={isStarred}
-        onClick={() =>
+        onClick={() => {
+          haptic.tap()
           flags.mutate({ pubkey: pubKey, starred: !isStarred })
-        }
+        }}
       >
         <Star
           className={
