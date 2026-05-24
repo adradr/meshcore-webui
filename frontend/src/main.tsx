@@ -15,6 +15,7 @@ import {
   resolveWsUrl,
 } from "@/realtime/WebSocketProvider"
 import { ReloadPrompt } from "@/pwa/ReloadPrompt"
+import { HapticProvider } from "@/haptics/HapticProvider"
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -41,8 +42,10 @@ createRoot(document.getElementById('root')!).render(
       <AuthGate>
         <WebSocketProvider url={resolveWsUrl()}>
           <ThemeProvider defaultTheme="system" storageKey="meshcore-ui-theme">
-            <AppRouter />
-            <ReloadPrompt />
+            <HapticProvider>
+              <AppRouter />
+              <ReloadPrompt />
+            </HapticProvider>
           </ThemeProvider>
         </WebSocketProvider>
       </AuthGate>
