@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
+import { resolveTargetUrl } from "./resolveTargetUrl"
 
 declare const self: ServiceWorkerGlobalScope
 
@@ -45,8 +46,10 @@ self.addEventListener("push", (event: PushEvent) => {
 // ---- Notification click ----
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close()
-  const targetUrl =
-    (event.notification.data && event.notification.data.url) || "/"
+  const targetUrl = resolveTargetUrl(
+    event.notification.data?.url,
+    self.location.origin,
+  )
 
   event.waitUntil(
     (async () => {
