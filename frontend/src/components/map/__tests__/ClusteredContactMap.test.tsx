@@ -58,6 +58,9 @@ vi.mock("@/lib/leaflet/fixDefaultIcon", () => ({
 vi.mock("../nodeIcons", () => ({
   iconForNodeType: () => undefined,
 }))
+vi.mock("../MapLegend", () => ({
+  MapLegend: () => null,
+}))
 
 import { ClusteredContactMap } from "../ClusteredContactMap"
 

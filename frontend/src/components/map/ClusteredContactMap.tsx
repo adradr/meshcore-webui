@@ -9,6 +9,7 @@ import { MapViewPersistence } from "./MapViewPersistence"
 import { CenterOnContactsButton } from "./CenterOnContactsButton"
 import { CenterOnSelfButton } from "./CenterOnSelfButton"
 import { LocatePhoneButton } from "./LocatePhoneButton"
+import { MapLegend } from "./MapLegend"
 import { iconForNodeType } from "./nodeIcons"
 
 fixDefaultIcon()
@@ -74,7 +75,10 @@ export function ClusteredContactMap({
       center={INITIAL_CENTER}
       zoom={INITIAL_ZOOM}
       scrollWheelZoom
-      className="h-full w-full"
+      // `dark:bg-zinc-900` paints the area outside loaded tiles in dark
+      // mode so panning to un-cached regions doesn't flash white. Light
+      // mode keeps Leaflet's default off-white backdrop.
+      className="h-full w-full bg-background dark:bg-zinc-900"
     >
       <ThemedTileLayer dark={dark} />
       <MapResizer />
@@ -111,6 +115,7 @@ export function ClusteredContactMap({
       <CenterOnContactsButton contacts={allPoints} />
       <CenterOnSelfButton self={self ? { lat: self.lat, lon: self.lon } : null} />
       <LocatePhoneButton />
+      <MapLegend />
       {children}
     </MapContainer>
   )

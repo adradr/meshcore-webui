@@ -2,12 +2,25 @@ import L from "leaflet"
 
 export type NodeType = "CLI" | "REP" | "ROOM" | "UNKNOWN" | "SELF"
 
+/**
+ * Single source of truth for per-node-type marker colours AND their
+ * human-readable labels. Used by both the Leaflet icon factory below and
+ * the `MapLegend` overlay so hex values never drift between the two.
+ */
+export const NODE_TYPE_PALETTE: Record<NodeType, { label: string; color: string }> = {
+  CLI: { label: "Companion", color: "#2563eb" }, // blue-600
+  REP: { label: "Repeater", color: "#16a34a" }, // green-600
+  ROOM: { label: "Room server", color: "#ea580c" }, // orange-600
+  UNKNOWN: { label: "Unknown", color: "#6b7280" }, // gray-500
+  SELF: { label: "Me", color: "#0891b2" }, // cyan-600 — your own node
+}
+
 const COLORS: Record<NodeType, string> = {
-  CLI: "#2563eb", // blue-600
-  REP: "#16a34a", // green-600
-  ROOM: "#ea580c", // orange-600
-  UNKNOWN: "#6b7280", // gray-500
-  SELF: "#0891b2", // cyan-600 — your own node
+  CLI: NODE_TYPE_PALETTE.CLI.color,
+  REP: NODE_TYPE_PALETTE.REP.color,
+  ROOM: NODE_TYPE_PALETTE.ROOM.color,
+  UNKNOWN: NODE_TYPE_PALETTE.UNKNOWN.color,
+  SELF: NODE_TYPE_PALETTE.SELF.color,
 }
 
 function svgFor(color: string): string {
