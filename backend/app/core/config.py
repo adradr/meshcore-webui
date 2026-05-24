@@ -1,9 +1,35 @@
 from __future__ import annotations
 
+from ipaddress import ip_address, ip_network
 from pathlib import Path
+from urllib.parse import urlparse
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# SSRF guard for operator-supplied URLs (`elevation_base_url`). We refuse
+# IP literals that target loopback, link-local (incl. cloud-metadata
+# 169.254.169.254), RFC1918, IPv6 loopback/link-local, and IPv6 ULA.
+#
+# Hostnames are NOT validated here: DNS-rebinding mitigation (re-resolving
+# + re-checking the resolved IP at request time) is out of scope. Operators
+# pointing the variable at a private hostname (e.g. self-hosted elevation
+# service on a private LAN) is an intentional, supported configuration.
+_PRIVATE_NETS = (
+    ip_network("10.0.0.0/8"),
+    ip_network("127.0.0.0/8"),
+    ip_network("169.254.0.0/16"),
+    ip_network("172.16.0.0/12"),
+    ip_network("192.168.0.0/16"),
+    ip_network("::1/128"),
+    ip_network("fc00::/7"),
+    ip_network("fe80::/10"),
+)
+# Reserved hostnames that resolve to loopback on virtually every OS. We
+# block these by name because the validator runs at config-load time, before
+# any DNS resolver is wired up; trusting DNS for these would let a tampered
+# /etc/hosts target arbitrary internal services.
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "ip6-localhost", "ip6-loopback"})
 
 
 class Settings(BaseSettings):
@@ -113,6 +139,39 @@ class Settings(BaseSettings):
         ),
     )
     trusted_proxy: bool = Field(default=False, alias="TRUSTED_PROXY")
+
+    @field_validator("elevation_base_url")
+    @classmethod
+    def _validate_elevation_base_url(cls, v: str) -> str:
+        """SSRF guard: refuse non-http(s) schemes and IP literals that target
+        loopback / link-local / RFC1918 / IPv6 loopback / IPv6 link-local /
+        IPv6 ULA. Hostnames are accepted (DNS-rebinding mitigation is out of
+        scope — see module-level note on `_PRIVATE_NETS`)."""
+        parsed = urlparse(v)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                "elevation_base_url scheme must be http or https "
+                f"(got {parsed.scheme!r})",
+            )
+        host = parsed.hostname or ""
+        if not host:
+            raise ValueError("elevation_base_url is missing a host component")
+        if host.lower() in _LOOPBACK_HOSTNAMES:
+            raise ValueError(
+                f"elevation_base_url points at a loopback hostname ({host!r})",
+            )
+        try:
+            ip = ip_address(host)
+        except ValueError:
+            # Hostname — resolved at request time. Accept.
+            return v
+        for net in _PRIVATE_NETS:
+            if ip in net:
+                raise ValueError(
+                    "elevation_base_url points at a private or loopback "
+                    f"address ({host})",
+                )
+        return v
 
 
 def get_settings() -> Settings:
