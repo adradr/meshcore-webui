@@ -16,7 +16,7 @@ jobs:
       - name: Install Python 3.12
         run: uv python install 3.12
       - name: Install deps
-        run: uv venv --python 3.12 && uv pip install -e ".[dev]"
+        run: uv sync --frozen --extra dev
         working-directory: backend
       - name: Run tests
         run: uv run pytest -q
