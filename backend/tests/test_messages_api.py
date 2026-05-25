@@ -341,6 +341,36 @@ async def test_threads_channel_unread_count(client, db):
 
 
 @pytest.mark.asyncio
+async def test_post_message_text_capped_at_2048(client):
+    app.state.meshcore_client = AsyncMock()
+    try:
+        r = await client.post(
+            "/api/messages",
+            json={"contact_pub_key": "abc123", "text": "x" * 2049},
+        )
+        assert r.status_code == 422
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_post_message_text_at_cap_accepted(client, db):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.send_dm = AsyncMock(return_value={
+        "expected_ack": "deadbeef",
+        "suggested_timeout_ms": 5000,
+    })
+    try:
+        r = await client.post(
+            "/api/messages",
+            json={"contact_pub_key": "abc123", "text": "x" * 2048},
+        )
+        assert r.status_code == 201
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
 async def test_post_message_502_on_runtime_error(client):
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.send_dm = AsyncMock(side_effect=RuntimeError("boom"))

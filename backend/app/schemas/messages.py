@@ -32,7 +32,7 @@ class MessagesPage(BaseModel):
 class MessageIn(BaseModel):
     contact_pub_key: str | None = None
     channel_idx: int | None = None
-    text: str = Field(..., min_length=1)
+    text: str = Field(..., min_length=1, max_length=2048)
 
     @model_validator(mode="after")
     def _exactly_one_target(self) -> "MessageIn":
