@@ -77,6 +77,100 @@ async def test_subscribe_existing_endpoint_still_upserts_at_cap(client, db, monk
 
 
 @pytest.mark.asyncio
+async def test_resubscribe_requires_api_key(client, monkeypatch):
+    """The endpoint sits behind ``APIKeyMiddleware`` — anonymous calls must
+    be rejected so a public deployment cannot be poked into churning
+    subscription rows when the SW bridge forwards a rotation.
+    """
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    r = await client.post(
+        "/api/push/resubscribe",
+        json={
+            "old_endpoint": "https://updates.push.services.mozilla.com/wpush/v2/old",
+            "new": {
+                "endpoint": "https://updates.push.services.mozilla.com/wpush/v2/new",
+                "keys": {"p256dh": "p" * 20, "auth": "a" * 20},
+            },
+        },
+    )
+    assert r.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_resubscribe_swaps_endpoint(client, db):
+    """A resubscribe call removes the old row and inserts/updates the new
+    one, leaving exactly one subscription with the new endpoint."""
+    old = {
+        "endpoint": "https://updates.push.services.mozilla.com/wpush/v2/old",
+        "keys": {"p256dh": "p" * 20, "auth": "a" * 20},
+    }
+    new_endpoint = "https://updates.push.services.mozilla.com/wpush/v2/new"
+    new_sub = {
+        "endpoint": new_endpoint,
+        "keys": {"p256dh": "q" * 20, "auth": "b" * 20},
+    }
+    r = await client.post("/api/push/subscribe", json=old)
+    assert r.status_code == 201, r.text
+    r = await client.post(
+        "/api/push/resubscribe",
+        json={"old_endpoint": old["endpoint"], "new": new_sub},
+    )
+    assert r.status_code == 201, r.text
+
+    rows = (await db.execute(select(PushSubscription))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].endpoint == new_endpoint
+    assert rows[0].p256dh == "q" * 20
+
+
+@pytest.mark.asyncio
+async def test_resubscribe_when_old_missing_still_inserts_new(client, db):
+    """If the SW posts a rotation for an endpoint the backend has never
+    seen (e.g. the row was reset), the new endpoint should still be
+    persisted so the subscription stays usable."""
+    new_sub = {
+        "endpoint": "https://updates.push.services.mozilla.com/wpush/v2/new",
+        "keys": {"p256dh": "q" * 20, "auth": "b" * 20},
+    }
+    r = await client.post(
+        "/api/push/resubscribe",
+        json={
+            "old_endpoint": "https://updates.push.services.mozilla.com/wpush/v2/missing",
+            "new": new_sub,
+        },
+    )
+    assert r.status_code == 201, r.text
+    rows = (await db.execute(select(PushSubscription))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].endpoint == new_sub["endpoint"]
+
+
+@pytest.mark.asyncio
+async def test_resubscribe_at_cap_still_succeeds(client, db, monkeypatch):
+    """The old row is deleted *before* the cap check so resubscribing at
+    capacity is a no-op for the row count and must not 429."""
+    monkeypatch.setattr("app.core.config.settings.push_subscriptions_max", 1)
+    old = {
+        "endpoint": "https://updates.push.services.mozilla.com/wpush/v2/old",
+        "keys": {"p256dh": "p" * 20, "auth": "a" * 20},
+    }
+    new_sub = {
+        "endpoint": "https://updates.push.services.mozilla.com/wpush/v2/new",
+        "keys": {"p256dh": "q" * 20, "auth": "b" * 20},
+    }
+    r = await client.post("/api/push/subscribe", json=old)
+    assert r.status_code == 201, r.text
+    r = await client.post(
+        "/api/push/resubscribe",
+        json={"old_endpoint": old["endpoint"], "new": new_sub},
+    )
+    assert r.status_code == 201, r.text
+    rows = (await db.execute(select(PushSubscription))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].endpoint == new_sub["endpoint"]
+
+
+@pytest.mark.asyncio
 async def test_get_vapid_public_key_returns_base64url(client, tmp_path, monkeypatch):
     # Generate a temp keypair for the test
     import sys; sys.path.insert(0, "scripts")

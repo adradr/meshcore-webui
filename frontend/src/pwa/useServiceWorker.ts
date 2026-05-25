@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { useRegisterSW } from "virtual:pwa-register/react"
 import { useHaptic } from "@/haptics/HapticProvider"
+import { installResubscribeBridge } from "./push"
 
 export interface ServiceWorkerState {
   needRefresh: boolean
@@ -46,6 +47,15 @@ export function useServiceWorker(): ServiceWorkerState {
   useEffect(() => {
     setOfflineReady(or)
   }, [or])
+
+  // Wire the SW-bridged resubscribe flow once per app mount. The SW posts
+  // `PUSH_RESUBSCRIBE` messages here whenever the user agent rotates the
+  // push endpoint; this page POSTs to `/api/push/resubscribe` with the
+  // bearer token the SW cannot read.
+  useEffect(() => {
+    const teardown = installResubscribeBridge()
+    return teardown
+  }, [])
 
   return {
     needRefresh,

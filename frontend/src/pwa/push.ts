@@ -5,6 +5,12 @@
  * Home Screen (i.e. running in standalone display mode).
  */
 
+import { api } from "@/lib/api"
+import { takePendingResubscribe } from "@/sw/pendingResubscribe"
+
+/** Message type the SW posts on `pushsubscriptionchange`. */
+export const PUSH_RESUBSCRIBE_MSG = "PUSH_RESUBSCRIBE" as const
+
 export function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
@@ -111,6 +117,55 @@ export async function subscribeToPush(
     throw new Error(`subscribe failed: ${res.status}`)
   }
   return sub
+}
+
+/**
+ * Wire up the page side of the SW-bridged resubscribe flow.
+ *
+ * Two responsibilities:
+ *   1. Listen for `PUSH_RESUBSCRIBE` postMessages from the SW (fired when
+ *      the user agent rotates the push endpoint) and POST the new
+ *      subscription to `/api/push/resubscribe` with the bearer token
+ *      attached by `api.post`.
+ *   2. On mount, drain any payload the SW stashed in IndexedDB while no
+ *      client was open. The next mounted page picks it up.
+ *
+ * Returns a teardown function so tests / hot-reload can detach the
+ * listener cleanly.
+ */
+export function installResubscribeBridge(): () => void {
+  if (
+    typeof navigator === "undefined" ||
+    !("serviceWorker" in navigator) ||
+    navigator.serviceWorker == null
+  ) {
+    return () => {}
+  }
+  const handler = (event: MessageEvent): void => {
+    const data = event.data as { type?: string; payload?: unknown } | null
+    if (!data || data.type !== PUSH_RESUBSCRIBE_MSG) return
+    // Fire-and-forget — the SW already considers the event handled. If the
+    // call fails (e.g. 401 because the user logged out), the next rotation
+    // will retry. We deliberately don't surface a toast here.
+    void api.post("/api/push/resubscribe", data.payload).catch((err) => {
+      console.error("[push] resubscribe POST failed", err)
+    })
+  }
+  navigator.serviceWorker.addEventListener("message", handler)
+  void replayPendingResubscribe()
+  return () => {
+    navigator.serviceWorker.removeEventListener("message", handler)
+  }
+}
+
+async function replayPendingResubscribe(): Promise<void> {
+  try {
+    const pending = await takePendingResubscribe()
+    if (pending == null) return
+    await api.post("/api/push/resubscribe", pending)
+  } catch (err) {
+    console.error("[push] replay pending resubscribe failed", err)
+  }
 }
 
 export async function unsubscribeFromPush(apiKey?: string): Promise<boolean> {
