@@ -235,6 +235,21 @@ print(\"OK\")'"
 
 Files produced: `secrets/vapid_private.pem` (mounted into container) and `secrets/vapid_public.txt` (used at build time so the frontend can subscribe with the matching key).
 
+Then lock down the secrets directory so the backend's world-readable-PEM check passes on first boot:
+
+```bash
+bash scripts/setup-secrets.sh
+```
+
+This sets every `*.pem` / `*.txt` under `secrets/` to mode `0600` and the directory itself to `0700`. Idempotent and safe to re-run any time you add a new secret file (e.g. `secrets/api_key.txt`).
+
+(Optional) install a pre-commit guard so accidental commits of files under `secrets/` are blocked locally — defence-in-depth on top of `.gitignore`:
+
+```bash
+cp scripts/pre-commit-secrets-guard.sh .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
 ### 3. Build the image
 
 ```bash
