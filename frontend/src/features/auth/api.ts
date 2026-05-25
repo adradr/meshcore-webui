@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
+import { api, setApiKey } from "@/lib/api"
 import { AuthInfoSchema, type AuthInfo } from "./types"
 
 export const AUTH_QUERY_KEY = ["auth", "info"] as const
@@ -20,11 +20,9 @@ export function useAuthInfo() {
 export function useSetApiKey() {
   const qc = useQueryClient()
   return async (newKey: string): Promise<AuthInfo> => {
-    if (newKey.trim() === "") {
-      localStorage.removeItem("apiKey")
-    } else {
-      localStorage.setItem("apiKey", newKey.trim())
-    }
+    // Canonical setter writes localStorage AND dispatches `apikeychange`
+    // so the WS provider reconnects with the new token immediately.
+    setApiKey(newKey.trim() === "" ? null : newKey)
     // Force a fresh fetch with the new key.
     await qc.invalidateQueries({ queryKey: AUTH_QUERY_KEY })
     const data = await qc.fetchQuery({

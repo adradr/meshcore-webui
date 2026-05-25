@@ -1,9 +1,18 @@
-import { createContext, useCallback, useContext, useMemo, useRef } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import { useWebSocket, type WSStatus } from "./useWebSocket"
 import { parseWireEvent, parseWSMessage } from "./wsSchema"
 import { useHaptic } from "@/haptics/HapticProvider"
+import { API_KEY_CHANGE_EVENT } from "@/lib/api"
 
 export type TopicHandler = (payload: unknown) => void
 
@@ -123,6 +132,25 @@ export function WebSocketProvider({
   const haptic = useHaptic()
   const subscribers = useRef(new Map<string, Set<TopicHandler>>())
 
+  // The `url` prop is computed once at app boot (resolveWsUrl()), so it
+  // captures whatever token was in localStorage then. After a key rotation
+  // (Settings → Save, or LoginPage submit) the underlying token changes
+  // but the prop doesn't — without intervention the WS keeps reconnecting
+  // with the OLD token forever. Listen for the `apikeychange` event
+  // dispatched by `setApiKey()` and recompute the URL so the underlying
+  // `useWebSocket([url])` effect tears down the stale socket and opens a
+  // fresh one with the new token.
+  const [liveUrl, setLiveUrl] = useState(url)
+  useEffect(() => {
+    setLiveUrl(url)
+  }, [url])
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const onRotate = () => setLiveUrl(resolveWsUrl())
+    window.addEventListener(API_KEY_CHANGE_EVENT, onRotate)
+    return () => window.removeEventListener(API_KEY_CHANGE_EVENT, onRotate)
+  }, [])
+
   const subscribe = useCallback(
     (topic: string, handler: TopicHandler) => {
       let set = subscribers.current.get(topic)
@@ -142,7 +170,7 @@ export function WebSocketProvider({
   )
 
   const { status, send, lastMessage } = useWebSocket({
-    url,
+    url: liveUrl,
     onMessage: (raw) => {
       // 1) Topic-based fan-out for new subscribers (Task 0.4).
       // Run first and isolated so a bad subscriber cannot break the

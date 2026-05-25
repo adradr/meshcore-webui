@@ -10,9 +10,37 @@ export function isApiError(e: unknown): e is ApiError {
   return e instanceof Error && "status" in e
 }
 
+/**
+ * Event dispatched on `window` after a successful API-key rotation.
+ *
+ * The realtime layer listens for this so it can rebuild the WebSocket URL
+ * and reconnect with the new token without a full page reload. Use this
+ * helper everywhere the key is mutated — direct `localStorage.setItem`
+ * calls won't trigger the listener.
+ */
+export const API_KEY_CHANGE_EVENT = "apikeychange"
+
 function getApiKey(): string | null {
   if (typeof localStorage === "undefined") return null
   return localStorage.getItem("apiKey")
+}
+
+/**
+ * Canonical setter for the persisted API key. Pass a string to store it,
+ * or `null` to clear it (logout). Always dispatches
+ * {@link API_KEY_CHANGE_EVENT} on `window` so listeners (e.g. the WS
+ * provider) can react.
+ */
+export function setApiKey(value: string | null): void {
+  if (typeof localStorage === "undefined") return
+  if (value && value.trim() !== "") {
+    localStorage.setItem("apiKey", value.trim())
+  } else {
+    localStorage.removeItem("apiKey")
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(API_KEY_CHANGE_EVENT))
+  }
 }
 
 async function request<T>(
