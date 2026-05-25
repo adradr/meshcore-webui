@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { IDBFactory } from "fake-indexeddb"
 import "fake-indexeddb/auto"
 import {
   stashPendingResubscribe,
@@ -47,21 +48,30 @@ function installFakeServiceWorker(): FakeSW {
   return fake
 }
 
-async function deleteDb(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const req = indexedDB.deleteDatabase("meshcore-pwa")
-    req.onsuccess = () => resolve()
-    req.onerror = () => resolve()
-    req.onblocked = () => resolve()
-  })
+// Flush a few macrotask cycles so any fire-and-forget IDB / mock-API promises
+// installed by `installResubscribeBridge` settle before we move on. Without
+// this, an in-flight `replayPendingResubscribe` from one test can resolve
+// during the next test and inflate `postMock.mock.calls`.
+async function flushPending(): Promise<void> {
+  for (let i = 0; i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 0))
+  }
 }
 
 beforeEach(async () => {
+  // Swap in a fresh IndexedDB so no leftover state (or an in-flight
+  // connection from a previous test) can interfere. `fake-indexeddb/auto`
+  // installed `indexedDB` as a globalThis property; reassigning it gives
+  // every test a clean factory with no open databases.
+  globalThis.indexedDB = new IDBFactory()
   postMock.mockClear()
-  await deleteDb()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // Drain any fire-and-forget promises kicked off by the bridge before the
+  // next test's `mockClear` lands — otherwise a late `api.post` from one
+  // test pollutes another.
+  await flushPending()
   // Restore navigator.serviceWorker to whatever jsdom left (likely undefined).
   Object.defineProperty(navigator, "serviceWorker", {
     configurable: true,
@@ -125,9 +135,10 @@ describe("installResubscribeBridge", () => {
     installFakeServiceWorker()
     const { installResubscribeBridge } = await import("./push")
     const teardown = installResubscribeBridge()
-    // Allow the async replay to complete.
-    await new Promise((r) => setTimeout(r, 0))
-    await new Promise((r) => setTimeout(r, 0))
+    // Allow the async replay (open db → read → delete → tx.oncomplete →
+    // post) to complete. IndexedDB needs several macrotask cycles before
+    // `api.post` actually fires.
+    await flushPending()
     expect(postMock).toHaveBeenCalledWith("/api/push/resubscribe", payload)
     teardown()
   })
