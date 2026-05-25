@@ -274,6 +274,16 @@ All settings are environment variables on the container:
 | `MESHCORE_WEBUI_RX_LOG_PERSIST` | `false` | Set `true` to persist every RX event to SQLite (in addition to the in-memory buffer) |
 | `MESHCORE_WEBUI_RX_LOG_BUFFER_SIZE` | `1000` | In-memory ring buffer size for the `/rx-log` page |
 | `MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S` | `2.0` | Noise floor polling interval in seconds (`STATS_RADIO` cadence) |
+| `MESHCORE_WEBUI_TILE_URL_LIGHT` | OpenStreetMap CDN | Leaflet tile URL template used in light mode. Point at a self-hosted tile server to keep viewer IPs / viewports off the public CDNs |
+| `MESHCORE_WEBUI_TILE_URL_DARK` | CARTO dark CDN | Same for dark mode |
+| `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` | OSM attribution HTML | Attribution overlay rendered by Leaflet for the light layer (HTML allowed) |
+| `MESHCORE_WEBUI_TILE_ATTRIBUTION_DARK` | OSM + CARTO attribution HTML | Same for the dark layer |
+
+### Tile-provider privacy
+
+By default, the map view fetches tiles directly from the public OpenStreetMap and CARTO CDNs. Each tile request reveals the viewer's IP address and approximate viewport (lat/lon/zoom) to those services. The map page renders an in-app disclosure note as long as the defaults are in effect.
+
+For privacy-sensitive deployments, point `MESHCORE_WEBUI_TILE_URL_LIGHT` / `MESHCORE_WEBUI_TILE_URL_DARK` at a self-hosted tile server (e.g. [`tileserver-gl`](https://github.com/maptiler/tileserver-gl) backed by [OpenMapTiles](https://openmaptiles.org/)). Once the URLs no longer match the public defaults, the in-app disclosure is hidden automatically. Don't forget to set `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` / `_DARK` to whatever your tile source requires — the values are inserted verbatim into the Leaflet attribution control.
 
 Example `docker-compose.yml`:
 
