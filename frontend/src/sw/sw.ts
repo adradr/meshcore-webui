@@ -2,11 +2,14 @@
 import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
 import { resolveTargetUrl } from "./resolveTargetUrl"
+import { installSkipWaitingGate } from "./skipWaitingGate"
 
 declare const self: ServiceWorkerGlobalScope
 
-// Take control on next reload after install
-self.skipWaiting()
+// Defer skipWaiting() until the page posts {type: "SKIP_WAITING"} after the
+// user clicks the reload prompt. This avoids silently swapping the SW under
+// every open tab when an update lands.
+installSkipWaitingGate(self)
 clientsClaim()
 
 cleanupOutdatedCaches()
