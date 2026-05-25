@@ -124,3 +124,13 @@ def test_dockerfile_base_images_pinned_by_digest():
         if ":" not in img:
             continue
         assert "@sha256:" in img, f"unpinned FROM line: {line!r}"
+
+
+def test_dockerfile_removes_pip_after_install():
+    """pip / setuptools / wheel must be stripped from the runtime image so a
+    runtime process that obtains a shell can't install arbitrary packages."""
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert ("uv pip uninstall" in text) or ("pip uninstall" in text), (
+        "Dockerfile must remove pip/setuptools/wheel from the runtime image"
+    )

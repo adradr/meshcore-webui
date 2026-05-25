@@ -28,6 +28,12 @@ RUN pip install --no-cache-dir uv
 COPY backend/pyproject.toml /app/
 RUN uv pip install --system --no-cache -e .
 
+# Strip package-management tools so a runtime process that gains a shell
+# can't pip-install a backdoor. uv itself is left in place for ops use
+# (e.g. one-off `uv pip list` from a debug shell).
+RUN uv pip uninstall --system pip setuptools wheel 2>/dev/null || true \
+ && rm -rf /root/.cache /tmp/* /var/tmp/*
+
 COPY backend/ /app/
 COPY --from=frontend-builder /app/dist /app/static
 
