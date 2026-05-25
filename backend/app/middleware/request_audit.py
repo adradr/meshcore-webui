@@ -47,7 +47,7 @@ class RequestAuditMiddleware(BaseHTTPMiddleware):
     `app.audit` logger to DEBUG when investigating probe behaviour.
     """
 
-    QUIET_PATHS = ("/api/health",)
+    QUIET_PATHS = ("/api/health", "/api/health/deep")
 
     async def dispatch(self, request: Request, call_next):
         raw_req_id = request.headers.get("x-request-id", "")

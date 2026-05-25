@@ -6,9 +6,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app.api.admin import router as admin_router
 from app.api.attachments import router as attachments_router
@@ -369,6 +370,49 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/health/deep")
+    async def health_deep(request: Request):
+        """Deep readiness probe for orchestrators / monitoring.
+
+        Reports:
+        * ``radio`` — whether the MeshCore companion TCP socket is up.
+          Informational only: a disconnected radio doesn't fail this
+          probe (the supervisor will reconnect on its own; failing the
+          probe would just restart the container in a loop).
+        * ``db``    — cheap ``SELECT 1`` against the SQLite file. The
+          ONLY field that affects the HTTP status: 200 when "ok", 503
+          when the query raised.
+        * ``vapid`` — whether the VAPID keypair finished loading at
+          startup. Informational: a missing key means push notifications
+          are broken, but the rest of the app still works.
+
+        Stays on the API-key exempt list so k8s / Uptime-Kuma probes
+        can call it without carrying a bearer token (same rationale as
+        the shallow ``/api/health``).
+        """
+        state = request.app.state
+        client = getattr(state, "meshcore_client", None)
+        radio_up = client is not None and client.is_radio_connected()
+        radio = "connected" if radio_up else "disconnected"
+
+        db_ok = True
+        try:
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception:
+            db_ok = False
+
+        vapid_loaded = getattr(state, "push_sender", None) is not None
+
+        body = {
+            "radio": radio,
+            "db": "ok" if db_ok else "error",
+            "vapid": "loaded" if vapid_loaded else "missing",
+        }
+        if not db_ok:
+            return JSONResponse(body, status_code=503)
+        return body
 
     app.include_router(auth_router)
     app.include_router(push_router)

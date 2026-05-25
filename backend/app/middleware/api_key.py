@@ -22,6 +22,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     #   the login gate; it has to be reachable *before* the user has set a key.
     EXEMPT_API_PATHS = (
         "/api/health",
+        "/api/health/deep",
         "/api/push/vapid-public-key",
         "/api/auth/info",
     )
