@@ -36,6 +36,7 @@ backend/secrets/
 docs/
 tasks/
 *.md
+CLAUDE.md
 !backend/README.md
 
 # Docker stuff
