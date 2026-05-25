@@ -1,6 +1,6 @@
 services:
   meshcore-webui:
-    image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:latest
+    image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:edge
     restart: unless-stopped
     # Defence-in-depth runtime caps. Combined with the non-root `USER` in the
     # Dockerfile these shrink the blast radius of a compromised process:

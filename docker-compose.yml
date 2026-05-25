@@ -1,6 +1,6 @@
 services:
   meshcore-webui:
-    image: ghcr.io/adradr/meshcore-webui:latest
+    image: ghcr.io/adradr/meshcore-webui:edge
     # `docker compose pull` fetches the CI-built image from GHCR. The `build:`
     # block below is retained so `docker compose build` still works for local
     # development (it tags the same image name and overrides the pulled one).

@@ -86,7 +86,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/meshcore-webui
           tags: |
-            type=raw,value=latest
+            type=raw,value=edge,enable={{ is_default_branch }}
             type=sha,format=short
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         id: build
