@@ -10,6 +10,26 @@ services:
         VITE_VAPID_PUBLIC_KEY: "${VITE_VAPID_PUBLIC_KEY:-}"
     container_name: meshcore-webui
     restart: unless-stopped
+    # Defence-in-depth runtime caps. Combined with the non-root `USER` in the
+    # Dockerfile these shrink the blast radius of a compromised process:
+    #   - mem/cpu/pids: bound resource exhaustion (DoS, fork-bomb).
+    #   - no-new-privileges: refuse setuid escalation inside the container.
+    #   - cap_drop ALL: the app needs no Linux capabilities (it binds an
+    #     unprivileged port and never raises privileges).
+    #   - read_only + tmpfs /tmp: writable state is restricted to the
+    #     bind-mounted /data volume (SQLite + attachments) and an in-memory
+    #     /tmp for transient files (e.g. tempfile.NamedTemporaryFile).
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: "1.0"
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     ports:
       # Loopback-only by default. Change to "8090:8080" (or "0.0.0.0:8090:8080")
       # for direct LAN access without a reverse proxy.
