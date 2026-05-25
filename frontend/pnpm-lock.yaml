@@ -97,7 +97,7 @@ importers:
         version: 1.2.4(react@19.2.6)(uplot@1.6.32)
       web-haptics:
         specifier: ^0.0.6
-        version: 0.0.6
+        version: 0.0.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -105,6 +105,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.4.0(jiti@2.7.0))
+      '@tanstack/react-query-devtools':
+        specifier: ^5.100.10
+        version: 5.100.10(@tanstack/react-query@5.100.10(react@19.2.6))(react@19.2.6)
       '@testing-library/jest-dom':
         specifier: ^6.9.1
         version: 6.9.1
@@ -114,9 +117,6 @@ importers:
       '@testing-library/user-event':
         specifier: ^14.6.1
         version: 14.6.1(@testing-library/dom@10.4.1)
-      '@tanstack/react-query-devtools':
-        specifier: ^5.100.10
-        version: 5.100.10(@tanstack/react-query@5.100.10(react@19.2.6))(react@19.2.6)
       '@types/leaflet':
         specifier: ^1.9.21
         version: 1.9.21
@@ -144,6 +144,9 @@ importers:
       eslint-plugin-react-refresh:
         specifier: ^0.5.2
         version: 0.5.2(eslint@10.4.0(jiti@2.7.0))
+      fake-indexeddb:
+        specifier: ^6.2.5
+        version: 6.2.5
       globals:
         specifier: ^17.6.0
         version: 17.6.0
@@ -3011,6 +3014,10 @@ packages:
   express@5.2.1:
     resolution: {integrity: sha512-hIS4idWWai69NezIdRt2xFVofaF4j+6INOpJlVOLDO8zXGpUVEVzIYk12UUi2JzjEzWL3IOAxcTubgz9Po0yXw==}
     engines: {node: '>= 18'}
+
+  fake-indexeddb@6.2.5:
+    resolution: {integrity: sha512-CGnyrvbhPlWYMngksqrSSUT1BAVP49dZocrHuK0SvtR0D5TMs5wP0o3j7jexDJW01KSadjBp1M/71o/KR3nD1w==}
+    engines: {node: '>=18'}
 
   fast-deep-equal@3.1.3:
     resolution: {integrity: sha512-f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==}
@@ -8024,6 +8031,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  fake-indexeddb@6.2.5: {}
+
   fast-deep-equal@3.1.3: {}
 
   fast-glob@3.3.3:
@@ -9857,7 +9866,10 @@ snapshots:
     dependencies:
       xml-name-validator: 5.0.0
 
-  web-haptics@0.0.6: {}
+  web-haptics@0.0.6(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
+    optionalDependencies:
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
 
   web-streams-polyfill@3.3.3: {}
 
