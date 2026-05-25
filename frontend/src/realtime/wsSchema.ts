@@ -99,3 +99,89 @@ export type WireEvent = z.infer<typeof WireEventSchema>
 export function parseWireEvent(raw: unknown): WireEvent {
   return WireEventSchema.parse(raw)
 }
+
+/* ------------------------------------------------------------------------ *
+ * Per-topic payload schemas — defensive validation in `useWsTopic`.
+ *
+ * The radio chain emits payloads we ultimately re-broadcast to every WS
+ * subscriber. The backend is trusted, but it forwards content sourced from
+ * peers on the LoRa mesh (RX_LOG_DATA, TRACE_DATA, advertisements). A hostile
+ * peer with a malformed packet shouldn't be able to make a subscriber's
+ * destructure throw. Each schema below mirrors the backend Pydantic / TS
+ * consumer shape, and `useWsTopic` drops anything that fails to parse with
+ * a `console.warn`. Schemas are intentionally permissive on fields the
+ * consumer doesn't care about — we want to filter "obviously not mine"
+ * payloads, not enforce a full type-check.
+ *
+ * Topics NOT listed here pass through unvalidated (loose escape hatch).
+ * ------------------------------------------------------------------------ */
+
+// `noise` topic — mirrors `NoisePoller._payload_from_event_payload` in
+// `backend/app/services/noise_poller.py`. `t_ms` is the only field the
+// chart consumer needs to plot; everything else is nullable/optional.
+export const NoisePayloadSchema = z.object({
+  noise_floor: z.number().nullable().optional(),
+  last_rssi: z.number().nullable().optional(),
+  last_snr: z.number().nullable().optional(),
+  tx_air_secs: z.number().nullable().optional(),
+  rx_air_secs: z.number().nullable().optional(),
+  t_ms: z.number(),
+})
+
+// `rx_log` topic — mirrors the sanitized RX_LOG_DATA payload from
+// `_sanitize_rx_log_payload` in meshcore_client.py. Real packets carry
+// many extra firmware-specific fields (`header`, `payload_ver`, `adv_*`…)
+// that the UI just renders verbatim, so we use passthrough() to let them
+// flow through without invalidating the message.
+export const RxLogPayloadSchema = z
+  .object({
+    recv_time: z.number().nullable().optional(),
+    snr: z.number().nullable().optional(),
+    rssi: z.number().nullable().optional(),
+    payload: z.string().nullable().optional(),
+    payload_length: z.number().nullable().optional(),
+    route_type: z.number().nullable().optional(),
+    route_typename: z.string().nullable().optional(),
+    payload_type: z.number().nullable().optional(),
+    payload_typename: z.string().nullable().optional(),
+    path_len: z.number().nullable().optional(),
+    path_hash_size: z.number().nullable().optional(),
+    path: z.string().nullable().optional(),
+    pkt_hash: z.string().nullable().optional(),
+    raw_hex: z.string().nullable().optional(),
+  })
+  .loose()
+
+// `trace_monitor` topic — mirrors `TraceSampleOut` in
+// `backend/app/schemas/trace_monitor.py`. The consumer
+// (`useTraceMonitorSamples`) filters by `session_id` so that field MUST be
+// present and a string; everything else can be permissive.
+const TraceHopPayloadSchema = z.object({
+  hash: z.string(),
+  snr: z.number(),
+})
+export const TraceMonitorPayloadSchema = z.object({
+  session_id: z.string(),
+  target_pubkey: z.string(),
+  started_at: z.string(),
+  finished_at: z.string(),
+  status: z.enum(["ok", "timeout", "unreachable", "error"]),
+  path_len: z.number().nullable().optional(),
+  snr_there: z.number().nullable().optional(),
+  snr_back: z.number().nullable().optional(),
+  hops: z.array(TraceHopPayloadSchema).optional().default([]),
+  error: z.string().nullable().optional(),
+})
+
+// Lookup keyed by topic name. Topics not listed here are intentionally
+// unvalidated — see useWsTopic.ts.
+export const TOPIC_PAYLOAD_SCHEMAS = {
+  noise: NoisePayloadSchema,
+  rx_log: RxLogPayloadSchema,
+  trace_monitor: TraceMonitorPayloadSchema,
+} as const
+
+export type ValidatedTopic = keyof typeof TOPIC_PAYLOAD_SCHEMAS
+export type PayloadFor<K extends ValidatedTopic> = z.infer<
+  (typeof TOPIC_PAYLOAD_SCHEMAS)[K]
+>
