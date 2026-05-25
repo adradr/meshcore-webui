@@ -24,6 +24,13 @@ jobs:
       - name: Run tests
         run: uv run pytest -q
         working-directory: backend
+      - name: Audit Python deps
+        # --skip-editable: the project itself is installed editable via
+        # `uv sync`; pip-audit treats editable distributions as
+        # uncollectable so we exclude it explicitly. Vulnerabilities in
+        # any non-editable transitive still fail the job (exit 1).
+        run: uv run pip-audit --skip-editable
+        working-directory: backend
 
   frontend:
     runs-on: ubuntu-latest
@@ -53,6 +60,9 @@ jobs:
       - name: Build
         run: pnpm run build
         working-directory: frontend
+      - name: Audit npm deps
+        run: pnpm audit --audit-level high
+        working-directory: frontend
 
   docker:
     needs: [backend, frontend]
@@ -77,6 +87,7 @@ jobs:
             type=raw,value=latest
             type=sha,format=short
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
+        id: build
         with:
           context: .
           push: true
@@ -84,3 +95,10 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/meshcore-webui@${{ steps.build.outputs.digest }}
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
