@@ -104,6 +104,39 @@ class Settings(BaseSettings):
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
     )
 
+    # Map tile-server overrides. Defaults send tile requests to public
+    # OpenStreetMap + CARTO CDNs — every tile fetch exposes the viewer's
+    # IP + viewport to those services. Privacy-sensitive operators can
+    # point these at a self-hosted tile server (e.g. tileserver-gl).
+    # The values are surfaced verbatim on `GET /api/auth/info` so the
+    # SPA can render the override without a separate config endpoint.
+    tile_url_light: str = Field(
+        default="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        alias="MESHCORE_WEBUI_TILE_URL_LIGHT",
+        description="Leaflet light-mode tile URL template.",
+    )
+    tile_url_dark: str = Field(
+        default="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        alias="MESHCORE_WEBUI_TILE_URL_DARK",
+        description="Leaflet dark-mode tile URL template.",
+    )
+    tile_attribution_light: str = Field(
+        default=(
+            '&copy; <a href="https://openstreetmap.org/copyright">'
+            "OpenStreetMap</a> contributors"
+        ),
+        alias="MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT",
+        description="Attribution HTML for the light-mode tile layer.",
+    )
+    tile_attribution_dark: str = Field(
+        default=(
+            '&copy; <a href="https://openstreetmap.org/copyright">OSM</a> '
+            '&copy; <a href="https://carto.com/attributions">CARTO</a>'
+        ),
+        alias="MESHCORE_WEBUI_TILE_ATTRIBUTION_DARK",
+        description="Attribution HTML for the dark-mode tile layer.",
+    )
+
     # Attachments / public image sharing
     public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
     attachments_dir: Path = Field(

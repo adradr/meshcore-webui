@@ -35,11 +35,33 @@ class AuthInfoResponse(BaseModel):
 
     ``public_base_url`` is optional and defaults to ``None`` so older clients
     that don't know about the field still parse the payload cleanly.
+
+    ``tile_url_*`` / ``tile_attribution_*`` mirror the operator-configurable
+    tile-server settings so the SPA can render the override (or the default
+    OpenStreetMap / CARTO endpoints) without a second config round-trip.
+    Defaults are surfaced verbatim — the SPA detects "operator overrode the
+    defaults" by comparing the value against the known public defaults to
+    decide whether to render the tile-provider privacy disclosure.
     """
 
     required: bool
     valid: bool
     public_base_url: str | None = None
+    tile_url_light: str
+    tile_url_dark: str
+    tile_attribution_light: str
+    tile_attribution_dark: str
+
+
+def _tile_payload() -> dict[str, str]:
+    """Pull the four tile-server fields into a flat dict so both branches
+    of :func:`auth_info` share the same source of truth."""
+    return {
+        "tile_url_light": settings.tile_url_light,
+        "tile_url_dark": settings.tile_url_dark,
+        "tile_attribution_light": settings.tile_attribution_light,
+        "tile_attribution_dark": settings.tile_attribution_dark,
+    }
 
 
 @router.get("/info", response_model=AuthInfoResponse)
@@ -50,6 +72,7 @@ async def auth_info(request: Request) -> AuthInfoResponse:
             required=False,
             valid=True,
             public_base_url=settings.public_base_url,
+            **_tile_payload(),
         )
     header = request.headers.get("authorization", "")
     valid = constant_time_bearer_equal(header, expected)
@@ -57,4 +80,5 @@ async def auth_info(request: Request) -> AuthInfoResponse:
         required=True,
         valid=valid,
         public_base_url=settings.public_base_url,
+        **_tile_payload(),
     )

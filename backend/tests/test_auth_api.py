@@ -121,3 +121,47 @@ async def test_auth_info_public_base_url_defaults_to_none(client, monkeypatch):
     r = await client.get("/api/auth/info")
     assert r.status_code == 200
     assert r.json()["public_base_url"] is None
+
+
+@pytest.mark.asyncio
+async def test_auth_info_includes_tile_config(client):
+    """SPA reads tile URLs / attributions on boot so it can render either the
+    public defaults or the operator-supplied self-hosted tile server.
+
+    Surfacing them on ``/api/auth/info`` keeps the boot probe to a single
+    request and lets the privacy disclosure detect the override without a
+    second config endpoint.
+    """
+    r = await client.get("/api/auth/info")
+    assert r.status_code == 200
+    body = r.json()
+    for field in (
+        "tile_url_light",
+        "tile_url_dark",
+        "tile_attribution_light",
+        "tile_attribution_dark",
+    ):
+        assert field in body, f"missing tile field {field!r}"
+        assert isinstance(body[field], str) and body[field]
+    # URL templates always include the leaflet `{z}` placeholder; defaults
+    # would otherwise be impossible to render.
+    assert "{z}" in body["tile_url_light"]
+    assert "{z}" in body["tile_url_dark"]
+
+
+@pytest.mark.asyncio
+async def test_auth_info_tile_override_is_surfaced(client, monkeypatch):
+    """An operator override on the tile URL flows through verbatim.
+
+    The SPA compares the response value against the well-known default to
+    decide whether to hide the tile-provider privacy disclosure; that
+    detection breaks if the backend rewrites or normalises the value, so
+    pin the round-trip explicitly.
+    """
+    from app.core.config import settings
+
+    override = "https://tiles.example.invalid/{z}/{x}/{y}.png"
+    monkeypatch.setattr(settings, "tile_url_light", override)
+    r = await client.get("/api/auth/info")
+    assert r.status_code == 200
+    assert r.json()["tile_url_light"] == override
