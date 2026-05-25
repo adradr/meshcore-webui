@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,30 @@ async def subscribe(
 ) -> PushSubscription:
     endpoint = str(payload.endpoint)
     now = datetime.now(timezone.utc)
+    # Cap the total number of distinct subscriptions so a runaway client
+    # can't multiply every inbound radio message into a fan-out flood at
+    # the upstream push providers. Re-subscribing an *existing* endpoint
+    # is always allowed because it's an upsert (no new row) — a legitimate
+    # client refreshing its keys must not be blocked by the cap.
+    existing = (
+        await db.execute(
+            select(PushSubscription.id).where(
+                PushSubscription.endpoint == endpoint,
+            ),
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        total = (
+            await db.execute(
+                select(func.count()).select_from(PushSubscription),
+            )
+        ).scalar_one()
+        if total >= settings.push_subscriptions_max:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="push subscription cap reached",
+                headers={"Retry-After": "60"},
+            )
     stmt = (
         sqlite_insert(PushSubscription)
         .values(

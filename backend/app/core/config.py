@@ -140,6 +140,21 @@ class Settings(BaseSettings):
     )
     trusted_proxy: bool = Field(default=False, alias="TRUSTED_PROXY")
 
+    # Hard ceiling on stored Web Push subscriptions per deployment. Each
+    # inbound radio message fans out one HTTP push to every row in
+    # `push_subscriptions`, so an attacker (or a misbehaving client) who
+    # can register unlimited distinct `endpoint` URLs amplifies every
+    # message into N requests against the upstream push providers. The
+    # cap is enforced in `POST /api/push/subscribe` — re-subscribing an
+    # existing endpoint is always allowed (upsert path) so a legitimate
+    # client at the cap can still refresh its keys.
+    push_subscriptions_max: int = Field(
+        default=64,
+        ge=1,
+        alias="PUSH_SUBSCRIPTIONS_MAX",
+        description="Max stored push subscriptions per deployment.",
+    )
+
     @field_validator("elevation_base_url")
     @classmethod
     def _validate_elevation_base_url(cls, v: str) -> str:
