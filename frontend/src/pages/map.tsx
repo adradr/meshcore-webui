@@ -18,6 +18,8 @@ import {
 } from "@/features/trace/monitor/api"
 import { TraceHopsDrawer } from "@/features/trace/TraceHopsDrawer"
 import { Button } from "@/components/ui/button"
+import { useAuthInfo } from "@/features/auth/api"
+import { tilesAreDefault } from "@/components/map/tileDisclosure"
 
 // 10 s is the default cadence we kick off with from the map. Operators can
 // re-tune via the slider on the contact-detail page once the chart is in
@@ -56,6 +58,11 @@ export function MapPage() {
   const { data } = useContacts()
   const { data: selfInfo } = useSelfInfo()
   const dark = useIsDark()
+  const auth = useAuthInfo()
+  const showTileDisclosure = tilesAreDefault(
+    auth.data?.tile_url_light,
+    auth.data?.tile_url_dark,
+  )
   const [losTarget, setLosTarget] = useState<{
     name: string
     lat: number
@@ -210,6 +217,36 @@ export function MapPage() {
         onOpenChange={setHopsOpen}
         trace={activeTrace}
       />
+      {showTileDisclosure && (
+        // Positioned above Leaflet's stock bottom-right attribution so it
+        // doesn't collide with it. z-[500] sits above the tile pane but
+        // below the trace control buttons and any open marker popup
+        // (which Leaflet pins at z-700+).
+        <div
+          data-testid="tile-privacy-note"
+          className="absolute bottom-8 left-2 z-[500] max-w-xs rounded bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow"
+        >
+          Map tiles delivered by{" "}
+          <a
+            href="https://www.openstreetmap.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            OpenStreetMap
+          </a>
+          {" / "}
+          <a
+            href="https://carto.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            CARTO
+          </a>
+          {" — your IP and viewport are visible to them. Self-host tiles to avoid this."}
+        </div>
+      )}
     </div>
   )
 }

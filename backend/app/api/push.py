@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from typing import Annotated, Literal
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-from fastapi import APIRouter, Depends, Header, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,7 @@ from app.core.vapid import load_vapid
 from app.db.models import PushSubscription
 from app.db.session import get_db
 from app.schemas.push import (
-    PushSubscriptionIn, PushSubscriptionOut, PushUnsubscribeIn,
+    PushResubscribeIn, PushSubscriptionIn, PushSubscriptionOut, PushUnsubscribeIn,
 )
 from app.services.push_mode import get_mode, set_mode
 
@@ -32,18 +32,42 @@ class PushModeOut(BaseModel):
     mode: Literal["all", "mentions", "mute"]
 
 
-@router.post(
-    "/subscribe",
-    response_model=PushSubscriptionOut,
-    status_code=status.HTTP_201_CREATED,
-)
-async def subscribe(
+async def _upsert_subscription(
+    db: AsyncSession,
     payload: PushSubscriptionIn,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    user_agent: Annotated[str | None, Header(alias="user-agent")] = None,
+    user_agent: str | None,
 ) -> PushSubscription:
+    """Insert or update a push subscription row.
+
+    Shared by ``/subscribe`` and ``/resubscribe`` so cap enforcement and
+    upsert semantics stay identical across the two entry points.
+    """
     endpoint = str(payload.endpoint)
     now = datetime.now(timezone.utc)
+    # Cap the total number of distinct subscriptions so a runaway client
+    # can't multiply every inbound radio message into a fan-out flood at
+    # the upstream push providers. Re-subscribing an *existing* endpoint
+    # is always allowed because it's an upsert (no new row) — a legitimate
+    # client refreshing its keys must not be blocked by the cap.
+    existing = (
+        await db.execute(
+            select(PushSubscription.id).where(
+                PushSubscription.endpoint == endpoint,
+            ),
+        )
+    ).scalar_one_or_none()
+    if existing is None:
+        total = (
+            await db.execute(
+                select(func.count()).select_from(PushSubscription),
+            )
+        ).scalar_one()
+        if total >= settings.push_subscriptions_max:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="push subscription cap reached",
+                headers={"Retry-After": "60"},
+            )
     stmt = (
         sqlite_insert(PushSubscription)
         .values(
@@ -65,7 +89,49 @@ async def subscribe(
         )
         .returning(PushSubscription)
     )
-    row = (await db.execute(stmt)).scalar_one()
+    return (await db.execute(stmt)).scalar_one()
+
+
+@router.post(
+    "/subscribe",
+    response_model=PushSubscriptionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def subscribe(
+    payload: PushSubscriptionIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_agent: Annotated[str | None, Header(alias="user-agent")] = None,
+) -> PushSubscription:
+    row = await _upsert_subscription(db, payload, user_agent)
+    await db.commit()
+    return row
+
+
+@router.post(
+    "/resubscribe",
+    response_model=PushSubscriptionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def resubscribe(
+    payload: PushResubscribeIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    user_agent: Annotated[str | None, Header(alias="user-agent")] = None,
+) -> PushSubscription:
+    """Swap an endpoint after a ``pushsubscriptionchange`` SW event.
+
+    Posted by the page on behalf of the SW (the SW has no bearer token).
+    Sits behind ``APIKeyMiddleware`` like the rest of ``/api/*`` so a public
+    deployment cannot be poked into churning subscription rows anonymously.
+    """
+    # Delete the old endpoint first so the cap check in `_upsert_subscription`
+    # sees an accurate row count — otherwise an at-capacity table would refuse
+    # the upsert even though the net row count stays the same.
+    await db.execute(
+        delete(PushSubscription).where(
+            PushSubscription.endpoint == str(payload.old_endpoint),
+        ),
+    )
+    row = await _upsert_subscription(db, payload.new, user_agent)
     await db.commit()
     return row
 

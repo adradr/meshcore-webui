@@ -107,19 +107,87 @@ def test_ws_open_when_no_api_key_configured(monkeypatch):
 
 
 def test_bearer_compare_is_constant_time(monkeypatch):
-    import app.middleware.api_key as mw
+    import app.core.bearer as bearer
 
     monkeypatch.setattr("app.core.config.settings.api_key", "secret")
-    calls: list[tuple[str, str]] = []
-    real = mw.hmac.compare_digest
+    calls: list[tuple[bytes, bytes]] = []
+    real = bearer.hmac.compare_digest
 
     def spy(a, b):
         calls.append((a, b))
         return real(a, b)
 
-    monkeypatch.setattr(mw.hmac, "compare_digest", spy)
+    monkeypatch.setattr(bearer.hmac, "compare_digest", spy)
 
     TestClient(app).get("/api/contacts", headers={"Authorization": "Bearer secret"})
 
     assert calls, "hmac.compare_digest was not invoked — bearer compare may be `==`"
-    assert any(b == "Bearer secret" for _a, b in calls)
+    assert any(b == b"Bearer secret" for _a, b in calls)
+
+
+def test_compare_digest_called_even_with_empty_header(monkeypatch):
+    """compare_digest must run on every gated request, even when no
+    Authorization header is sent. Skipping the call when the header is
+    empty leaks "key not provided" vs "key wrong" as a timing oracle.
+    """
+    import app.core.bearer as bearer
+
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    calls: list[tuple[bytes, bytes]] = []
+    real = bearer.hmac.compare_digest
+
+    def spy(a, b):
+        calls.append((a, b))
+        return real(a, b)
+
+    monkeypatch.setattr(bearer.hmac, "compare_digest", spy)
+
+    r = TestClient(app).get("/api/contacts")  # no Authorization header
+    assert r.status_code == 401
+    assert calls, "compare_digest must run even with empty header"
+
+
+def test_compare_digest_called_for_auth_info_with_empty_header(monkeypatch):
+    """`/api/auth/info` is middleware-exempt — it does its own bearer
+    check. That check must also be unconditional to avoid the same
+    timing oracle on the login-gate probe."""
+    import app.core.bearer as bearer
+
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    calls: list[tuple[bytes, bytes]] = []
+    real = bearer.hmac.compare_digest
+
+    def spy(a, b):
+        calls.append((a, b))
+        return real(a, b)
+
+    monkeypatch.setattr(bearer.hmac, "compare_digest", spy)
+
+    r = TestClient(app).get("/api/auth/info")
+    assert r.status_code == 200
+    assert r.json()["valid"] is False
+    assert calls, "compare_digest must run on /api/auth/info even with empty header"
+
+
+def test_ws_compare_digest_called_with_empty_credentials(monkeypatch):
+    """WS auth must run compare_digest even when neither Authorization
+    header nor ?token= query is present, for both bearer and raw-token
+    code paths."""
+    from starlette.websockets import WebSocketDisconnect
+
+    import app.core.bearer as bearer
+
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    calls: list[tuple[bytes, bytes]] = []
+    real = bearer.hmac.compare_digest
+
+    def spy(a, b):
+        calls.append((a, b))
+        return real(a, b)
+
+    monkeypatch.setattr(bearer.hmac, "compare_digest", spy)
+
+    with pytest.raises(WebSocketDisconnect):
+        with TestClient(app).websocket_connect("/ws") as ws:
+            ws.receive_json()
+    assert calls, "compare_digest must run on /ws even with no credentials"

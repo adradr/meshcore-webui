@@ -424,6 +424,80 @@ async def test_contacts_stats_aggregates_per_pubkey(client, db):
     assert _naive(dt.datetime.fromisoformat(b["last_msg_at"])) == _naive(b_only)
 
 
+# ----- pubkey path validation (security hardening) -----
+#
+# Every route under /api/contacts/{pubkey}/... must reject malformed pubkeys
+# with a 422 BEFORE the MeshCore dependency runs. Without this, garbage
+# input flows to the lib and surfaces as 502/503/504 — masking the real
+# client-side error.
+#
+# All routes are exercised against a known-bad pubkey ("garbage") AND a
+# matrix of length/charset edge cases.
+
+_BAD_PUBKEY_ROUTES = [
+    ("GET",    "/api/contacts/{pk}/share"),
+    ("DELETE", "/api/contacts/{pk}"),
+    ("PATCH",  "/api/contacts/{pk}/flags"),
+    ("POST",   "/api/contacts/{pk}/telemetry"),
+    ("POST",   "/api/contacts/{pk}/ping"),
+    ("POST",   "/api/contacts/{pk}/acl"),
+    ("POST",   "/api/contacts/{pk}/path/discover"),
+    ("POST",   "/api/contacts/{pk}/path/reset"),
+]
+
+
+@pytest.mark.parametrize("method,path_tmpl", _BAD_PUBKEY_ROUTES)
+@pytest.mark.asyncio
+async def test_contacts_reject_garbage_pubkey(client, method, path_tmpl):
+    """Each pubkey-bearing route returns 422 for an obviously bad pubkey."""
+    # Install a mock client so a missing-client 503 can't mask the 422.
+    _install_mock_client()
+    try:
+        path = path_tmpl.format(pk="garbage")
+        # PATCH /flags accepts a JSON body — provide an empty one.
+        kwargs = {"json": {}} if method == "PATCH" else {}
+        r = await client.request(method, path, **kwargs)
+        assert r.status_code == 422, f"{method} {path} → {r.status_code}: {r.text}"
+    finally:
+        _uninstall_mock_client()
+
+
+@pytest.mark.parametrize("bad", [
+    "zz" + "f" * 62,         # non-hex characters
+    "ff" * 31 + "f",         # 63 chars (one short)
+    "FF" * 32 + "00",        # 66 chars (two long)
+    "",                      # empty (matches GET / route, not / DELETE — covered separately)
+    "g" * 64,                # 64 chars but non-hex
+])
+@pytest.mark.asyncio
+async def test_contacts_reject_wrong_length_or_non_hex(client, bad):
+    """DELETE /api/contacts/{pubkey} rejects every malformed shape with 422.
+
+    Skip empty string because it collapses to /api/contacts which is a
+    different route.
+    """
+    if not bad:
+        return
+    _install_mock_client()
+    try:
+        r = await client.delete(f"/api/contacts/{bad}")
+        assert r.status_code == 422, f"DELETE /api/contacts/{bad!r} → {r.status_code}"
+    finally:
+        _uninstall_mock_client()
+
+
+@pytest.mark.asyncio
+async def test_contacts_accept_uppercase_pubkey(client):
+    """Uppercase hex must still be accepted (the pattern allows [0-9a-fA-F])."""
+    mc = _install_mock_client()
+    mc.remove_contact = AsyncMock(return_value=None)
+    try:
+        r = await client.delete(f"/api/contacts/{PK.upper()}")
+        assert r.status_code == 204
+    finally:
+        _uninstall_mock_client()
+
+
 @pytest.mark.asyncio
 async def test_contacts_stats_excludes_channel_messages(client, db):
     """Channel messages (contact_pub_key=NULL) must NOT appear in the map."""

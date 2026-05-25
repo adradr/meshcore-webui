@@ -13,6 +13,7 @@ import { PageHeader } from "@/components/page-header"
 import { useTheme, type Theme } from "@/components/theme-provider"
 import { cn } from "@/lib/utils"
 import { notifyError } from "@/lib/notify"
+import { setApiKey as persistApiKey } from "@/lib/api"
 import { PWAInstallPrompt } from "@/pwa/PWAInstallPrompt"
 import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
 import { useHaptic } from "@/haptics/HapticProvider"
@@ -78,9 +79,10 @@ export function SettingsPage() {
   }
 
   const saveApiKey = () => {
-    if (apiKey) localStorage.setItem("apiKey", apiKey)
-    else localStorage.removeItem("apiKey")
-    toast.success("API key saved — reload to apply")
+    // Canonical setter — dispatches `apikeychange` so the WS hot-reloads
+    // with the new token, no full page reload needed.
+    persistApiKey(apiKey ? apiKey : null)
+    toast.success("API key saved")
   }
 
   return (

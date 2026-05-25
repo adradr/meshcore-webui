@@ -17,7 +17,8 @@ dependencies = [
   "meshcore>=2.3.7",
   "python-multipart>=0.0.9",
   "httpx>=0.27",
-  "Pillow>=10.4,<12",
+  "Pillow>=12.2,<13",
+  "starlette>=1.0.1",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +29,7 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.10",
   "freezegun>=1.5",
+  "pip-audit>=2.7",
 ]
 
 [build-system]

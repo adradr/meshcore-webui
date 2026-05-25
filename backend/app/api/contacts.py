@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,17 @@ from app.db.session import get_db
 from app.schemas.contacts import ContactImportIn, FlagsIn
 
 router = APIRouter(prefix="/api/contacts", tags=["contacts"])
+
+# 32-byte Ed25519 pubkey rendered as 64 hex chars (either case).
+# Validated at the Path layer so malformed pubkeys yield a 422 *before*
+# the MeshCore dependency runs — otherwise garbage input would propagate
+# to the radio layer and surface as 502/503/504, masking the real
+# client-side error. Mirrors `_PUBKEY_PATTERN` in `app/api/trace.py`.
+_PUBKEY_PATH = Path(
+    ...,
+    pattern=r"^[0-9a-fA-F]{64}$",
+    description="32-byte hex pubkey (64 chars, case-insensitive).",
+)
 
 
 # MeshCore contact flag bits (from change_flags in meshcore-cli):
@@ -102,20 +113,24 @@ async def import_contact(payload: ContactImportIn, request: Request) -> dict:
 
 
 @router.get("/{pubkey}/share")
-async def share_contact(pubkey: str, request: Request) -> dict:
+async def share_contact(request: Request, pubkey: str = _PUBKEY_PATH) -> dict:
     client = _require_client(request)
     return await _call(client.share_contact(pubkey))
 
 
 @router.delete("/{pubkey}", status_code=204)
-async def delete_contact(pubkey: str, request: Request) -> Response:
+async def delete_contact(request: Request, pubkey: str = _PUBKEY_PATH) -> Response:
     client = _require_client(request)
     await _call(client.remove_contact(pubkey))
     return Response(status_code=204)
 
 
 @router.patch("/{pubkey}/flags")
-async def patch_flags(pubkey: str, payload: FlagsIn, request: Request) -> dict:
+async def patch_flags(
+    payload: FlagsIn,
+    request: Request,
+    pubkey: str = _PUBKEY_PATH,
+) -> dict:
     """Compute the raw flags byte from the booleans and forward."""
     client = _require_client(request)
     flags = 0
@@ -130,13 +145,13 @@ async def patch_flags(pubkey: str, payload: FlagsIn, request: Request) -> dict:
 
 
 @router.post("/{pubkey}/telemetry")
-async def telemetry(pubkey: str, request: Request) -> dict:
+async def telemetry(request: Request, pubkey: str = _PUBKEY_PATH) -> dict:
     client = _require_client(request)
     return await _call(client.req_telemetry(pubkey))
 
 
 @router.post("/{pubkey}/ping")
-async def ping(pubkey: str, request: Request) -> dict:
+async def ping(request: Request, pubkey: str = _PUBKEY_PATH) -> dict:
     """Ping a peer the way the official MeshCore app does it.
 
     Implemented as a *directed trace*: look up the peer's advert path,
@@ -161,19 +176,19 @@ async def ping(pubkey: str, request: Request) -> dict:
 
 
 @router.post("/{pubkey}/acl")
-async def acl(pubkey: str, request: Request) -> dict:
+async def acl(request: Request, pubkey: str = _PUBKEY_PATH) -> dict:
     client = _require_client(request)
     return await _call(client.req_acl(pubkey))
 
 
 @router.post("/{pubkey}/path/discover")
-async def discover_path(pubkey: str, request: Request) -> dict:
+async def discover_path(request: Request, pubkey: str = _PUBKEY_PATH) -> dict:
     client = _require_client(request)
     return await _call(client.disc_path(pubkey))
 
 
 @router.post("/{pubkey}/path/reset", status_code=204)
-async def reset_path(pubkey: str, request: Request) -> Response:
+async def reset_path(request: Request, pubkey: str = _PUBKEY_PATH) -> Response:
     client = _require_client(request)
     await _call(client.reset_path(pubkey))
     return Response(status_code=204)

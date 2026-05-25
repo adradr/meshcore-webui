@@ -6,9 +6,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app.api.admin import router as admin_router
 from app.api.attachments import router as attachments_router
@@ -29,11 +30,13 @@ from app.api.trace import router as trace_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
-from app.core.vapid import load_vapid
+from app.core.logging_filters import SensitiveQueryFilter
+from app.core.vapid import VapidLoadError, load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
 from app.middleware.api_key import APIKeyMiddleware
 from app.middleware.attachment_rate_limit import AttachmentRateLimitMiddleware
+from app.middleware.auth_rate_limit import AuthRateLimitMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
 from app.services.elevation import ElevationProvider
@@ -90,6 +93,16 @@ def _configure_logging() -> None:
         if handler not in meshcore_logger.handlers:
             meshcore_logger.addHandler(handler)
         meshcore_logger.propagate = "pytest" in sys.modules
+
+    # Attach the sensitive-query-param redactor to every logger that can
+    # surface request URLs. Filters bound to a logger only run for records
+    # emitted by that logger (not parent/child), so we explicitly cover each
+    # named source: our own app + audit channels and uvicorn's access/error.
+    redactor = SensitiveQueryFilter()
+    for name in ("uvicorn.access", "uvicorn.error", "app", "app.audit"):
+        logger = logging.getLogger(name)
+        if not any(isinstance(f, SensitiveQueryFilter) for f in logger.filters):
+            logger.addFilter(redactor)
 
 
 _configure_logging()
@@ -191,7 +204,11 @@ async def lifespan(app: FastAPI):
     await _ensure_schema()
 
     log.info("Loading VAPID")
-    vapid = load_vapid(settings.vapid_private_key_path)
+    try:
+        vapid = load_vapid(settings.vapid_private_key_path)
+    except VapidLoadError as e:
+        log.error("VAPID load failed: %s", e)
+        raise
     sender = PushSender(vapid=vapid, subject=settings.vapid_subject)
     pool = TaskPool()
 
@@ -330,7 +347,17 @@ def create_app() -> FastAPI:
     # SecurityHeaders. The middleware receives callables for caps so a
     # test (or future hot-reload) bumping `settings.attachments_rate_*`
     # is reflected on the next request without rebuilding the app.
+    #
+    # AuthRateLimit sits BETWEEN AttachmentRateLimit and APIKey: it must
+    # be OUTSIDE APIKeyMiddleware so it can see the 401 status APIKey
+    # emits on a wrong bearer (count failures), and INSIDE RequestAudit
+    # so a 429 short-circuit is still audited.
     app.add_middleware(APIKeyMiddleware)
+    app.add_middleware(
+        AuthRateLimitMiddleware,
+        per_min=lambda: settings.auth_rate_per_min,
+        trust_x_forwarded_for=lambda: settings.trusted_proxy,
+    )
     app.add_middleware(
         AttachmentRateLimitMiddleware,
         per_min=lambda: settings.attachments_rate_per_min,
@@ -343,6 +370,49 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/health/deep")
+    async def health_deep(request: Request):
+        """Deep readiness probe for orchestrators / monitoring.
+
+        Reports:
+        * ``radio`` — whether the MeshCore companion TCP socket is up.
+          Informational only: a disconnected radio doesn't fail this
+          probe (the supervisor will reconnect on its own; failing the
+          probe would just restart the container in a loop).
+        * ``db``    — cheap ``SELECT 1`` against the SQLite file. The
+          ONLY field that affects the HTTP status: 200 when "ok", 503
+          when the query raised.
+        * ``vapid`` — whether the VAPID keypair finished loading at
+          startup. Informational: a missing key means push notifications
+          are broken, but the rest of the app still works.
+
+        Stays on the API-key exempt list so k8s / Uptime-Kuma probes
+        can call it without carrying a bearer token (same rationale as
+        the shallow ``/api/health``).
+        """
+        state = request.app.state
+        client = getattr(state, "meshcore_client", None)
+        radio_up = client is not None and client.is_radio_connected()
+        radio = "connected" if radio_up else "disconnected"
+
+        db_ok = True
+        try:
+            async with SessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception:
+            db_ok = False
+
+        vapid_loaded = getattr(state, "push_sender", None) is not None
+
+        body = {
+            "radio": radio,
+            "db": "ok" if db_ok else "error",
+            "vapid": "loaded" if vapid_loaded else "missing",
+        }
+        if not db_ok:
+            return JSONResponse(body, status_code=503)
+        return body
 
     app.include_router(auth_router)
     app.include_router(push_router)

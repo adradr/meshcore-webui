@@ -1,3 +1,5 @@
+import pathlib
+
 from app.core.config import Settings
 
 
@@ -82,3 +84,102 @@ def test_attachments_env_overrides(monkeypatch):
     assert s.attachments_quota_bytes == 500_000_000
     assert s.attachments_rate_per_min == 30
     assert s.trusted_proxy is True
+
+
+def test_api_key_file_loads_when_env_var_unset(monkeypatch, tmp_path):
+    """Settings should read MESHCORE_WEBUI_API_KEY_FILE when the env var
+    is absent — the Docker-secret deployment pattern."""
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    p = tmp_path / "api_key.txt"
+    p.write_text("from-the-file\n")  # trailing newline must be stripped
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key == "from-the-file"
+
+
+def test_api_key_env_wins_over_file(monkeypatch, tmp_path):
+    """If MESHCORE_WEBUI_API_KEY is set, the file fallback is ignored.
+    Operators migrating to Docker secrets can leave the env var temporarily."""
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY", "env-key")
+    p = tmp_path / "api_key.txt"
+    p.write_text("file-key")
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key == "env-key"
+
+
+def test_api_key_file_missing_path_raises(monkeypatch, tmp_path):
+    """A misconfigured MESHCORE_WEBUI_API_KEY_FILE (path doesn't exist) must
+    fail loud at startup. Silently treating it as "no auth" would be a
+    severe security footgun."""
+    import pytest
+
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "MESHCORE_WEBUI_API_KEY_FILE", str(tmp_path / "does-not-exist.txt"),
+    )
+    with pytest.raises(ValueError, match="cannot read MESHCORE_WEBUI_API_KEY_FILE"):
+        Settings(_env_file=None)
+
+
+def test_api_key_file_empty_content_yields_no_key(monkeypatch, tmp_path):
+    """An empty or whitespace-only secret file is treated as "no key" —
+    same semantics as leaving the env var unset. Prevents a leftover empty
+    secret from authenticating as the literal "Bearer " header (the empty-
+    string env-var path is already blocked by `min_length=1` on the field)."""
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    p = tmp_path / "api_key.txt"
+    p.write_text("   \n")
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key is None
+
+
+def test_dockerfile_does_not_baked_in_proxy_trust():
+    """The runtime image must not unconditionally trust X-Forwarded-* from any client.
+    Operators behind a real proxy can re-enable via UVICORN_FORWARDED_ALLOW_IPS."""
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert "--forwarded-allow-ips=*" not in text
+    assert "--proxy-headers" not in text  # default off; operators opt in via env
+
+
+def test_dockerfile_runs_as_non_root():
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert "useradd" in text or "adduser" in text, "no non-root user created"
+    assert "\nUSER " in text or text.startswith("USER "), "no USER directive"
+    assert "USER root" not in text, "USER root must not appear"
+
+
+def test_dockerfile_base_images_pinned_by_digest():
+    """Every FROM line referencing an external image must include a @sha256: digest.
+
+    Floating tags like `python:3.12-slim` can resolve to a different image after
+    a CI cache miss; pinning by digest makes builds reproducible.
+    """
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("FROM "):
+            continue
+        # `FROM <image>[:tag][@digest] [AS stage]`
+        tokens = s.split()
+        if len(tokens) < 2:
+            continue
+        img = tokens[1]
+        # Stage references like `FROM frontend-builder` have no tag/digest and no colon.
+        if ":" not in img:
+            continue
+        assert "@sha256:" in img, f"unpinned FROM line: {line!r}"
+
+
+def test_dockerfile_removes_pip_after_install():
+    """pip / setuptools / wheel must be stripped from the runtime image so a
+    runtime process that obtains a shell can't install arbitrary packages."""
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    assert ("uv pip uninstall" in text) or ("pip uninstall" in text), (
+        "Dockerfile must remove pip/setuptools/wheel from the runtime image"
+    )

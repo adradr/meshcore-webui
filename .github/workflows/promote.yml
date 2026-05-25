@@ -1,0 +1,29 @@
+name: Promote to latest
+on:
+  workflow_dispatch:
+    inputs:
+      digest:
+        description: "Image digest to promote (sha256:...)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag :latest
+        run: |
+          docker buildx imagetools create \
+            --tag ghcr.io/${{ github.repository_owner }}/meshcore-webui:latest \
+            ghcr.io/${{ github.repository_owner }}/meshcore-webui@${{ inputs.digest }}

@@ -1,9 +1,31 @@
 services:
   meshcore-webui:
-    image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:latest
+    image: meshcore-webui:dev  # locally built; for prod use ghcr.io/<user>/meshcore-webui:edge
     restart: unless-stopped
+    # Defence-in-depth runtime caps. Combined with the non-root `USER` in the
+    # Dockerfile these shrink the blast radius of a compromised process:
+    #   - mem/cpu/pids: bound resource exhaustion (DoS, fork-bomb).
+    #   - no-new-privileges: refuse setuid escalation inside the container.
+    #   - cap_drop ALL: the app needs no Linux capabilities (it binds an
+    #     unprivileged port and never raises privileges).
+    #   - read_only + tmpfs /tmp: writable state is restricted to the
+    #     bind-mounted /data volume (SQLite + attachments) and an in-memory
+    #     /tmp for transient files (e.g. tempfile.NamedTemporaryFile).
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: "1.0"
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     ports:
-      - "8080:8080"
+      # Loopback-only by default. Change to "8080:8080" (or "0.0.0.0:8080:8080")
+      # for direct LAN access without a reverse proxy.
+      - "127.0.0.1:8080:8080"
     environment:
       # Default is the LilyGo T3-S3 WiFi-firmware default AP address.
       # Set to your device's actual LAN IP.
@@ -16,7 +38,21 @@ services:
       # Generate a long random secret: `openssl rand -hex 32`
       # Note: do NOT set this to an empty string — the backend rejects empty
       # values at startup. Either set a real secret, or leave the line absent.
+      #
+      # Alternative (recommended for production): write the key to
+      # `./secrets/api_key.txt` and uncomment both the
+      # `MESHCORE_WEBUI_API_KEY_FILE` entry and the `secrets:` stanzas below.
+      # The backend reads `MESHCORE_WEBUI_API_KEY_FILE` when the env var is
+      # unset, so the secret never appears in `docker inspect` or the
+      # container's environ.
       MESHCORE_WEBUI_API_KEY: "REPLACE_ME_WITH_openssl_rand_hex_32"
+      # MESHCORE_WEBUI_API_KEY_FILE: /run/secrets/meshcore_api_key
     volumes:
       - ./data:/data
       - ./secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
+    # secrets:
+    #   - meshcore_api_key
+#
+# secrets:
+#   meshcore_api_key:
+#     file: ./secrets/api_key.txt

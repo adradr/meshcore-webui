@@ -117,6 +117,50 @@ async def test_elevation_raises_on_non_2xx():
 
 
 @pytest.mark.asyncio
+async def test_elevation_error_does_not_leak_upstream_body(caplog):
+    """A 5xx from the upstream must not surface the raw response body in the
+    ElevationLookupError. The body may contain sensitive content (internal
+    hostnames, stack traces, error pages) if the operator ever points the
+    elevation URL at an internal service. The body should still be logged at
+    DEBUG for operator forensics, just not propagated up the exception chain
+    (which becomes the 502 ``detail`` returned to the LoS endpoint caller).
+    """
+    import logging
+
+    sensitive_body = (
+        '{"error": "internal stack trace at /opt/secret-service: '
+        "InternalHostname=db-prod-01.internal exception=AuthFailure}"
+    )
+
+    async def handler(req):
+        return httpx.Response(500, text=sensitive_body)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        provider = ElevationProvider("http://x/v1", "srtm30m", client, rate_limit_s=0)
+        with caplog.at_level(logging.DEBUG, logger="app.elevation"):
+            with pytest.raises(ElevationLookupError) as exc:
+                await provider.lookup([(0.0, 0.0)])
+
+    msg = str(exc.value)
+    # Status code is still surfaced — it's safe to share.
+    assert "500" in msg
+    # But none of the body content leaks into the exception message.
+    assert "internal" not in msg.lower()
+    assert "stack" not in msg.lower()
+    assert "secret-service" not in msg
+    assert "db-prod-01" not in msg
+    assert "AuthFailure" not in msg
+    # The body IS recorded at DEBUG so operators can still investigate via logs.
+    debug_records = [
+        r for r in caplog.records if r.levelno == logging.DEBUG
+    ]
+    assert any("secret-service" in r.getMessage() for r in debug_records), (
+        "expected upstream body to be logged at DEBUG for operator forensics"
+    )
+
+
+@pytest.mark.asyncio
 async def test_elevation_rate_limit_does_not_serialize_concurrent_requests_into_waiting():
     """Two concurrent ``.lookup()`` calls should complete close to back-to-back.
 

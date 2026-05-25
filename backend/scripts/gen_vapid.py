@@ -8,6 +8,7 @@ Writes:
 """
 from __future__ import annotations
 import base64
+import os
 import sys
 from pathlib import Path
 
@@ -24,6 +25,9 @@ def generate(out_dir: Path) -> tuple[Path, str]:
     public_pem = out_dir / "vapid_public.pem"
     vapid.save_key(str(private_pem))
     vapid.save_public_key(str(public_pem))
+    # Lock down the private PEM so load_vapid() accepts it (fail-closed on 0o077).
+    if os.name == "posix":
+        os.chmod(private_pem, 0o600)
 
     raw_pub = vapid.public_key.public_bytes(
         encoding=Encoding.X962,

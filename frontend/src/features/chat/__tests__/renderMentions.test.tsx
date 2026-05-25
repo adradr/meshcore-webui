@@ -30,6 +30,15 @@ describe("renderMentions", () => {
     expect(anchors[0].getAttribute("target")).toBe("_blank")
   })
 
+  it("auto-link uses noopener noreferrer", () => {
+    const nodes = renderMentions("see https://example.com", contacts)
+    const { container } = rtl(nodes)
+    const a = container.querySelector("a[href='https://example.com']")!
+    expect(a).toBeTruthy()
+    expect(a.getAttribute("rel")).toBe("noopener noreferrer")
+    expect(a.getAttribute("target")).toBe("_blank")
+  })
+
   it("renders a mention link for known contact", () => {
     const nodes = renderMentions("@Alice hi", contacts)
     const { container } = rtl(nodes)

@@ -1,11 +1,16 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
+import { resolveTargetUrl } from "./resolveTargetUrl"
+import { installSkipWaitingGate } from "./skipWaitingGate"
+import { stashPendingResubscribe } from "./pendingResubscribe"
 
 declare const self: ServiceWorkerGlobalScope
 
-// Take control on next reload after install
-self.skipWaiting()
+// Defer skipWaiting() until the page posts {type: "SKIP_WAITING"} after the
+// user clicks the reload prompt. This avoids silently swapping the SW under
+// every open tab when an update lands.
+installSkipWaitingGate(self)
 clientsClaim()
 
 cleanupOutdatedCaches()
@@ -45,8 +50,10 @@ self.addEventListener("push", (event: PushEvent) => {
 // ---- Notification click ----
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close()
-  const targetUrl =
-    (event.notification.data && event.notification.data.url) || "/"
+  const targetUrl = resolveTargetUrl(
+    event.notification.data?.url,
+    self.location.origin,
+  )
 
   event.waitUntil(
     (async () => {
@@ -70,9 +77,52 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
 })
 
 // ---- Push subscription change (re-subscribe) ----
+//
+// The browser fires `pushsubscriptionchange` when it rotates the push
+// endpoint (Firefox after a long offline period; Chrome after server-side
+// key invalidation). The SW cannot read the API bearer token from
+// `localStorage`, so a direct `fetch("/api/push/resubscribe")` would 401
+// against any deployment with auth enabled — that's a silent push outage.
+//
+// Bridge: forward the rotation to any open client via `postMessage`. The
+// page (which has the bearer token) POSTs the resubscribe. If no client
+// is open, stash the payload in IndexedDB; the next mounted page drains
+// it. The SW never touches the API directly.
 interface PushSubscriptionChangeEvent extends ExtendableEvent {
   readonly oldSubscription: PushSubscription | null
   readonly newSubscription: PushSubscription | null
+}
+
+export interface PushResubscribePayload {
+  old_endpoint: string
+  new: {
+    endpoint: string
+    keys: { p256dh: string; auth: string }
+    expirationTime: number | null
+  }
+}
+
+export const PUSH_RESUBSCRIBE_MSG = "PUSH_RESUBSCRIBE" as const
+
+function subscriptionToPayload(
+  sub: PushSubscription,
+): PushResubscribePayload["new"] {
+  // `PushSubscription.toJSON()` returns the canonical wire shape but its
+  // typing is `unknown`-ish across browsers. Reproduce it explicitly so
+  // the bridge boundary stays type-safe.
+  const json = sub.toJSON() as {
+    endpoint?: string
+    expirationTime?: number | null
+    keys?: { p256dh?: string; auth?: string }
+  }
+  return {
+    endpoint: json.endpoint ?? sub.endpoint,
+    keys: {
+      p256dh: json.keys?.p256dh ?? "",
+      auth: json.keys?.auth ?? "",
+    },
+    expirationTime: json.expirationTime ?? null,
+  }
 }
 
 self.addEventListener("pushsubscriptionchange", ((
@@ -84,18 +134,27 @@ self.addEventListener("pushsubscriptionchange", ((
         const oldSub = event.oldSubscription
         const applicationServerKey =
           oldSub?.options.applicationServerKey ?? undefined
-        const newSub = await self.registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: applicationServerKey ?? undefined,
+        const newSub =
+          event.newSubscription ??
+          (await self.registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: applicationServerKey ?? undefined,
+          }))
+        const payload: PushResubscribePayload = {
+          old_endpoint: oldSub?.endpoint ?? "",
+          new: subscriptionToPayload(newSub),
+        }
+        const clients = await self.clients.matchAll({
+          includeUncontrolled: true,
+          type: "window",
         })
-        await fetch("/api/push/resubscribe", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            old: oldSub?.toJSON() ?? null,
-            new: newSub.toJSON(),
-          }),
-        })
+        if (clients.length > 0) {
+          for (const c of clients) {
+            c.postMessage({ type: PUSH_RESUBSCRIBE_MSG, payload })
+          }
+        } else {
+          await stashPendingResubscribe(payload)
+        }
       } catch (err) {
         console.error("[sw] resubscribe failed", err)
       }

@@ -8,17 +8,13 @@ interface Props {
 export function AuthGate({ children }: Props) {
   const { data, isLoading, isError } = useAuthInfo()
 
-  // During the very first fetch we don't know if we need a login screen.
-  // Render nothing (no flash) — the query resolves in milliseconds. If we
-  // rendered children eagerly we'd briefly show the app, then snap to the
-  // login screen, which is a worse UX than a blank frame.
-  if (isLoading) return null
-
-  // Network failure / non-2xx on /api/auth/info itself: degrade gracefully
-  // by showing the children (no gate). The middleware will 401 individual
-  // calls if a key is actually required — the existing notifyError mapping
-  // ("API key missing or invalid — check Settings") handles that.
-  if (isError || !data) return <>{children}</>
+  // Hold the UI shell while auth status is unknown — either during the
+  // initial fetch or on a transient /api/auth/info failure (network blip,
+  // captive portal, 5xx). Rendering children eagerly would briefly show
+  // the full app before the middleware 401s individual calls, which is
+  // both a confusing UX and a small captive-portal-style attack window.
+  // The query resolves in milliseconds, so a blank frame is fine.
+  if (isLoading || isError || !data) return null
 
   if (data.required && !data.valid) {
     return <LoginPage />

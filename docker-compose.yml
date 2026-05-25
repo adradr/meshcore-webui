@@ -1,6 +1,6 @@
 services:
   meshcore-webui:
-    image: ghcr.io/adradr/meshcore-webui:latest
+    image: ghcr.io/adradr/meshcore-webui:edge
     # `docker compose pull` fetches the CI-built image from GHCR. The `build:`
     # block below is retained so `docker compose build` still works for local
     # development (it tags the same image name and overrides the pulled one).
@@ -10,17 +10,47 @@ services:
         VITE_VAPID_PUBLIC_KEY: "${VITE_VAPID_PUBLIC_KEY:-}"
     container_name: meshcore-webui
     restart: unless-stopped
+    # Defence-in-depth runtime caps. Combined with the non-root `USER` in the
+    # Dockerfile these shrink the blast radius of a compromised process:
+    #   - mem/cpu/pids: bound resource exhaustion (DoS, fork-bomb).
+    #   - no-new-privileges: refuse setuid escalation inside the container.
+    #   - cap_drop ALL: the app needs no Linux capabilities (it binds an
+    #     unprivileged port and never raises privileges).
+    #   - read_only + tmpfs /tmp: writable state is restricted to the
+    #     bind-mounted /data volume (SQLite + attachments) and an in-memory
+    #     /tmp for transient files (e.g. tempfile.NamedTemporaryFile).
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: "1.0"
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     ports:
-      - "8090:8080"   # host 8080 is taken by kubectl; using 8090
+      # Loopback-only by default. Change to "8090:8080" (or "0.0.0.0:8090:8080")
+      # for direct LAN access without a reverse proxy.
+      - "127.0.0.1:8090:8080"
     environment:
       # Point at your MeshCore device's TCP companion port.
       # `192.168.4.1:5000` is the default for the LilyGo T3-S3 WiFi firmware.
       MESHCORE_HOST: "${MESHCORE_HOST:-192.168.4.1}"
       MESHCORE_PORT: "${MESHCORE_PORT:-5000}"
-      VAPID_SUBJECT: mailto:adr@example.com
+      # Web Push abuse-contact email. Some push services log this — set a real address in .env.
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
       # Read from .env (gitignored). To run without auth, remove this line or
       # leave MESHCORE_WEBUI_API_KEY empty in .env.
+      #
+      # Alternative (recommended for production): write the key to
+      # `./secrets/api_key.txt` and uncomment both the `MESHCORE_WEBUI_API_KEY_FILE`
+      # env entry and the `secrets:` stanzas below. The backend reads
+      # `MESHCORE_WEBUI_API_KEY_FILE` when the env var is unset, so the secret
+      # never appears in `docker inspect` or the container's environ.
       MESHCORE_WEBUI_API_KEY: "${MESHCORE_WEBUI_API_KEY:-}"
+      # MESHCORE_WEBUI_API_KEY_FILE: /run/secrets/meshcore_api_key
       # Public base URL for shared image links. REQUIRED for the
       # attachment-sharing feature to work. Must match where your
       # reverse proxy serves the app from the outside world.
@@ -40,3 +70,9 @@ services:
     volumes:
       - ./data:/data
       - ./backend/secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
+    # secrets:
+    #   - meshcore_api_key
+#
+# secrets:
+#   meshcore_api_key:
+#     file: ./secrets/api_key.txt

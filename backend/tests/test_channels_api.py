@@ -173,6 +173,37 @@ async def test_post_channel_422_on_bad_psk_hex(client):
 
 
 @pytest.mark.asyncio
+async def test_post_channel_422_idx_above_firmware_ceiling(client):
+    """idx > 255 exceeds the firmware channel-slot range and must be rejected."""
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_channel = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/channels",
+            json={"idx": 65535, "name": "x"},
+        )
+        assert r.status_code == 422
+        app.state.meshcore_client.set_channel.assert_not_called()
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_post_channel_422_idx_just_above_ceiling(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.set_channel = AsyncMock(return_value=None)
+    try:
+        r = await client.post(
+            "/api/channels",
+            json={"idx": 256, "name": "x"},
+        )
+        assert r.status_code == 422
+        app.state.meshcore_client.set_channel.assert_not_called()
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
 async def test_post_channel_503_on_connection_error(client):
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.set_channel = AsyncMock(

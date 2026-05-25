@@ -80,13 +80,29 @@ describe("AuthGate", () => {
     expect(container.firstChild).toBeNull()
   })
 
-  it("renders children on isError (graceful degradation)", () => {
+  it("does not render children when /api/auth/info errors (fail-closed)", () => {
     mockAuth({ isError: true })
-    render(
+    const { container } = render(
       <AuthGate>
         <div data-testid="app">app</div>
       </AuthGate>,
     )
-    expect(screen.getByTestId("app")).toBeInTheDocument()
+    // Holding the UI shell while auth status is unknown avoids a brief
+    // flash of the full app on a transient /api/auth/info failure (e.g.
+    // captive portal) before the middleware 401s individual calls.
+    expect(screen.queryByTestId("app")).toBeNull()
+    expect(screen.queryByRole("button")).toBeNull()
+    expect(container.firstChild).toBeNull()
+  })
+
+  it("does not render children when data is missing", () => {
+    mockAuth({ data: undefined })
+    const { container } = render(
+      <AuthGate>
+        <div data-testid="app">app</div>
+      </AuthGate>,
+    )
+    expect(screen.queryByTestId("app")).toBeNull()
+    expect(container.firstChild).toBeNull()
   })
 })

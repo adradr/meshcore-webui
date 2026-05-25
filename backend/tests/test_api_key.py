@@ -60,3 +60,22 @@ async def test_public_attachment_paths_are_exempt_from_api_key(
     # Whatever the response (404/410/500), it must not be 401 — the
     # api-key middleware must let the request through to the handler.
     assert r.status_code != 401
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+@pytest.mark.asyncio
+async def test_docs_routes_require_api_key_when_configured(client, monkeypatch, path):
+    """When MESHCORE_WEBUI_API_KEY is configured, FastAPI's built-in docs routes
+    must not be reachable without the bearer token."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    r = await client.get(path)
+    assert r.status_code == 401, f"{path} returned {r.status_code}"
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+@pytest.mark.asyncio
+async def test_docs_routes_open_when_no_key(client, monkeypatch, path):
+    """Without a key configured, the docs remain reachable (open-LAN mode)."""
+    monkeypatch.setattr("app.core.config.settings.api_key", None)
+    r = await client.get(path)
+    assert r.status_code == 200

@@ -47,11 +47,14 @@ class SelfInfo(BaseModel):
     """Complete ``SELF_INFO`` payload from the firmware.
 
     Mirrors the meshcore lib's ``reader.py`` parser for ``PacketType.SELF_INFO``.
-    ``extra="allow"`` lets newer firmware fields flow through without a
-    schema bump (informational OpenAPI only — callers see the documented
-    fields as required keys).
+    ``extra="ignore"`` is a deliberate **closed allowlist**: a newer firmware
+    build (or the lib's reader) could surface fields we never reviewed —
+    private keying material, internal memory offsets, debugging counters,
+    PII — and forwarding those unreviewed bytes to every API caller is a
+    leak waiting to happen. When firmware adds a new field the UI needs,
+    we add it here explicitly and bump the schema.
     """
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
 
     name: str
     public_key: str
@@ -140,10 +143,12 @@ async def get_info(request: Request) -> dict:
 async def get_self_info(request: Request) -> dict:
     """Return the complete ``SELF_INFO`` payload from the firmware.
 
-    Documents every field the meshcore lib parses out of the
-    ``PacketType.SELF_INFO`` frame (see ``meshcore/reader.py``). Unknown
-    extra fields (e.g. introduced by a newer firmware build) flow through
-    unchanged via ``SelfInfo.model_config["extra"] = "allow"``.
+    The response is filtered through ``SelfInfo`` — a **closed allowlist**
+    of every field the meshcore lib's reader is known to expose
+    (``meshcore/reader.py``: ``PacketType.SELF_INFO``). Unknown fields
+    introduced by a newer firmware build are dropped (``extra="ignore"``)
+    so the API surface never leaks unreviewed bytes. When a new field is
+    needed by the UI, add it to ``SelfInfo`` explicitly.
     """
     client = getattr(request.app.state, "meshcore_client", None)
     if client is None:
