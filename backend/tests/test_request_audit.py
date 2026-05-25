@@ -151,6 +151,43 @@ def test_key_fingerprint_is_stable_and_short():
 
 
 @pytest.mark.asyncio
+async def test_audit_uses_xff_when_trusted_proxy(caplog, monkeypatch):
+    """When the operator has opted into `TRUSTED_PROXY=1`, audit lines
+    must show the original client IP from `X-Forwarded-For` — otherwise
+    every request is logged as coming from the reverse-proxy IP and the
+    audit stream is useless for forensics."""
+    monkeypatch.setattr("app.core.config.settings.trusted_proxy", True)
+    caplog.set_level(logging.INFO, logger="app.audit")
+    async with AsyncClient(
+        transport=ASGITransport(app=_app()), base_url="http://t",
+    ) as c:
+        await c.get(
+            "/api/echo",
+            headers={"X-Forwarded-For": "1.2.3.4, 10.0.0.1"},
+        )
+    audit_lines = [r.getMessage() for r in caplog.records if r.name == "app.audit"]
+    assert any("ip=1.2.3.4" in line for line in audit_lines), audit_lines
+
+
+@pytest.mark.asyncio
+async def test_audit_ignores_xff_when_not_trusted(caplog, monkeypatch):
+    """Without `TRUSTED_PROXY=1`, the XFF header is attacker-controlled
+    and must NOT be reflected into the audit stream — otherwise any
+    caller can spoof the recorded IP."""
+    monkeypatch.setattr("app.core.config.settings.trusted_proxy", False)
+    caplog.set_level(logging.INFO, logger="app.audit")
+    async with AsyncClient(
+        transport=ASGITransport(app=_app()), base_url="http://t",
+    ) as c:
+        await c.get(
+            "/api/echo",
+            headers={"X-Forwarded-For": "1.2.3.4"},
+        )
+    audit_lines = [r.getMessage() for r in caplog.records if r.name == "app.audit"]
+    assert not any("ip=1.2.3.4" in line for line in audit_lines), audit_lines
+
+
+@pytest.mark.asyncio
 async def test_request_id_strips_control_chars_and_caps_length(caplog):
     """A caller-supplied X-Request-ID must not be able to forge fake
     audit lines via newline injection or balloon the value with a

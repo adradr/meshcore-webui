@@ -9,6 +9,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from app.core.client_ip import resolve_client_ip
+from app.core.config import settings
+
 
 audit = logging.getLogger("app.audit")
 
@@ -63,7 +66,11 @@ class RequestAuditMiddleware(BaseHTTPMiddleware):
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             path = request.url.path
             method = request.method
-            ip = request.client.host if request.client else "-"
+            # Honour `X-Forwarded-For` only when the operator has flagged
+            # the deployment as sitting behind a trusted reverse proxy —
+            # otherwise the IP is attacker-supplied and would let any
+            # caller spoof their entry in the audit stream.
+            ip = resolve_client_ip(request, trust_xff=settings.trusted_proxy)
             auth = request.headers.get("authorization", "")
             key = auth[7:] if auth.startswith("Bearer ") else None
             key_fp = key_fingerprint(key)

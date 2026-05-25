@@ -6,6 +6,7 @@ from fastapi import Request
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.client_ip import resolve_client_ip
 from app.services.sliding_window import BoundedSlidingWindow, _now
 
 # Re-exported so test files that monkeypatch `mod._now` keep working without
@@ -164,11 +165,13 @@ class AttachmentRateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
     def _client_key(self, request: Request) -> str:
-        if self.trust_xff:
-            xff = request.headers.get("x-forwarded-for", "")
-            if xff:
-                return xff.split(",", 1)[0].strip()
-        return request.client.host if request.client else "unknown"
+        # Centralised in `app.core.client_ip` so audit logging and any
+        # future per-IP throttle parse `X-Forwarded-For` the same way.
+        # `fallback="unknown"` preserves the pre-refactor bucket key for
+        # ASGI scopes that lack a `client` tuple.
+        return resolve_client_ip(
+            request, trust_xff=self.trust_xff, fallback="unknown",
+        )
 
 
 # Module-level pointer to the instance wired into `app.main:app`. Tests
