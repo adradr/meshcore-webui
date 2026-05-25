@@ -1,3 +1,11 @@
+// Defense-in-depth sanitisation: filename segments may incorporate radio-
+// supplied identifiers (pubkey prefixes, contact names). Browsers mostly
+// scrub `a.download`, but strip path separators and control bytes ourselves
+// and cap the length so we never hand a hostile string to the OS save dialog.
+function sanitiseDownloadName(name: string): string {
+  return name.replace(/[/\\?%*:|"<>\x00-\x1f]/g, "_").slice(0, 200)
+}
+
 export function downloadBlob(
   content: string,
   filename: string,
@@ -7,7 +15,7 @@ export function downloadBlob(
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  a.download = filename
+  a.download = sanitiseDownloadName(filename)
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
