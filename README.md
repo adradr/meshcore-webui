@@ -250,6 +250,12 @@ cp scripts/pre-commit-secrets-guard.sh .git/hooks/pre-commit
 chmod +x .git/hooks/pre-commit
 ```
 
+The container now runs as UID 1001. On a fresh deployment this is transparent. If you're upgrading an existing instance that was running as root, fix ownership before bringing the new image up:
+
+```bash
+sudo chown -R 1001:1001 ./data ./backend/secrets/
+```
+
 ### 3. Build the image
 
 ```bash
@@ -282,6 +288,9 @@ All settings are environment variables on the container:
 | `VAPID_PRIVATE_KEY_PATH` | `/run/secrets/vapid_private.pem` | Where the container looks for the VAPID private PEM (mount your secret here) |
 | `VAPID_SUBJECT` | `mailto:admin@example.com` | Required by Web Push protocol; some push services log it |
 | `MESHCORE_WEBUI_API_KEY` | _(unset)_ | If set, requires `Authorization: Bearer <key>` on all `/api/*` + `/ws` requests |
+| `MESHCORE_WEBUI_API_KEY_FILE` | _(unset)_ | Alternative to `MESHCORE_WEBUI_API_KEY`. Path to a file containing the API key (e.g. `/run/secrets/meshcore_api_key`). Read once at startup. Useful with Docker secrets so the key never appears in `docker inspect` or the container's environ |
+| `AUTH_RATE_PER_MIN` | `30` | Per-IP cap on bearer-auth failures per 60-second sliding window. Exceeding it short-circuits the offending IP with `429 Retry-After: 60` |
+| `PUSH_SUBSCRIPTIONS_MAX` | `64` | Hard ceiling on stored Web Push subscriptions per deployment. Re-subscribing an existing endpoint is always allowed |
 | `DATABASE_URL` | `sqlite+aiosqlite:////data/meshcore.db` | Override if you want the DB on a different mount |
 | `STATIC_DIR` | `/app/static` | Where the built frontend lives in the image (don't change normally) |
 | `MESHCORE_WEBUI_ELEVATION_BASE_URL` | `https://api.opentopodata.org/v1` | Elevation API for Line of Sight. Point at a self-hosted [OpenTopoData](https://www.opentopodata.org/) instance to avoid public rate limits |
@@ -294,21 +303,34 @@ All settings are environment variables on the container:
 | `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` | OSM attribution HTML | Attribution overlay rendered by Leaflet for the light layer (HTML allowed) |
 | `MESHCORE_WEBUI_TILE_ATTRIBUTION_DARK` | OSM + CARTO attribution HTML | Same for the dark layer |
 
+### Behind a reverse proxy
+
+If you terminate TLS at a reverse proxy and the container needs to honour `X-Forwarded-For` / `X-Forwarded-Proto` (so audit logs see the real client IP, rate-limiting buckets by the real client, etc.), set `UVICORN_FORWARDED_ALLOW_IPS` to the proxy's source address (uvicorn reads this env var natively). Examples:
+
+```yaml
+environment:
+  UVICORN_FORWARDED_ALLOW_IPS: "127.0.0.1"        # proxy on the same host
+  # UVICORN_FORWARDED_ALLOW_IPS: "10.0.0.0/8"     # proxy on a private subnet
+```
+
+Leave it unset if the container is reachable directly — in that case the forwarded headers are ignored and every connection is attributed to its actual TCP peer.
+
 ### Tile-provider privacy
 
 By default, the map view fetches tiles directly from the public OpenStreetMap and CARTO CDNs. Each tile request reveals the viewer's IP address and approximate viewport (lat/lon/zoom) to those services. The map page renders an in-app disclosure note as long as the defaults are in effect.
 
 For privacy-sensitive deployments, point `MESHCORE_WEBUI_TILE_URL_LIGHT` / `MESHCORE_WEBUI_TILE_URL_DARK` at a self-hosted tile server (e.g. [`tileserver-gl`](https://github.com/maptiler/tileserver-gl) backed by [OpenMapTiles](https://openmaptiles.org/)). Once the URLs no longer match the public defaults, the in-app disclosure is hidden automatically. Don't forget to set `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` / `_DARK` to whatever your tile source requires — the values are inserted verbatim into the Leaflet attribution control.
 
-Example `docker-compose.yml`:
+Example `docker-compose.yml` (see `docker-compose.example.yml` for the fully-annotated version, including the hardening stanzas — `read_only`, `cap_drop`, `pids_limit`, `no-new-privileges`, Docker-secrets-based API key):
 
 ```yaml
 services:
   meshcore-webui:
-    image: meshcore-webui:dev
+    image: ghcr.io/<owner>/meshcore-webui:latest
     restart: unless-stopped
     ports:
-      - "8090:8080"
+      # Loopback-only by default; change to "0.0.0.0:8090:8080" for direct LAN.
+      - "127.0.0.1:8090:8080"
     environment:
       MESHCORE_HOST: 192.168.4.1   # your MeshCore device LAN IP
       MESHCORE_PORT: "5000"
@@ -323,7 +345,15 @@ services:
 
 ## LAN access (no proxy)
 
-The Docker container binds `0.0.0.0:8090` by default via `docker-compose.yml`'s `ports: "8090:8080"` mapping — meaning any device on your LAN can reach it once the host's firewall permits port 8090.
+The example compose file binds to `127.0.0.1:8080` by default — the container is only reachable from the host loopback, which is the safe default when a reverse proxy is fronting it. To expose it to your LAN, change the `ports:` entry to one of:
+
+```yaml
+ports:
+  - "0.0.0.0:8090:8080"   # explicit: every interface, host port 8090
+  # - "8090:8080"          # shorthand: same as above
+```
+
+Then:
 
 ```bash
 # 1. Find your host's LAN IP
@@ -348,9 +378,41 @@ Any reverse proxy works as long as it forwards WebSocket upgrades. Tested with:
 
 - **Nginx Proxy Manager** (easiest if you're new) — Forward Hostname `<your-host>`, Forward Port `8090`, ✅ **Websockets Support**, ✅ Force SSL, Let's Encrypt
 - **Traefik** — standard Docker labels with `traefik.http.services.meshcore-webui.loadbalancer.server.port=8080`
-- **Caddy** — one-liner `meshcore.example.com { reverse_proxy meshcore-webui:8080 }`
+- **Caddy** — minimal stanza with the destructive reset routes blocked at the public origin (recommended default):
+
+  ```caddy
+  meshcore.example.com {
+    # Refuse the device factory-wipe and bulk admin-reset endpoints from
+    # the public origin. Operators run these from a LAN-only context if
+    # needed. Comment out if you really do want them reachable.
+    @reset path /api/device/reset /api/admin/reset
+    respond @reset 403
+
+    reverse_proxy meshcore-webui:8080
+  }
+  ```
 - **Cloudflare Tunnel** — no port forwarding, free TLS, automatic WS support
 - **Tailscale Funnel** — zero-config TLS via Tailscale, instant `*.ts.net` cert
+
+---
+
+## Image tags
+
+The CI workflow publishes to `ghcr.io/<owner>/meshcore-webui` with three coordinates:
+
+| Tag | When it moves | Use it for |
+|---|---|---|
+| `:edge` | Auto-published on every push to `main` | Pre-release / tracking the bleeding edge |
+| `:sha-<commit>` | Every successful main build (immutable) | Pinning to an exact commit |
+| `:latest` | Manually promoted from a `:sha-<commit>` digest | Production |
+
+Promote a build to `:latest` via the `Promote to latest` workflow:
+
+```bash
+gh workflow run promote.yml -f digest=sha256:<digest-from-release-notes>
+```
+
+Recommendation: production deployments pull `:latest`, but pin by digest in your compose file (see hardening checklist point 6) so a future promotion doesn't surprise you.
 
 ---
 
@@ -403,8 +465,9 @@ For real user-facing auth (SSO, login pages, etc.), put **Authelia** or **Cloudf
 
 If you're exposing this service beyond a trusted LAN, walk through this list:
 
-1. **Set `MESHCORE_WEBUI_API_KEY` to a strong random secret.** Generate with `openssl rand -hex 32`. An empty value is rejected at startup — leave the variable absent for open-access mode, never set it to an empty string.
-2. **Strip WebSocket `?token=…` query strings from your reverse-proxy access logs.** Browsers can't attach `Authorization` headers to `new WebSocket()` so the SPA sends the key in the URL. Caddy logs the upgrade URL by default, which preserves the token in plaintext.
+1. **Set `MESHCORE_WEBUI_API_KEY` to a strong random secret.** Generate with `openssl rand -hex 32`. An empty value is rejected at startup — leave the variable absent for open-access mode, never set it to an empty string. For production, prefer `MESHCORE_WEBUI_API_KEY_FILE` pointing at a Docker secret (see point 8).
+
+2. **Bearer tokens are scrubbed from logs in-process.** The audit logger replaces every `Authorization: Bearer …` value with its 8-char SHA-256 fingerprint, and `?token=…` query strings on the WebSocket upgrade are likewise redacted before they reach `docker logs`. Belt-and-braces: still redact the same at the reverse-proxy layer, since proxy access logs are written independently.
 
    Caddy snippet:
    ```caddy
@@ -421,11 +484,27 @@ If you're exposing this service beyond a trusted LAN, walk through this list:
    ```
    Nginx: `log_format` without `$query_string`, or `set $loggable_uri $uri;` then log `$loggable_uri`.
 
-3. **The app already sets** `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin` on every response. If your proxy strips them, add them back at the proxy layer.
+3. **The app sets a full set of security headers on every response:** `Content-Security-Policy` (locked-down `default-src 'self'` with the explicit tile-host and elevation-host allowlist derived from your configuration), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy` denying camera/microphone/geolocation. If your proxy strips them, add them back at the proxy layer.
 
-4. **Every authenticated request is audited** at `app.audit` INFO level. The bearer token is replaced with an 8-char SHA-256 fingerprint — the raw value never lands in `docker logs`. Grep `app.audit` for `status=401` to spot brute-force attempts; grep `key=` to delineate sessions across key rotations.
+4. **Every authenticated request is audited** at `app.audit` INFO level. The bearer token is replaced with an 8-char SHA-256 fingerprint — the raw value never lands in `docker logs`. Grep `app.audit` for `status=401` to spot brute-force attempts; grep `key=` to delineate sessions across key rotations. A per-IP rate limiter (`AUTH_RATE_PER_MIN`, default 30/min) automatically returns `429` once an IP exceeds the cap on failed bearer auth, blunting online brute-force.
 
-5. **Factory reset (`POST /api/device/reset`) destroys the radio's identity keypair.** It is gated behind a typed-confirm token AND the API key. If you don't need it from the public origin, block the route at the proxy.
+5. **Factory reset (`POST /api/device/reset`) destroys the radio's identity keypair.** It is gated behind a typed-confirm token AND the API key. The example Caddy config above already blocks `/api/device/reset` and `/api/admin/reset` at the public origin by default — comment the `respond @reset 403` block out only if you actually need to run them remotely.
+
+6. **Pin the image by digest, not by tag.** Tags are mutable. Once you've verified a build, pin it in your compose file:
+
+   ```yaml
+   image: ghcr.io/<owner>/meshcore-webui@sha256:<digest-from-release-notes>
+   ```
+
+7. **Verify the image signature with [cosign](https://github.com/sigstore/cosign) before deploying.** Images are signed via GitHub Actions OIDC, with SLSA v1 build provenance and an SPDX SBOM attached as attestations. Verify keylessly:
+
+   ```bash
+   cosign verify ghcr.io/<owner>/meshcore-webui:<tag> \
+     --certificate-identity 'https://github.com/<owner>/meshcore-webui/.github/workflows/ci.yml@refs/heads/main' \
+     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
+   ```
+
+8. **Use a Docker secret for the API key.** Don't put it in `environment:` where it'll show in `docker inspect`. Write the key to `./secrets/api_key.txt` and uncomment the `MESHCORE_WEBUI_API_KEY_FILE` env entry + the `secrets:` stanzas in `docker-compose.example.yml`. The backend reads the file once at startup and the secret never enters the container's environ.
 
 ---
 
@@ -437,7 +516,7 @@ If you're exposing this service beyond a trusted LAN, walk through this list:
 cd backend
 uv venv --python 3.12
 uv pip install -e ".[dev]"
-uv run pytest -q                              # ~107 tests
+uv run pytest -q                              # full suite
 uv run uvicorn app.main:app --reload --port 8765
 ```
 
@@ -448,7 +527,7 @@ Requires Python 3.12 + [uv](https://github.com/astral-sh/uv) ≥ 0.5.
 ```bash
 cd frontend
 pnpm install
-pnpm test --run                               # vitest, ~42 tests
+pnpm test --run                               # vitest, full suite
 pnpm dev                                      # vite at http://localhost:5173
 pnpm build
 ```
@@ -505,7 +584,7 @@ Edit the SVGs first, then rerun to regenerate all PNG sizes + the root `favicon.
 
 ## Status
 
-Working with real hardware: tested against a LilyGo T3-S3 V1 running MeshCore companion firmware over TCP. 240+ backend / 137+ frontend tests passing.
+Working with real hardware: tested against a LilyGo T3-S3 V1 running MeshCore companion firmware over TCP. 200+ backend / 500+ frontend tests passing.
 
 ---
 
