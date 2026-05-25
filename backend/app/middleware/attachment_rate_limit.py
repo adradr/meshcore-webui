@@ -1,36 +1,54 @@
 from __future__ import annotations
 
-import asyncio
-import time
-from collections import defaultdict, deque
 from collections.abc import Callable
 
 from fastapi import Request
 from fastapi.responses import PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.services.sliding_window import BoundedSlidingWindow, _now
 
-def _now() -> float:
-    """Monotonic clock indirection so tests can monkeypatch the wall."""
-    return time.monotonic()
+# Re-exported so test files that monkeypatch `mod._now` keep working without
+# importing from `app.services.sliding_window` directly.
+__all__ = ["AttachmentRateLimitMiddleware", "RateLimiter", "_now"]
 
 
 class RateLimiter:
-    """Sliding-window rate limiter, two windows enforced jointly.
+    """Joint per-minute / per-hour sliding-window rate limiter.
 
     A request is allowed only if BOTH the rolling per-minute and the
     rolling per-hour counts for the caller key are under their caps.
-    Timestamps are stored in a `deque[float]` of monotonic seconds; on
-    each check we evict timestamps older than the window cutoff before
-    comparing against the cap.
+    Internally composes two `BoundedSlidingWindow` instances — one
+    windowed at 60 s, one at 3600 s — so per-IP bucket dicts are bounded
+    by LRU eviction (see `BoundedSlidingWindow.max_keys`).
     """
 
     def __init__(self, per_min: int, per_hour: int):
-        self.per_min = per_min
-        self.per_hour = per_hour
-        self._minute: dict[str, deque[float]] = defaultdict(deque)
-        self._hour: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = asyncio.Lock()
+        # Inject the module-level `_now` indirectly so tests that
+        # `monkeypatch.setattr(mod, "_now", ...)` slide both windows.
+        clock = lambda: _now()  # noqa: E731 - intentional late binding
+        self._minute = BoundedSlidingWindow(
+            window_seconds=60.0, max_per_window=per_min, clock=clock,
+        )
+        self._hour = BoundedSlidingWindow(
+            window_seconds=3600.0, max_per_window=per_hour, clock=clock,
+        )
+
+    @property
+    def per_min(self) -> int:
+        return self._minute.max_per_window
+
+    @per_min.setter
+    def per_min(self, value: int) -> None:
+        self._minute.max_per_window = value
+
+    @property
+    def per_hour(self) -> int:
+        return self._hour.max_per_window
+
+    @per_hour.setter
+    def per_hour(self, value: int) -> None:
+        self._hour.max_per_window = value
 
     async def check(self, key: str) -> tuple[bool, int]:
         """Return (allowed, retry_after_seconds).
@@ -40,29 +58,28 @@ class RateLimiter:
         by 1 so a `Retry-After` header never advises "0 seconds" while
         the window is still saturated).
         """
-        async with self._lock:
-            now = _now()
-            mq = self._minute[key]
-            hq = self._hour[key]
-            self._evict(mq, now - 60)
-            self._evict(hq, now - 3600)
-            if len(mq) >= self.per_min:
-                return False, int(60 - (now - mq[0])) + 1
-            if len(hq) >= self.per_hour:
-                return False, int(3600 - (now - hq[0])) + 1
-            mq.append(now)
-            hq.append(now)
-            return True, 0
-
-    @staticmethod
-    def _evict(q: deque[float], cutoff: float) -> None:
-        while q and q[0] < cutoff:
-            q.popleft()
+        # Probe both windows BEFORE recording so an over-cap request
+        # doesn't pollute the count further. This preserves the original
+        # contract that the (N+1)-th call inside a window returns False
+        # without consuming a slot.
+        if await self._minute.is_over_limit(key):
+            oldest = await self._minute.oldest(key)
+            retry = int(60 - (_now() - oldest)) + 1 if oldest is not None else 60
+            return False, max(retry, 1)
+        if await self._hour.is_over_limit(key):
+            oldest = await self._hour.oldest(key)
+            retry = (
+                int(3600 - (_now() - oldest)) + 1 if oldest is not None else 3600
+            )
+            return False, max(retry, 1)
+        await self._minute.record(key)
+        await self._hour.record(key)
+        return True, 0
 
     def reset(self) -> None:
         """Clear all per-key state. Intended for test isolation."""
-        self._minute.clear()
-        self._hour.clear()
+        self._minute.reset_sync()
+        self._hour.reset_sync()
 
 
 class AttachmentRateLimitMiddleware(BaseHTTPMiddleware):

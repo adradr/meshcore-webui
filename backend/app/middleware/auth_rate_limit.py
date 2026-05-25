@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import asyncio
-import time
-from collections import OrderedDict, deque
 from collections.abc import Callable
 
 from fastapi import Request
@@ -10,19 +7,18 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.middleware.api_key import APIKeyMiddleware
+from app.services.sliding_window import (
+    DEFAULT_MAX_KEYS,
+    BoundedSlidingWindow,
+    _now,
+)
 
-
-def _now() -> float:
-    """Monotonic clock indirection so tests can monkeypatch the wall."""
-    return time.monotonic()
-
-
-# Default cap on tracked per-IP buckets. A wide-scan attacker hitting many
-# spoofed source IPs (when the operator has trusted_proxy=true and the proxy
-# is misconfigured) could otherwise grow this dict without bound. Pop the
-# least-recently-used key on overflow so live attackers can't evict the
-# legitimate buckets that are still actively failing.
-_DEFAULT_MAX_KEYS = 4096
+# Re-exported so test files that monkeypatch `mod._now` keep working.
+__all__ = [
+    "AuthFailureLimiter",
+    "AuthRateLimitMiddleware",
+    "_now",
+]
 
 
 class AuthFailureLimiter:
@@ -33,19 +29,40 @@ class AuthFailureLimiter:
     when the current 60-second window holds fewer than `per_min` entries
     for the caller's key.
 
-    The bucket dict is bounded by `max_keys`; on overflow the LRU key is
-    evicted. This caps memory under wide-source-IP attacks at the cost
-    of occasionally re-arming a long-dormant attacker — acceptable given
-    the cap is much larger than typical concurrent-client counts.
+    The per-key bucket dict is LRU-bounded inside `BoundedSlidingWindow`;
+    on overflow the least-recently-touched key is evicted. This caps
+    memory under wide-source-IP attacks at the cost of occasionally
+    re-arming a long-dormant attacker — acceptable given the cap is much
+    larger than typical concurrent-client counts.
     """
 
-    def __init__(self, per_min: int, max_keys: int = _DEFAULT_MAX_KEYS):
-        self.per_min = per_min
-        self.max_keys = max_keys
-        # OrderedDict so we can use move_to_end / popitem(last=False)
-        # to implement an LRU eviction policy in O(1).
-        self._buckets: OrderedDict[str, deque[float]] = OrderedDict()
-        self._lock = asyncio.Lock()
+    def __init__(self, per_min: int, max_keys: int = DEFAULT_MAX_KEYS):
+        # Late-bound clock indirection so tests can monkeypatch the
+        # module-level `_now` and have it slide the window in real time.
+        clock = lambda: _now()  # noqa: E731 - intentional late binding
+        self._window = BoundedSlidingWindow(
+            window_seconds=60.0,
+            max_per_window=per_min,
+            max_keys=max_keys,
+            clock=clock,
+        )
+
+    @property
+    def per_min(self) -> int:
+        return self._window.max_per_window
+
+    @per_min.setter
+    def per_min(self, value: int) -> None:
+        self._window.max_per_window = value
+
+    @property
+    def max_keys(self) -> int:
+        return self._window.max_keys
+
+    @property
+    def _buckets(self):
+        """Internal handle for tests asserting LRU bound. Do not mutate."""
+        return self._window.buckets
 
     async def allow(self, key: str) -> bool:
         """Probe-only: is `key` still under the cap?
@@ -55,37 +72,15 @@ class AuthFailureLimiter:
         short-circuit a flood without inflating the counter further once
         the IP is already locked out.
         """
-        async with self._lock:
-            q = self._touch(key)
-            self._evict(q, _now() - 60)
-            return len(q) < self.per_min
+        return not await self._window.is_over_limit(key)
 
     async def record_failure(self, key: str) -> None:
         """Append a failure timestamp for `key`."""
-        async with self._lock:
-            q = self._touch(key)
-            self._evict(q, _now() - 60)
-            q.append(_now())
-
-    def _touch(self, key: str) -> deque[float]:
-        """Get-or-create a bucket, refreshing LRU position; evict if oversized."""
-        if key in self._buckets:
-            self._buckets.move_to_end(key)
-            return self._buckets[key]
-        q: deque[float] = deque()
-        self._buckets[key] = q
-        while len(self._buckets) > self.max_keys:
-            self._buckets.popitem(last=False)
-        return q
-
-    @staticmethod
-    def _evict(q: deque[float], cutoff: float) -> None:
-        while q and q[0] < cutoff:
-            q.popleft()
+        await self._window.record(key)
 
     def reset(self) -> None:
         """Clear all per-key state. Intended for test isolation."""
-        self._buckets.clear()
+        self._window.reset_sync()
 
 
 class AuthRateLimitMiddleware(BaseHTTPMiddleware):
