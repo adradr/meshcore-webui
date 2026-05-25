@@ -31,7 +31,7 @@ function decorateText(text: string, keyPrefix: string): React.ReactNode[] {
         key={`${keyPrefix}-u${idx++}`}
         href={href}
         target="_blank"
-        rel="noopener"
+        rel="noopener noreferrer"
         // `[overflow-wrap:anywhere]` lets long un-breakable URLs wrap
         // mid-string so the bubble never overflows a narrow viewport.
         // Plain `break-words` doesn't apply inside <a> reliably.
