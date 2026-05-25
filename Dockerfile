@@ -4,7 +4,7 @@
 FROM node:26-alpine@sha256:7c6af15abe4e3de859690e7db171d0d711bf37d27528eddfe625b2fe89e097f8 AS frontend-builder
 WORKDIR /app
 ENV CI=true
-RUN corepack enable
+RUN npm install -g pnpm@10
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 # --ignore-scripts: skips msw postinstall (dev-only) and avoids pnpm 10
 # strict-builds gate; we never run install-time scripts in production.
