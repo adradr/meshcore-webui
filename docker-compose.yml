@@ -43,7 +43,14 @@ services:
       VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
       # Read from .env (gitignored). To run without auth, remove this line or
       # leave MESHCORE_WEBUI_API_KEY empty in .env.
+      #
+      # Alternative (recommended for production): write the key to
+      # `./secrets/api_key.txt` and uncomment both the `MESHCORE_WEBUI_API_KEY_FILE`
+      # env entry and the `secrets:` stanzas below. The backend reads
+      # `MESHCORE_WEBUI_API_KEY_FILE` when the env var is unset, so the secret
+      # never appears in `docker inspect` or the container's environ.
       MESHCORE_WEBUI_API_KEY: "${MESHCORE_WEBUI_API_KEY:-}"
+      # MESHCORE_WEBUI_API_KEY_FILE: /run/secrets/meshcore_api_key
       # Public base URL for shared image links. REQUIRED for the
       # attachment-sharing feature to work. Must match where your
       # reverse proxy serves the app from the outside world.
@@ -63,3 +70,9 @@ services:
     volumes:
       - ./data:/data
       - ./backend/secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
+    # secrets:
+    #   - meshcore_api_key
+#
+# secrets:
+#   meshcore_api_key:
+#     file: ./secrets/api_key.txt

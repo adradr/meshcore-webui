@@ -38,7 +38,21 @@ services:
       # Generate a long random secret: `openssl rand -hex 32`
       # Note: do NOT set this to an empty string — the backend rejects empty
       # values at startup. Either set a real secret, or leave the line absent.
+      #
+      # Alternative (recommended for production): write the key to
+      # `./secrets/api_key.txt` and uncomment both the
+      # `MESHCORE_WEBUI_API_KEY_FILE` entry and the `secrets:` stanzas below.
+      # The backend reads `MESHCORE_WEBUI_API_KEY_FILE` when the env var is
+      # unset, so the secret never appears in `docker inspect` or the
+      # container's environ.
       MESHCORE_WEBUI_API_KEY: "REPLACE_ME_WITH_openssl_rand_hex_32"
+      # MESHCORE_WEBUI_API_KEY_FILE: /run/secrets/meshcore_api_key
     volumes:
       - ./data:/data
       - ./secrets/vapid_private.pem:/run/secrets/vapid_private.pem:ro
+    # secrets:
+    #   - meshcore_api_key
+#
+# secrets:
+#   meshcore_api_key:
+#     file: ./secrets/api_key.txt

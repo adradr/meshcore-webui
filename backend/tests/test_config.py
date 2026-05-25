@@ -86,6 +86,55 @@ def test_attachments_env_overrides(monkeypatch):
     assert s.trusted_proxy is True
 
 
+def test_api_key_file_loads_when_env_var_unset(monkeypatch, tmp_path):
+    """Settings should read MESHCORE_WEBUI_API_KEY_FILE when the env var
+    is absent — the Docker-secret deployment pattern."""
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    p = tmp_path / "api_key.txt"
+    p.write_text("from-the-file\n")  # trailing newline must be stripped
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key == "from-the-file"
+
+
+def test_api_key_env_wins_over_file(monkeypatch, tmp_path):
+    """If MESHCORE_WEBUI_API_KEY is set, the file fallback is ignored.
+    Operators migrating to Docker secrets can leave the env var temporarily."""
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY", "env-key")
+    p = tmp_path / "api_key.txt"
+    p.write_text("file-key")
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key == "env-key"
+
+
+def test_api_key_file_missing_path_raises(monkeypatch, tmp_path):
+    """A misconfigured MESHCORE_WEBUI_API_KEY_FILE (path doesn't exist) must
+    fail loud at startup. Silently treating it as "no auth" would be a
+    severe security footgun."""
+    import pytest
+
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "MESHCORE_WEBUI_API_KEY_FILE", str(tmp_path / "does-not-exist.txt"),
+    )
+    with pytest.raises(ValueError, match="cannot read MESHCORE_WEBUI_API_KEY_FILE"):
+        Settings(_env_file=None)
+
+
+def test_api_key_file_empty_content_yields_no_key(monkeypatch, tmp_path):
+    """An empty or whitespace-only secret file is treated as "no key" —
+    same semantics as leaving the env var unset. Prevents a leftover empty
+    secret from authenticating as the literal "Bearer " header (the empty-
+    string env-var path is already blocked by `min_length=1` on the field)."""
+    monkeypatch.delenv("MESHCORE_WEBUI_API_KEY", raising=False)
+    p = tmp_path / "api_key.txt"
+    p.write_text("   \n")
+    monkeypatch.setenv("MESHCORE_WEBUI_API_KEY_FILE", str(p))
+    s = Settings(_env_file=None)
+    assert s.api_key is None
+
+
 def test_dockerfile_does_not_baked_in_proxy_trust():
     """The runtime image must not unconditionally trust X-Forwarded-* from any client.
     Operators behind a real proxy can re-enable via UVICORN_FORWARDED_ALLOW_IPS."""

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import os
 from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import urlparse
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # SSRF guard for operator-supplied URLs (`elevation_base_url`). We refuse
@@ -220,6 +221,35 @@ class Settings(BaseSettings):
                     f"address ({host})",
                 )
         return v
+
+    @model_validator(mode="after")
+    def _load_api_key_from_file(self) -> Settings:
+        """Allow the API key to be sourced from a file instead of an env var.
+
+        Pattern: if `MESHCORE_WEBUI_API_KEY` is unset/empty, fall back to the
+        path in `MESHCORE_WEBUI_API_KEY_FILE` (typical container usage:
+        ``/run/secrets/meshcore_api_key`` mounted from a Docker secret).
+        The env-var path always wins so existing deployments keep working.
+
+        The file is read once at process start; whitespace is stripped. An
+        empty file (after strip) is treated as no key. A missing or
+        unreadable file path raises so a misconfigured deployment fails
+        loud instead of starting un-authenticated.
+        """
+        if self.api_key:
+            return self
+        file_env = os.environ.get("MESHCORE_WEBUI_API_KEY_FILE")
+        if not file_env:
+            return self
+        try:
+            content = Path(file_env).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(
+                f"cannot read MESHCORE_WEBUI_API_KEY_FILE={file_env!r}: {exc}",
+            ) from exc
+        if content:
+            self.api_key = content
+        return self
 
 
 def get_settings() -> Settings:
