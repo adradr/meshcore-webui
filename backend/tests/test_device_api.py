@@ -116,17 +116,33 @@ async def test_get_self_info_includes_full_payload(client):
 
 
 @pytest.mark.asyncio
-async def test_get_self_info_extra_fields_pass_through(client):
-    """``SelfInfo`` declares ``extra='allow'`` so a newer firmware build
-    that adds a key (e.g. ``foobar_setting``) doesn't get silently
-    truncated — the UI can still surface it as raw data."""
-    fake = _fake_self_info(foobar_setting=42)
+async def test_get_self_info_drops_unknown_firmware_fields(client):
+    """``SelfInfo`` declares ``extra='ignore'`` so unknown fields from a
+    future firmware build (or anything the lib's reader might add — such
+    as private keying material or internal memory offsets) are NOT
+    transparently forwarded to API callers. The response surface is a
+    closed allowlist: only documented keys appear.
+
+    Inverts the previous Task 1.5 behaviour, which was pass-through.
+    Tightening per the security-hardening review (Task 3.10)."""
+    fake = _fake_self_info(
+        secret_master_key="DEADBEEF",
+        internal_mem_offset=0x1234,
+        foobar_setting=42,
+    )
     app.state.meshcore_client = AsyncMock()
     app.state.meshcore_client.get_self_info = AsyncMock(return_value=fake)
     try:
         r = await client.get("/api/device/self-info")
         assert r.status_code == 200
-        assert r.json().get("foobar_setting") == 42
+        body = r.json()
+        # Documented fields still present (smoke check the allowlist works).
+        assert body.get("name") == "adr"
+        assert body.get("public_key") == "33f0"
+        # Unknown firmware fields stripped.
+        assert "secret_master_key" not in body
+        assert "internal_mem_offset" not in body
+        assert "foobar_setting" not in body
     finally:
         del app.state.meshcore_client
 
