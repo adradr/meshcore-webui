@@ -10,7 +10,7 @@ class ChannelIn(BaseModel):
     PSK from ``sha256(name)[0:16]``. When provided it must decode to
     exactly 16 bytes.
     """
-    idx: int = Field(..., ge=0)
+    idx: int = Field(..., ge=0, le=255)
     name: str = Field(..., min_length=1, max_length=32)
     psk: str | None = Field(default=None, max_length=64)
 
