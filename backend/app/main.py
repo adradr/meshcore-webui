@@ -146,8 +146,27 @@ async def _ensure_schema() -> None:
     def _detect_legacy(sync_conn) -> bool:
         insp = sa_inspect(sync_conn)
         tables = set(insp.get_table_names())
-        # Legacy = some app table exists (e.g. "messages") but no version table yet.
         return "messages" in tables and "alembic_version" not in tables
+
+    def _detect_orphan_revision(sync_conn, cfg) -> str | None:
+        """Return the DB's current revision if it's missing from the migration scripts."""
+        from alembic.script import ScriptDirectory
+
+        insp = sa_inspect(sync_conn)
+        if "alembic_version" not in insp.get_table_names():
+            return None
+        from sqlalchemy import text
+
+        row = sync_conn.execute(text("SELECT version_num FROM alembic_version")).first()
+        if not row:
+            return None
+        db_rev = row[0]
+        script = ScriptDirectory.from_config(cfg)
+        try:
+            script.get_revision(db_rev)
+        except Exception:
+            return db_rev
+        return None
 
     async with engine.connect() as conn:
         legacy = await conn.run_sync(_detect_legacy)
@@ -169,6 +188,23 @@ async def _ensure_schema() -> None:
                 "Stamping at base revision %s before upgrade.", base_rev
             )
             await asyncio.to_thread(command.stamp, cfg, base_rev)
+
+    async with engine.connect() as conn:
+        orphan = await conn.run_sync(_detect_orphan_revision, cfg)
+
+    if orphan:
+        from alembic.script import ScriptDirectory
+
+        script = ScriptDirectory.from_config(cfg)
+        heads = script.get_heads()
+        if heads:
+            head_rev = heads[0]
+            log.warning(
+                "DB stamped at unknown revision %s (migration file missing). "
+                "Re-stamping to current head %s so the app can start.",
+                orphan, head_rev,
+            )
+            await asyncio.to_thread(command.stamp, cfg, head_rev)
 
     log.info("Running alembic upgrade head")
     await asyncio.to_thread(command.upgrade, cfg, "head")
