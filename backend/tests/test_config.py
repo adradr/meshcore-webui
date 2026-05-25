@@ -101,3 +101,26 @@ def test_dockerfile_runs_as_non_root():
     assert "useradd" in text or "adduser" in text, "no non-root user created"
     assert "\nUSER " in text or text.startswith("USER "), "no USER directive"
     assert "USER root" not in text, "USER root must not appear"
+
+
+def test_dockerfile_base_images_pinned_by_digest():
+    """Every FROM line referencing an external image must include a @sha256: digest.
+
+    Floating tags like `python:3.12-slim` can resolve to a different image after
+    a CI cache miss; pinning by digest makes builds reproducible.
+    """
+    df = pathlib.Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = df.read_text()
+    for line in text.splitlines():
+        s = line.strip()
+        if not s.startswith("FROM "):
+            continue
+        # `FROM <image>[:tag][@digest] [AS stage]`
+        tokens = s.split()
+        if len(tokens) < 2:
+            continue
+        img = tokens[1]
+        # Stage references like `FROM frontend-builder` have no tag/digest and no colon.
+        if ":" not in img:
+            continue
+        assert "@sha256:" in img, f"unpinned FROM line: {line!r}"
