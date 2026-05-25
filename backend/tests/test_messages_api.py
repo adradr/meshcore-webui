@@ -9,8 +9,14 @@ from app.db.models import Message
 from app.main import app
 from app.services.read_state import mark_read
 
+# 64-hex pubkeys used in tests. Routes now validate the GET
+# `contact_pub_key` query param against this format, so DB rows and
+# query strings must agree on a hex value.
+PK_A = "a" * 64
+PK_B = "b" * 64
 
-async def _insert_messages(db, count: int, *, contact_pub_key: str = "abc123") -> list[Message]:
+
+async def _insert_messages(db, count: int, *, contact_pub_key: str = PK_A) -> list[Message]:
     base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
     rows: list[Message] = []
     for i in range(count):
@@ -31,7 +37,7 @@ async def _insert_messages(db, count: int, *, contact_pub_key: str = "abc123") -
 
 @pytest.mark.asyncio
 async def test_get_messages_empty(client):
-    r = await client.get("/api/messages?contact_pub_key=abc123")
+    r = await client.get(f"/api/messages?contact_pub_key={PK_A}")
     assert r.status_code == 200
     body = r.json()
     assert body["items"] == []
@@ -41,7 +47,7 @@ async def test_get_messages_empty(client):
 @pytest.mark.asyncio
 async def test_get_messages_returns_in_reverse_chronological_order(client, db):
     await _insert_messages(db, 3)
-    r = await client.get("/api/messages?contact_pub_key=abc123")
+    r = await client.get(f"/api/messages?contact_pub_key={PK_A}")
     assert r.status_code == 200
     body = r.json()
     assert len(body["items"]) == 3
@@ -52,13 +58,13 @@ async def test_get_messages_returns_in_reverse_chronological_order(client, db):
 
 @pytest.mark.asyncio
 async def test_get_messages_filters_by_contact(client, db):
-    await _insert_messages(db, 2, contact_pub_key="abc123")
-    await _insert_messages(db, 3, contact_pub_key="def456")
-    r = await client.get("/api/messages?contact_pub_key=def456")
+    await _insert_messages(db, 2, contact_pub_key=PK_A)
+    await _insert_messages(db, 3, contact_pub_key=PK_B)
+    r = await client.get(f"/api/messages?contact_pub_key={PK_B}")
     assert r.status_code == 200
     items = r.json()["items"]
     assert len(items) == 3
-    assert all(i["contact_pub_key"] == "def456" for i in items)
+    assert all(i["contact_pub_key"] == PK_B for i in items)
 
 
 @pytest.mark.asyncio
@@ -84,7 +90,7 @@ async def test_get_messages_filters_by_channel(client, db):
 async def test_get_messages_pagination_with_cursor(client, db):
     await _insert_messages(db, 5)
     # First page, limit 2 → newest 2 (msg 4, msg 3), next_cursor set
-    r1 = await client.get("/api/messages?contact_pub_key=abc123&limit=2")
+    r1 = await client.get(f"/api/messages?contact_pub_key={PK_A}&limit=2")
     assert r1.status_code == 200
     body1 = r1.json()
     assert [i["text"] for i in body1["items"]] == ["msg 4", "msg 3"]
@@ -93,7 +99,7 @@ async def test_get_messages_pagination_with_cursor(client, db):
 
     # Second page using cursor
     r2 = await client.get(
-        f"/api/messages?contact_pub_key=abc123&limit=2&before={cursor1}"
+        f"/api/messages?contact_pub_key={PK_A}&limit=2&before={cursor1}"
     )
     body2 = r2.json()
     assert [i["text"] for i in body2["items"]] == ["msg 2", "msg 1"]
@@ -102,7 +108,7 @@ async def test_get_messages_pagination_with_cursor(client, db):
 
     # Third page → only msg 0
     r3 = await client.get(
-        f"/api/messages?contact_pub_key=abc123&limit=2&before={cursor2}"
+        f"/api/messages?contact_pub_key={PK_A}&limit=2&before={cursor2}"
     )
     body3 = r3.json()
     assert [i["text"] for i in body3["items"]] == ["msg 0"]
@@ -112,7 +118,7 @@ async def test_get_messages_pagination_with_cursor(client, db):
 @pytest.mark.asyncio
 async def test_get_messages_default_limit_50(client, db):
     await _insert_messages(db, 60)
-    r = await client.get("/api/messages?contact_pub_key=abc123")
+    r = await client.get(f"/api/messages?contact_pub_key={PK_A}")
     body = r.json()
     assert len(body["items"]) == 50
     assert body["next_cursor"] is not None
@@ -338,6 +344,18 @@ async def test_threads_channel_unread_count(client, db):
     await mark_read(db, contact_pub_key=None, channel_idx=2, when=when)
     r2 = await client.get("/api/messages/threads")
     assert r2.json()[0]["unread_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_get_messages_rejects_malformed_contact_pub_key(client):
+    r = await client.get("/api/messages?contact_pub_key=not-a-pubkey")
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_messages_rejects_short_hex_contact_pub_key(client):
+    r = await client.get("/api/messages?contact_pub_key=" + "a" * 63)
+    assert r.status_code == 422
 
 
 @pytest.mark.asyncio

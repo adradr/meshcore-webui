@@ -29,7 +29,10 @@ def _encode_cursor(ts: dt.datetime) -> str:
 @router.get("", response_model=MessagesPage)
 async def list_messages(
     db: Annotated[AsyncSession, Depends(get_db)],
-    contact_pub_key: str | None = None,
+    contact_pub_key: Annotated[
+        str | None,
+        Query(pattern=r"^[0-9a-fA-F]{64}$"),
+    ] = None,
     channel_idx: int | None = None,
     before: str | None = None,
     limit: int = 50,
