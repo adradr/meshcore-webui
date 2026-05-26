@@ -9,8 +9,6 @@ import {
   type AuthInfo,
 } from "@/features/auth/types"
 
-// Capture the props react-leaflet receives so we can assert that the
-// runtime override (or default fallback) actually flows through.
 const tileCalls: Record<string, unknown>[] = []
 vi.mock("react-leaflet", () => ({
   TileLayer: (props: Record<string, unknown>) => {
@@ -19,8 +17,6 @@ vi.mock("react-leaflet", () => ({
   },
 }))
 
-// `useAuthInfo()` is the single source of truth — stub it per-test so we
-// can drive the {data} value without spinning up TanStack Query.
 const authMock = vi.fn<() => { data: AuthInfo | undefined }>(() => ({
   data: undefined,
 }))
@@ -34,7 +30,7 @@ describe("ThemedTileLayer", () => {
     authMock.mockReset()
   })
 
-  it("falls back to public OSM defaults when auth info hasn't resolved yet", () => {
+  it("falls back to proxy defaults when auth info hasn't resolved yet", () => {
     authMock.mockReturnValue({ data: undefined })
     render(<ThemedTileLayer dark={false} />)
     expect(tileCalls).toHaveLength(1)
@@ -42,7 +38,7 @@ describe("ThemedTileLayer", () => {
     expect(tileCalls[0].attribution).toBe(DEFAULT_TILE_ATTRIBUTION_LIGHT)
   })
 
-  it("uses CARTO defaults in dark mode when nothing is overridden", () => {
+  it("uses proxy dark defaults when nothing is overridden", () => {
     authMock.mockReturnValue({
       data: {
         required: false,

@@ -27,6 +27,7 @@ from app.api.public_attachments import router as public_attachments_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
 from app.api.trace import router as trace_router
+from app.api.tiles import router as tiles_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
@@ -47,6 +48,7 @@ from app.services.push_sender import PushSender
 from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
 from app.services.task_pool import TaskPool
+from app.services.tile_proxy import TileProxy
 from app.services.trace_monitor import TraceMonitor
 from app.services.trace_sample_persist import persist_trace_sample
 
@@ -351,17 +353,28 @@ async def lifespan(app: FastAPI):
 
     log.info("Initializing ElevationProvider (%s/%s)",
              settings.elevation_base_url, settings.elevation_dataset)
-    async with httpx.AsyncClient(timeout=30.0) as elev_client:
+    log.info("Initializing tile proxy (cache=%s)", settings.tile_cache_dir)
+    async with (
+        httpx.AsyncClient(timeout=30.0) as elev_client,
+        httpx.AsyncClient(timeout=30.0) as tile_client,
+    ):
         app.state.elevation_provider = ElevationProvider(
             base_url=settings.elevation_base_url,
             dataset=settings.elevation_dataset,
             client=elev_client,
+        )
+        app.state.tile_proxy = TileProxy(
+            client=tile_client,
+            upstream_light=settings.tile_upstream_url_light,
+            upstream_dark=settings.tile_upstream_url_dark,
+            cache_dir=settings.tile_cache_dir,
         )
         try:
             yield
         finally:
             log.info("Shutting down")
             app.state.elevation_provider = None
+            app.state.tile_proxy = None
             await trace_monitor.stop()
             await noise_poller.stop()
             client.unsubscribe(q)
@@ -463,6 +476,7 @@ def create_app() -> FastAPI:
     app.include_router(messages_router)
     app.include_router(conversations_router)
     app.include_router(los_router)
+    app.include_router(tiles_router)
     app.include_router(trace_router)
     app.include_router(trace_monitor_router)
     app.include_router(rx_log_router)

@@ -1,25 +1,21 @@
-import {
-  DEFAULT_TILE_URL_DARK,
-  DEFAULT_TILE_URL_LIGHT,
-} from "@/features/auth/types"
+import { EXTERNAL_TILE_HOSTS } from "@/features/auth/types"
 
 /**
- * True when the active tile templates match the public OpenStreetMap /
- * CARTO defaults, i.e. the operator has NOT swapped in a self-hosted
- * tile server. Drives the visibility of the tile-provider privacy
- * disclosure overlay — once an override is in place the warning is
- * misleading, so we hide it. Treat "auth-info not yet resolved" as
- * defaults too: better to over-disclose for the first paint than to
- * silently elide the warning forever if /api/auth/info is slow.
+ * True when the active tile URLs point at a known public CDN (e.g.
+ * OpenStreetMap, CARTO) rather than the built-in proxy or a self-hosted
+ * server. Drives the visibility of the tile-provider privacy disclosure
+ * overlay — the proxy routes all requests through the backend so the
+ * viewer's IP is never exposed to the CDN, making the warning unnecessary.
+ *
+ * When auth info hasn't resolved yet, both arguments are `undefined` and
+ * we return `false` (proxy paths are the default, so no disclosure needed).
  */
-export function tilesAreDefault(
+export function tilesAreExternal(
   light: string | undefined,
   dark: string | undefined,
 ): boolean {
-  const effectiveLight = light ?? DEFAULT_TILE_URL_LIGHT
-  const effectiveDark = dark ?? DEFAULT_TILE_URL_DARK
-  return (
-    effectiveLight === DEFAULT_TILE_URL_LIGHT &&
-    effectiveDark === DEFAULT_TILE_URL_DARK
+  const urls = [light ?? "", dark ?? ""]
+  return urls.some((url) =>
+    EXTERNAL_TILE_HOSTS.some((host) => url.includes(host)),
   )
 }

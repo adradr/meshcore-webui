@@ -19,7 +19,7 @@ import {
 import { TraceHopsDrawer } from "@/features/trace/TraceHopsDrawer"
 import { Button } from "@/components/ui/button"
 import { useAuthInfo } from "@/features/auth/api"
-import { tilesAreDefault } from "@/components/map/tileDisclosure"
+import { tilesAreExternal } from "@/components/map/tileDisclosure"
 
 // 10 s is the default cadence we kick off with from the map. Operators can
 // re-tune via the slider on the contact-detail page once the chart is in
@@ -59,7 +59,7 @@ export function MapPage() {
   const { data: selfInfo } = useSelfInfo()
   const dark = useIsDark()
   const auth = useAuthInfo()
-  const showTileDisclosure = tilesAreDefault(
+  const showTileDisclosure = tilesAreExternal(
     auth.data?.tile_url_light,
     auth.data?.tile_url_dark,
   )
