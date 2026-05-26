@@ -39,10 +39,10 @@ export function Layout() {
   useDocumentTitleUnreadBadge(total)
 
   return (
-    // Shell fills the parent via `h-full` (html/body are both `h-full
-    // overflow-hidden` in index.css). This avoids viewport-unit bugs on
-    // iOS standalone PWA where `100vh` can overshoot the visible area by
-    // the home-indicator height, clipping the bottom nav icons.
+    // Shell fills the parent via `h-full` (html → body → #root are all
+    // `h-full overflow-hidden` in index.css). Percentage heights avoid
+    // viewport-unit bugs on iOS standalone PWA where `100vh` can overshoot
+    // the visible area by the home-indicator height.
     <div
       className="flex h-full flex-col"
       style={{ paddingTop: "env(safe-area-inset-top)" }}

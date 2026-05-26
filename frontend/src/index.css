@@ -136,7 +136,7 @@
    * overflow:hidden, some iOS versions still propagate rubber-band scrolls
    * up to the document root.
    */
-  html, body {
+  html, body, #root {
     @apply h-full overflow-hidden;
     overscroll-behavior: none;
     }
