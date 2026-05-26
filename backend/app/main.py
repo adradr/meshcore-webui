@@ -26,8 +26,8 @@ from app.api.noise import router as noise_router
 from app.api.public_attachments import router as public_attachments_router
 from app.api.push import router as push_router
 from app.api.rx_log import router as rx_log_router
-from app.api.trace import router as trace_router
 from app.api.tiles import router as tiles_router
+from app.api.trace import router as trace_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings

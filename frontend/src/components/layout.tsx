@@ -65,7 +65,8 @@ export function Layout() {
         transitions in Safari.
       */}
       <nav
-        className="shrink-0 border-t bg-background pb-[env(safe-area-inset-bottom)]"
+        className="shrink-0 border-t bg-background"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         aria-label="Primary"
       >
         <div className="grid h-16 grid-cols-6">

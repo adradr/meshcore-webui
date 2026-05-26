@@ -26,7 +26,8 @@ def proxy(tmp_path):
 @respx.mock
 @pytest.mark.asyncio
 async def test_fetches_and_caches_tile(proxy, tmp_path):
-    respx.get("https://tiles.test/a/light/5/10/12.png").respond(
+    # (10 + 12) % 4 = 2 → subdomain "c"
+    respx.get("https://tiles.test/c/light/5/10/12.png").respond(
         200, content=FAKE_PNG,
     )
     data, ct = await proxy.get_tile("light", 5, 10, 12)
@@ -40,7 +41,7 @@ async def test_fetches_and_caches_tile(proxy, tmp_path):
 @respx.mock
 @pytest.mark.asyncio
 async def test_serves_from_cache_on_second_call(proxy):
-    respx.get("https://tiles.test/a/light/5/10/12.png").respond(
+    respx.get("https://tiles.test/c/light/5/10/12.png").respond(
         200, content=FAKE_PNG,
     )
     await proxy.get_tile("light", 5, 10, 12)
