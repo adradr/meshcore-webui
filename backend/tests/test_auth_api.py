@@ -143,10 +143,11 @@ async def test_auth_info_includes_tile_config(client):
     ):
         assert field in body, f"missing tile field {field!r}"
         assert isinstance(body[field], str) and body[field]
-    # URL templates always include the leaflet `{z}` placeholder; defaults
-    # would otherwise be impossible to render.
     assert "{z}" in body["tile_url_light"]
     assert "{z}" in body["tile_url_dark"]
+    # Default is the built-in tile proxy, not external CDNs.
+    assert body["tile_url_light"].startswith("/api/tiles/")
+    assert body["tile_url_dark"].startswith("/api/tiles/")
 
 
 @pytest.mark.asyncio

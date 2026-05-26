@@ -1,36 +1,53 @@
 import { describe, expect, it } from "vitest"
-import { tilesAreDefault } from "../tileDisclosure"
-import {
-  DEFAULT_TILE_URL_DARK,
-  DEFAULT_TILE_URL_LIGHT,
-} from "@/features/auth/types"
+import { tilesAreExternal } from "../tileDisclosure"
 
-describe("tilesAreDefault", () => {
-  it("treats undefined values as defaults so we over-disclose on first paint", () => {
-    expect(tilesAreDefault(undefined, undefined)).toBe(true)
+describe("tilesAreExternal", () => {
+  it("returns false when both URLs are undefined (proxy defaults)", () => {
+    expect(tilesAreExternal(undefined, undefined)).toBe(false)
   })
 
-  it("returns true when both URLs match the public defaults verbatim", () => {
+  it("returns false when using the built-in proxy paths", () => {
     expect(
-      tilesAreDefault(DEFAULT_TILE_URL_LIGHT, DEFAULT_TILE_URL_DARK),
-    ).toBe(true)
-  })
-
-  it("returns false once the light URL is overridden (self-hosted tiles)", () => {
-    expect(
-      tilesAreDefault(
-        "https://tiles.internal/{z}/{x}/{y}.png",
-        DEFAULT_TILE_URL_DARK,
+      tilesAreExternal(
+        "/api/tiles/light/{z}/{x}/{y}.png",
+        "/api/tiles/dark/{z}/{x}/{y}.png",
       ),
     ).toBe(false)
   })
 
-  it("returns false once the dark URL is overridden", () => {
+  it("returns false for a self-hosted tile server", () => {
     expect(
-      tilesAreDefault(
-        DEFAULT_TILE_URL_LIGHT,
+      tilesAreExternal(
+        "https://tiles.internal/{z}/{x}/{y}.png",
         "https://tiles.internal/dark/{z}/{x}/{y}.png",
       ),
     ).toBe(false)
+  })
+
+  it("returns true when the light URL points at public OSM", () => {
+    expect(
+      tilesAreExternal(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "/api/tiles/dark/{z}/{x}/{y}.png",
+      ),
+    ).toBe(true)
+  })
+
+  it("returns true when the dark URL points at public CARTO", () => {
+    expect(
+      tilesAreExternal(
+        "/api/tiles/light/{z}/{x}/{y}.png",
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      ),
+    ).toBe(true)
+  })
+
+  it("returns true when both URLs point at external CDNs", () => {
+    expect(
+      tilesAreExternal(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      ),
+    ).toBe(true)
   })
 })

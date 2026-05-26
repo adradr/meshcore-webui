@@ -35,7 +35,7 @@ export function ThemedTileLayer({ dark }: Props) {
       key={darkUrl}
       url={darkUrl}
       attribution={darkAttr}
-      subdomains="abcd"
+      {...(darkUrl.includes("{s}") ? { subdomains: "abcd" } : {})}
       maxZoom={20}
     />
   ) : (

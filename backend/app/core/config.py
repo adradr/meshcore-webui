@@ -105,19 +105,19 @@ class Settings(BaseSettings):
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
     )
 
-    # Map tile-server overrides. Defaults send tile requests to public
-    # OpenStreetMap + CARTO CDNs — every tile fetch exposes the viewer's
-    # IP + viewport to those services. Privacy-sensitive operators can
-    # point these at a self-hosted tile server (e.g. tileserver-gl).
-    # The values are surfaced verbatim on `GET /api/auth/info` so the
-    # SPA can render the override without a separate config endpoint.
+    # Map tile-server overrides. By default the SPA fetches tiles from
+    # the backend's built-in tile proxy (`/api/tiles/…`), which caches
+    # them on disk so the end-user's browser never contacts external
+    # CDNs. Operators can bypass the proxy by pointing these at any
+    # Leaflet-compatible tile URL — the values are surfaced verbatim on
+    # `GET /api/auth/info` so the SPA renders whatever is configured.
     tile_url_light: str = Field(
-        default="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        default="/api/tiles/light/{z}/{x}/{y}.png",
         alias="MESHCORE_WEBUI_TILE_URL_LIGHT",
         description="Leaflet light-mode tile URL template.",
     )
     tile_url_dark: str = Field(
-        default="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        default="/api/tiles/dark/{z}/{x}/{y}.png",
         alias="MESHCORE_WEBUI_TILE_URL_DARK",
         description="Leaflet dark-mode tile URL template.",
     )
@@ -136,6 +136,25 @@ class Settings(BaseSettings):
         ),
         alias="MESHCORE_WEBUI_TILE_ATTRIBUTION_DARK",
         description="Attribution HTML for the dark-mode tile layer.",
+    )
+
+    # Upstream tile servers the built-in proxy fetches from. The proxy
+    # replaces {s}/{z}/{x}/{y}/{r} per the Leaflet convention and caches
+    # responses under `tile_cache_dir`.
+    tile_upstream_url_light: str = Field(
+        default="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+        alias="MESHCORE_WEBUI_TILE_UPSTREAM_URL_LIGHT",
+        description="Upstream light-mode tile URL for the built-in proxy.",
+    )
+    tile_upstream_url_dark: str = Field(
+        default="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+        alias="MESHCORE_WEBUI_TILE_UPSTREAM_URL_DARK",
+        description="Upstream dark-mode tile URL for the built-in proxy.",
+    )
+    tile_cache_dir: Path = Field(
+        default=Path("/data/tile-cache"),
+        alias="MESHCORE_WEBUI_TILE_CACHE_DIR",
+        description="Disk cache directory for proxied map tiles.",
     )
 
     # Attachments / public image sharing

@@ -9,6 +9,11 @@ import {
 } from "react-leaflet"
 import L, { type LeafletMouseEvent } from "leaflet"
 import { fixDefaultIcon } from "@/lib/leaflet/fixDefaultIcon"
+import { useAuthInfo } from "@/features/auth/api"
+import {
+  DEFAULT_TILE_ATTRIBUTION_LIGHT,
+  DEFAULT_TILE_URL_LIGHT,
+} from "@/features/auth/types"
 
 /**
  * Small map control that lets the user click anywhere to drop a marker
@@ -133,9 +138,12 @@ function LocateMeButton({
 }
 
 export function PositionPicker({ lat, lon, onPick }: PositionPickerProps) {
-  // Patch Leaflet's default-icon URLs on first mount; idempotent thanks
-  // to the module-level `patched` guard inside fixDefaultIcon.
   fixDefaultIcon()
+
+  const auth = useAuthInfo()
+  const tileUrl = auth.data?.tile_url_light ?? DEFAULT_TILE_URL_LIGHT
+  const tileAttr =
+    auth.data?.tile_attribution_light ?? DEFAULT_TILE_ATTRIBUTION_LIGHT
 
   const haveCoords = lat != null && lon != null
   const center: [number, number] = haveCoords
@@ -156,8 +164,10 @@ export function PositionPicker({ lat, lon, onPick }: PositionPickerProps) {
         scrollWheelZoom
       >
         <TileLayer
-          attribution="© OpenStreetMap contributors"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          key={tileUrl}
+          attribution={tileAttr}
+          url={tileUrl}
+          maxZoom={19}
         />
         {haveCoords && <Marker position={[lat, lon]} />}
         <PickerEvents onPick={onPick} />

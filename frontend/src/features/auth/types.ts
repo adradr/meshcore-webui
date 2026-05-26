@@ -1,19 +1,23 @@
 import { z } from "zod"
 
-// Public OpenStreetMap / CARTO endpoints that the backend ships as
-// defaults. The SPA compares the values it gets back from /api/auth/info
-// against these to decide whether to render the tile-provider privacy
-// disclosure: if the operator has overridden them (e.g. to a self-hosted
-// tile server), the disclosure is unnecessary and gets hidden. Keep these
-// in lockstep with `Settings.tile_url_*` in backend/app/core/config.py.
-export const DEFAULT_TILE_URL_LIGHT =
-  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-export const DEFAULT_TILE_URL_DARK =
-  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+// Default tile URLs served by the backend's built-in tile proxy. The
+// proxy caches upstream tiles on disk so the end-user's browser never
+// contacts external CDNs. Keep in lockstep with `Settings.tile_url_*`
+// in backend/app/core/config.py.
+export const DEFAULT_TILE_URL_LIGHT = "/api/tiles/light/{z}/{x}/{y}.png"
+export const DEFAULT_TILE_URL_DARK = "/api/tiles/dark/{z}/{x}/{y}.png"
 export const DEFAULT_TILE_ATTRIBUTION_LIGHT =
   '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 export const DEFAULT_TILE_ATTRIBUTION_DARK =
   '&copy; <a href="https://openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+
+// Known external tile CDN hostnames. The tile-provider privacy
+// disclosure is shown only when an operator overrides the defaults to
+// point directly at one of these public services (bypassing the proxy).
+export const EXTERNAL_TILE_HOSTS = [
+  "tile.openstreetmap.org",
+  "basemaps.cartocdn.com",
+]
 
 export const AuthInfoSchema = z.object({
   required: z.boolean(),
