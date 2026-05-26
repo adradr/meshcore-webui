@@ -30,7 +30,7 @@ class APIKeyMiddleware(BaseHTTPMiddleware):
     # Used for shareable attachment URLs (`/s/<slug>` short links and
     # `/i/<slug>[/thumb]` inline image previews) that must be openable by
     # recipients who don't have the operator's API key.
-    EXEMPT_PREFIXES = ("/s/", "/i/")
+    EXEMPT_PREFIXES = ("/s/", "/i/", "/api/tiles/")
     # Path prefixes gated by the bearer-token check. `/api` and `/ws` are the
     # product surface; `/docs`, `/redoc`, and `/openapi.json` are FastAPI's
     # auto-generated docs which would otherwise leak the full route inventory

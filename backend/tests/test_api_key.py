@@ -62,6 +62,15 @@ async def test_public_attachment_paths_are_exempt_from_api_key(
     assert r.status_code != 401
 
 
+@pytest.mark.asyncio
+async def test_tile_proxy_is_exempt_from_api_key(client, monkeypatch):
+    """Leaflet fetches tiles as <img> tags which can't carry an Authorization
+    header. The tile proxy must be reachable without the bearer token."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    r = await client.get("/api/tiles/light/1/0/0.png")
+    assert r.status_code != 401
+
+
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
 @pytest.mark.asyncio
 async def test_docs_routes_require_api_key_when_configured(client, monkeypatch, path):
