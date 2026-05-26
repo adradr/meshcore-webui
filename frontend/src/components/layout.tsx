@@ -44,8 +44,7 @@ export function Layout() {
     // viewport-unit bugs on iOS standalone PWA where `100vh` can overshoot
     // the visible area by the home-indicator height.
     <div
-      className="flex h-full flex-col"
-      style={{ paddingTop: "env(safe-area-inset-top)" }}
+      className="safe-top flex h-full flex-col"
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
         <h1 className="text-base font-semibold tracking-wider">MESHCORE</h1>
@@ -65,8 +64,7 @@ export function Layout() {
         transitions in Safari.
       */}
       <nav
-        className="shrink-0 border-t bg-background"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        className="safe-bottom shrink-0 border-t bg-background"
         aria-label="Primary"
       >
         <div className="grid h-16 grid-cols-6">

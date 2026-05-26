@@ -148,6 +148,22 @@
     }
 }
 
+/*
+ * iOS safe-area handling. Kept as plain CSS (not Tailwind utilities or
+ * inline styles) because:
+ *  1. Tailwind v4's JIT extractor can't parse nested parens in env().
+ *  2. Inline `style={{ paddingBottom: "env(...)" }}` is unreliable in
+ *     some iOS Safari / standalone-PWA versions.
+ *  3. A real stylesheet rule is parsed by the engine exactly once —
+ *     no React reconciliation quirks.
+ */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 /* Trap Leaflet's z-index world.
  *
  * Leaflet panes inside `.leaflet-container` use absolute z-indexes up to 700
