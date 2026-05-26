@@ -1,7 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import Message, Setting
+from app.db.session import get_db
 from app.schemas.channels import ChannelIn, ChannelOut
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
@@ -93,12 +99,18 @@ async def create_channel(payload: ChannelIn, request: Request) -> dict:
 
 
 @router.delete("/{idx}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_channel(idx: int, request: Request) -> Response:
-    """Clear a channel slot on the device.
+async def delete_channel(
+    idx: int,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Clear a channel slot on the device and purge local message history.
 
     The MeshCore firmware has no explicit delete primitive — clearing
     is done by writing an empty name + 16 zero bytes (see
-    ``MeshCoreClient.delete_channel``).
+    ``MeshCoreClient.delete_channel``). After the radio slot is wiped
+    we also remove stored messages and the read-state pointer so a
+    future channel on the same index starts with a clean slate.
     """
     client = _require_client(request)
     try:
@@ -107,4 +119,9 @@ async def delete_channel(idx: int, request: Request) -> Response:
         raise HTTPException(503, str(e))
     except RuntimeError as e:
         raise HTTPException(502, str(e))
+    await db.execute(delete(Message).where(Message.channel_idx == idx))
+    await db.execute(
+        delete(Setting).where(Setting.key == f"read:chan:{idx}")
+    )
+    await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

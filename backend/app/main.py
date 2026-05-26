@@ -97,9 +97,13 @@ def _configure_logging() -> None:
     # Attach the sensitive-query-param redactor to every logger that can
     # surface request URLs. Filters bound to a logger only run for records
     # emitted by that logger (not parent/child), so we explicitly cover each
-    # named source: our own app + audit channels and uvicorn's access/error.
+    # named source: our own app + audit channels and uvicorn's error logger.
+    # NOTE: uvicorn.access is intentionally excluded — its AccessFormatter
+    # destructures record.args in formatMessage(), which breaks after the
+    # filter clears args. The RequestAuditMiddleware already provides
+    # complete per-request logging with key fingerprints.
     redactor = SensitiveQueryFilter()
-    for name in ("uvicorn.access", "uvicorn.error", "app", "app.audit"):
+    for name in ("uvicorn.error", "app", "app.audit"):
         logger = logging.getLogger(name)
         if not any(isinstance(f, SensitiveQueryFilter) for f in logger.filters):
             logger.addFilter(redactor)

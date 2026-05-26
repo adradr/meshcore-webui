@@ -39,29 +39,12 @@ export function Layout() {
   useDocumentTitleUnreadBadge(total)
 
   return (
-    // The nav is `fixed` so iOS Safari's URL-bar collapse animation doesn't
-    // shift it mid-scroll (the layout used to use a flex child for the nav,
-    // which produced a visible jump as `100dvh` recalculated). Reserve space
-    // for the nav via padding on the shell so page content can't render under
-    // it. The padding wraps the safe-area inset so home-bar devices still get
-    // the bottom gutter automatically.
-    // Shell pads for BOTH safe areas:
-    //   top    → Dynamic Island / notch (otherwise header sits under it on standalone PWA)
-    //   bottom → fixed nav (4rem) + home-indicator inset
+    // Shell fills the parent via `h-full` (html/body are both `h-full
+    // overflow-hidden` in index.css). This avoids viewport-unit bugs on
+    // iOS standalone PWA where `100vh` can overshoot the visible area by
+    // the home-indicator height, clipping the bottom nav icons.
     <div
-      // Viewport-height strategy:
-      //   - `h-[100vh]` everywhere; in standalone PWA mode there's no
-      //     URL bar, so 100vh == full screen (correct from cold start).
-      //   - In mobile Safari (with URL bar), 100dvh is the right dynamic
-      //     value; override via @media (display-mode: browser).
-      // Why not just `h-[100dvh]`: iOS standalone PWA cold-start has a
-      // documented bug where `100dvh` resolves to the SMALL viewport (as if
-      // the URL bar were visible), leaving an empty band below the nav until
-      // a scroll forces a reflow. `100vh` doesn't trigger the bug because
-      // there's no URL-bar concept in standalone mode. Refs:
-      //   https://dev.to/nirazanbasnet/dont-use-100vh-for-mobile-responsive-3o97
-      //   https://www.frontend.fyi/tutorials/finally-a-fix-for-100vh-on-mobile
-      className="flex h-[100vh] flex-col [@media(display-mode:browser)]:h-[100dvh]"
+      className="flex h-full flex-col"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">

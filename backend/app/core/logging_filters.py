@@ -38,7 +38,7 @@ class SensitiveQueryFilter(logging.Filter):
                 record.msg = _scrub(record.msg)
             return True
         scrubbed = _scrub(rendered)
-        if scrubbed != rendered or record.args:
+        if scrubbed != rendered:
             record.msg = scrubbed
             record.args = None
         return True

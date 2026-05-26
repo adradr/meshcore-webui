@@ -1,6 +1,6 @@
 import { useMemo } from "react"
 import { Link } from "react-router-dom"
-import { ArrowUpRight, CheckCheck, Loader2, MessagesSquare, Star } from "lucide-react"
+import { ArrowUpRight, CheckCheck, Loader2, MessagesSquare, Star, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -10,7 +10,7 @@ import { ContactAvatar } from "@/components/contact-avatar"
 import { ChannelAvatar } from "@/components/channel-avatar"
 import { useContacts, type Contact } from "@/features/contacts/queries"
 import { useChannels } from "@/features/channels/queries"
-import { useMarkAllRead, useThreads, useUnreadTotal, type Thread } from "./queries"
+import { useDeleteConversation, useMarkAllRead, useThreads, useUnreadTotal, type Thread } from "./queries"
 
 function relativeTime(iso: string | null): string {
   if (!iso) return ""
@@ -47,6 +47,24 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
   const isChannel = thread.msg_type === "chan"
   const unread = thread.unread_count > 0
   const showDirIcon = thread.last_direction === "out"
+  const del = useDeleteConversation()
+
+  const onDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!window.confirm(`Delete all messages in "${title}"?`)) return
+    del.mutate(
+      isChannel
+        ? { channelIdx: thread.channel_idx ?? undefined }
+        : { contactPubKey: thread.contact_pub_key ?? undefined },
+      {
+        onSuccess: (r) =>
+          toast.success(`Deleted ${r.deleted} message${r.deleted === 1 ? "" : "s"}`),
+        onError: (err) => notifyError("Delete conversation", err),
+      },
+    )
+  }
+
   return (
     <Link to={href} className="block focus:outline-none">
       <Card size="sm" className="transition-colors hover:bg-muted/50">
@@ -112,6 +130,16 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
               )}
             </div>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={onDelete}
+            disabled={del.isPending}
+            aria-label="Delete conversation"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
         </CardContent>
       </Card>
     </Link>
@@ -219,8 +247,8 @@ export function ThreadsList() {
         const idx = t.channel_idx ?? -1
         const ch = channels.data?.find((c) => c.channel_idx === idx)
         const title = ch?.channel_name
-          ? `# ${ch.channel_name}`
-          : `Channel #${idx}`
+          ? ch.channel_name
+          : `Channel ${idx}`
         return {
           thread: t,
           title,
