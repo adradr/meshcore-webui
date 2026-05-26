@@ -120,3 +120,23 @@ export function useDeleteMessage() {
     },
   })
 }
+
+export interface DeleteConversationVars {
+  contactPubKey?: string
+  channelIdx?: number
+}
+
+export function useDeleteConversation() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: DeleteConversationVars) =>
+      api.delete<{ deleted: number }>("/api/conversations", {
+        contact_pub_key: vars.contactPubKey,
+        channel_idx: vars.channelIdx,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      qc.invalidateQueries({ queryKey: ["threads"] })
+    },
+  })
+}

@@ -1,11 +1,12 @@
 from __future__ import annotations
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import text
+from sqlalchemy import and_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import Message, Setting
 from app.db.session import get_db
 from app.services.read_state import mark_all_read, mark_read
 
@@ -76,3 +77,34 @@ async def get_unread_total(
     """)
     row = (await db.execute(sql)).mappings().one()
     return {"total": int(row["total"] or 0)}
+
+
+class DeleteConversationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contact_pub_key: str | None = None
+    channel_idx: int | None = None
+
+
+@router.delete("")
+async def delete_conversation(
+    payload: DeleteConversationIn,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Delete all messages for a conversation and its read-state pointer."""
+    if (payload.contact_pub_key is None) == (payload.channel_idx is None):
+        raise HTTPException(
+            422, "exactly one of contact_pub_key or channel_idx required"
+        )
+    conds = []
+    if payload.contact_pub_key is not None:
+        conds.append(Message.contact_pub_key == payload.contact_pub_key)
+        conds.append(Message.msg_type == "dm")
+        setting_key = f"read:dm:{payload.contact_pub_key}"
+    else:
+        conds.append(Message.channel_idx == payload.channel_idx)
+        conds.append(Message.msg_type == "chan")
+        setting_key = f"read:chan:{payload.channel_idx}"
+    result = await db.execute(delete(Message).where(and_(*conds)))
+    await db.execute(delete(Setting).where(Setting.key == setting_key))
+    await db.commit()
+    return {"deleted": result.rowcount}

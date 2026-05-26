@@ -46,7 +46,9 @@ function ChannelCard({ channel }: { channel: Channel }) {
         <div className="flex min-w-0 items-center gap-3">
           <ChannelAvatar idx={channel.channel_idx} name={name} size="sm" />
           <CardTitle className="text-sm font-medium">
-            <span className="text-muted-foreground">#{channel.channel_idx}</span>{" "}
+            <span className="text-muted-foreground">
+              {name.startsWith("#") ? `#${channel.channel_idx}` : `idx ${channel.channel_idx}`}
+            </span>{" "}
             {name}
           </CardTitle>
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { List, X } from "lucide-react"
 import { ClusteredContactMap } from "@/components/map/ClusteredContactMap"
@@ -93,14 +93,17 @@ export function MapPage() {
   // already toasts on failure via `notifyError`, and the success path
   // navigates immediately, so a button-level spinner would only flash
   // for the few hundred ms before the route change.
-  const handleMonitorRequest = (c: ContactMarker) => {
-    startMonitor.mutate(
-      { pubkey: c.id, interval_s: MAP_MONITOR_DEFAULT_INTERVAL_S, force: true },
-      {
-        onSuccess: () => navigate(`/contact/${c.id}`),
-      },
-    )
-  }
+  const handleMonitorRequest = useCallback(
+    (c: ContactMarker) => {
+      startMonitor.mutate(
+        { pubkey: c.id, interval_s: MAP_MONITOR_DEFAULT_INTERVAL_S, force: true },
+        {
+          onSuccess: () => navigate(`/contact/${c.id}`),
+        },
+      )
+    },
+    [startMonitor, navigate],
+  )
 
   // ``self`` and ``contacts`` are memoised on their source data refs so the
   // 5 s ``useTraceMonitorStatus`` poll (which re-renders MapPage on every
@@ -144,22 +147,28 @@ export function MapPage() {
       }))
   }, [data])
 
-  const handleTraceRequest = (c: { id: string; name: string }) => {
-    setTracingPubkey(c.id)
-    traceMutation.mutate(c.id, {
-      onSuccess: (trace) => {
-        setActiveTrace(trace)
-      },
-      // Clear on settled (NOT onSuccess) so an error doesn't leave the
-      // markers wedged in the disabled state forever.
-      onSettled: () => setTracingPubkey(null),
-    })
-  }
+  const handleTraceRequest = useCallback(
+    (c: { id: string; name: string }) => {
+      setTracingPubkey(c.id)
+      traceMutation.mutate(c.id, {
+        onSuccess: (trace) => {
+          setActiveTrace(trace)
+        },
+        onSettled: () => setTracingPubkey(null),
+      })
+    },
+    [traceMutation],
+  )
 
   const clearTrace = () => {
     setActiveTrace(null)
     setHopsOpen(false)
   }
+
+  const handleLosRequest = useCallback(
+    (c: ContactMarker) => setLosTarget({ name: c.name, lat: c.lat, lon: c.lon }),
+    [],
+  )
 
   return (
     <div className="relative h-full w-full">
@@ -167,11 +176,7 @@ export function MapPage() {
         contacts={contacts}
         self={self}
         dark={dark}
-        onLosRequest={
-          self
-            ? (c) => setLosTarget({ name: c.name, lat: c.lat, lon: c.lon })
-            : undefined
-        }
+        onLosRequest={self ? handleLosRequest : undefined}
         selfHasGps={self !== null}
         onTraceRequest={handleTraceRequest}
         traceInFlightPubkey={tracingPubkey}
