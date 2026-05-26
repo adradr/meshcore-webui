@@ -24,6 +24,7 @@ vi.mock("../queries", () => ({
   useThreads: () => threadsState,
   useMarkAllRead: () => ({ mutate: vi.fn(), isPending: false }),
   useUnreadTotal: () => ({ data: { total: 0 } }),
+  useDeleteConversation: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 vi.mock("@/features/contacts/queries", () => ({
@@ -89,7 +90,7 @@ describe("ThreadsList — channel filter", () => {
 
     render(wrap(<ThreadsList />))
 
-    expect(screen.getByText("# Public")).toBeInTheDocument()
+    expect(screen.getByText("Public")).toBeInTheDocument()
     expect(screen.getByText("live message")).toBeInTheDocument()
   })
 
