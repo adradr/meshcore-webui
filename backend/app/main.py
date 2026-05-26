@@ -356,7 +356,7 @@ async def lifespan(app: FastAPI):
     log.info("Initializing tile proxy (cache=%s)", settings.tile_cache_dir)
     async with (
         httpx.AsyncClient(timeout=30.0) as elev_client,
-        httpx.AsyncClient(timeout=30.0) as tile_client,
+        httpx.AsyncClient(timeout=10.0) as tile_client,
     ):
         app.state.elevation_provider = ElevationProvider(
             base_url=settings.elevation_base_url,

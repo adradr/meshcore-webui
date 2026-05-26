@@ -71,7 +71,9 @@ class TileProxy:
                 headers={"User-Agent": "meshcore-webui tile-proxy"},
             )
         except httpx.HTTPError as exc:
-            raise TileProxyError(f"upstream error: {exc}") from exc
+            raise TileProxyError(
+                f"upstream {type(exc).__name__}: {exc} (url={url})"
+            ) from exc
         if resp.status_code != 200:
             raise TileProxyError(f"upstream HTTP {resp.status_code}")
         data = resp.content
