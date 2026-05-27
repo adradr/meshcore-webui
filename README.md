@@ -298,8 +298,8 @@ All settings are environment variables on the container:
 | `MESHCORE_WEBUI_RX_LOG_PERSIST` | `false` | Set `true` to persist every RX event to SQLite (in addition to the in-memory buffer) |
 | `MESHCORE_WEBUI_RX_LOG_BUFFER_SIZE` | `1000` | In-memory ring buffer size for the `/rx-log` page |
 | `MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S` | `2.0` | Noise floor polling interval in seconds (`STATS_RADIO` cadence) |
-| `MESHCORE_WEBUI_TILE_URL_LIGHT` | `/api/tiles/light/…` (built-in proxy) | Leaflet tile URL template used in light mode. Default routes through the built-in tile proxy so no external CDN sees the viewer's IP |
-| `MESHCORE_WEBUI_TILE_URL_DARK` | `/api/tiles/dark/…` (built-in proxy) | Same for dark mode |
+| `MESHCORE_WEBUI_TILE_URL_LIGHT` | OpenStreetMap CDN | Leaflet tile URL template for light mode. Browser fetches directly by default; set to `/api/tiles/light/{z}/{x}/{y}.png` to use the built-in privacy proxy |
+| `MESHCORE_WEBUI_TILE_URL_DARK` | CARTO dark CDN | Same for dark mode (`/api/tiles/dark/{z}/{x}/{y}.png` for the proxy) |
 | `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` | OSM attribution HTML | Attribution overlay rendered by Leaflet for the light layer (HTML allowed) |
 | `MESHCORE_WEBUI_TILE_ATTRIBUTION_DARK` | OSM + CARTO attribution HTML | Same for the dark layer |
 | `MESHCORE_WEBUI_TILE_UPSTREAM_URL_LIGHT` | OpenStreetMap CDN | Upstream tile source the built-in proxy fetches from (light mode) |
@@ -320,9 +320,16 @@ Leave it unset if the container is reachable directly — in that case the forwa
 
 ### Tile-provider privacy
 
-By default, the map view routes all tile requests through a **built-in reverse proxy** (`/api/tiles/…`) that fetches from OpenStreetMap (light) and CARTO (dark), caches tiles on disk under `/data/tile-cache/`, and serves them to the browser. The end-user's IP and viewport are never exposed to the external CDN — only the server's IP is visible upstream. Cached tiles are served for 7 days before being re-fetched.
+By default, the map view fetches tiles directly from the public OpenStreetMap and CARTO CDNs — fast and reliable, but each request exposes the viewer's IP and viewport to those services. An in-app disclosure note appears automatically when the default CDN URLs are active.
 
-To change the upstream tile source (e.g. a self-hosted [tileserver-gl](https://github.com/maptiler/tileserver-gl)), set `MESHCORE_WEBUI_TILE_UPSTREAM_URL_LIGHT` / `_DARK`. To bypass the proxy entirely and have browsers fetch tiles directly, set `MESHCORE_WEBUI_TILE_URL_LIGHT` / `_DARK` to the external URL — an in-app privacy disclosure appears automatically when tiles point at known public CDNs. Don't forget to set `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` / `_DARK` to whatever your tile source requires — the values are inserted verbatim into the Leaflet attribution control.
+For privacy-sensitive deployments, a **built-in tile proxy** is available at `/api/tiles/…`. It fetches tiles server-side, caches them on disk under `/data/tile-cache/` (7-day TTL), and serves them to the browser so the viewer's IP is never exposed. To enable it:
+
+```yaml
+MESHCORE_WEBUI_TILE_URL_LIGHT: "/api/tiles/light/{z}/{x}/{y}.png"
+MESHCORE_WEBUI_TILE_URL_DARK: "/api/tiles/dark/{z}/{x}/{y}.png"
+```
+
+The proxy requires the container to have outbound HTTPS access to the upstream tile servers. To change the upstream source (e.g. a self-hosted [tileserver-gl](https://github.com/maptiler/tileserver-gl)), set `MESHCORE_WEBUI_TILE_UPSTREAM_URL_LIGHT` / `_DARK`. Don't forget to set `MESHCORE_WEBUI_TILE_ATTRIBUTION_LIGHT` / `_DARK` to whatever your tile source requires — the values are inserted verbatim into the Leaflet attribution control.
 
 Example `docker-compose.yml` (see `docker-compose.example.yml` for the fully-annotated version, including the hardening stanzas — `read_only`, `cap_drop`, `pids_limit`, `no-new-privileges`, Docker-secrets-based API key):
 

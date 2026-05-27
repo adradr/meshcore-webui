@@ -1,11 +1,13 @@
 import { z } from "zod"
 
-// Default tile URLs served by the backend's built-in tile proxy. The
-// proxy caches upstream tiles on disk so the end-user's browser never
-// contacts external CDNs. Keep in lockstep with `Settings.tile_url_*`
-// in backend/app/core/config.py.
-export const DEFAULT_TILE_URL_LIGHT = "/api/tiles/light/{z}/{x}/{y}.png"
-export const DEFAULT_TILE_URL_DARK = "/api/tiles/dark/{z}/{x}/{y}.png"
+// Default tile URLs — public CDNs, fast and reliable since the browser
+// fetches directly. Keep in lockstep with `Settings.tile_url_*` in
+// backend/app/core/config.py. Operators who want privacy can switch to
+// the built-in proxy (`/api/tiles/…`) or a self-hosted tile server.
+export const DEFAULT_TILE_URL_LIGHT =
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+export const DEFAULT_TILE_URL_DARK =
+  "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
 export const DEFAULT_TILE_ATTRIBUTION_LIGHT =
   '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 export const DEFAULT_TILE_ATTRIBUTION_DARK =

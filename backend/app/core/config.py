@@ -105,19 +105,20 @@ class Settings(BaseSettings):
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
     )
 
-    # Map tile-server overrides. By default the SPA fetches tiles from
-    # the backend's built-in tile proxy (`/api/tiles/…`), which caches
-    # them on disk so the end-user's browser never contacts external
-    # CDNs. Operators can bypass the proxy by pointing these at any
-    # Leaflet-compatible tile URL — the values are surfaced verbatim on
-    # `GET /api/auth/info` so the SPA renders whatever is configured.
+    # Map tile-server configuration. By default the SPA fetches tiles
+    # directly from the public OpenStreetMap / CARTO CDNs — fast and
+    # reliable since the browser handles the requests. Operators who
+    # want to avoid exposing viewer IPs to the CDNs can point these at
+    # the built-in tile proxy (`/api/tiles/light/{z}/{x}/{y}.png`) or
+    # at a self-hosted tile server (e.g. tileserver-gl). The values are
+    # surfaced verbatim on `GET /api/auth/info`.
     tile_url_light: str = Field(
-        default="/api/tiles/light/{z}/{x}/{y}.png",
+        default="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         alias="MESHCORE_WEBUI_TILE_URL_LIGHT",
         description="Leaflet light-mode tile URL template.",
     )
     tile_url_dark: str = Field(
-        default="/api/tiles/dark/{z}/{x}/{y}.png",
+        default="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
         alias="MESHCORE_WEBUI_TILE_URL_DARK",
         description="Leaflet dark-mode tile URL template.",
     )

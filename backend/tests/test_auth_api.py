@@ -145,9 +145,6 @@ async def test_auth_info_includes_tile_config(client):
         assert isinstance(body[field], str) and body[field]
     assert "{z}" in body["tile_url_light"]
     assert "{z}" in body["tile_url_dark"]
-    # Default is the built-in tile proxy, not external CDNs.
-    assert body["tile_url_light"].startswith("/api/tiles/")
-    assert body["tile_url_dark"].startswith("/api/tiles/")
 
 
 @pytest.mark.asyncio
