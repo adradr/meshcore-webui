@@ -1,6 +1,14 @@
 import { useEffect } from "react"
 import { Outlet, NavLink } from "react-router-dom"
 import { Toaster } from "@/components/ui/sonner"
+import {
+  BottomNav,
+  BottomNavList,
+  BottomNavItem,
+  BottomNavIcon,
+  BottomNavBadge,
+  BottomNavLabel,
+} from "@/components/ui/bottom-nav"
 import { OfflineBanner } from "@/components/offline-banner"
 import { ModeToggle } from "@/components/mode-toggle"
 import { useUnreadTotal } from "@/features/chat/queries"
@@ -54,57 +62,25 @@ export function Layout() {
       <main className="flex-1 overflow-hidden">
         <Outlet />
       </main>
-      {/*
-        Flex-child nav, NOT `position: fixed`. iOS standalone PWA has a known
-        bug where `fixed bottom-0` + `safe-area-inset-bottom` renders against
-        the "large viewport" on launch — so the nav lands above its final
-        spot until a scroll forces a reflow. Flow layout sidesteps the bug.
-        The split between outer wrapper (variable safe-area pb) and inner
-        h-16 grid keeps the icon row at a stable 4rem regardless of URL-bar
-        transitions in Safari.
-      */}
-      <nav
-        className="safe-bottom shrink-0 border-t bg-background"
-        aria-label="Primary"
-      >
-        <div className="grid h-16 grid-cols-6">
+      <BottomNav>
+        <BottomNavList>
           {NAV.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              end={to === "/"}
-              title={label}
-              aria-label={label}
-              className={({ isActive }) =>
-                // Below sm: hide the text label so all icons fit comfortably
-                // on 360-390px PWAs. Icon + title attr keeps discoverability;
-                // aria-label keeps it accessible.
-                `relative flex flex-col items-center justify-center gap-1 text-[10px] ${
-                  isActive ? "text-primary" : "text-muted-foreground"
-                }`
-              }
-            >
-              <span className="relative">
-                <Icon className="h-5 w-5" />
-                {to === "/" && total > 0 && (
-                  <span
-                    // iOS-native badge styling: solid red-500 + white text +
-                    // ring matching the nav bg for separation. Previously used
-                    // `bg-destructive text-destructive-foreground` but our
-                    // theme never defines `--destructive-foreground`, so the
-                    // text rendered as dark-gray-on-dark-red = invisible.
-                    className="absolute -right-2 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none tabular-nums text-white ring-2 ring-background"
-                    aria-label={`${total} unread messages`}
-                  >
-                    {total > 99 ? "99+" : total}
-                  </span>
-                )}
-              </span>
-              <span className="hidden sm:inline">{label}</span>
-            </NavLink>
+            <BottomNavItem key={to} asChild>
+              <NavLink to={to} end={to === "/"} title={label} aria-label={label}>
+                <BottomNavIcon>
+                  <Icon />
+                  {to === "/" && total > 0 && (
+                    <BottomNavBadge aria-label={`${total} unread messages`}>
+                      {total > 99 ? "99+" : total}
+                    </BottomNavBadge>
+                  )}
+                </BottomNavIcon>
+                <BottomNavLabel>{label}</BottomNavLabel>
+              </NavLink>
+            </BottomNavItem>
           ))}
-        </div>
-      </nav>
+        </BottomNavList>
+      </BottomNav>
       <Toaster position="top-center" />
     </div>
   )
