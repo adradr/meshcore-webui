@@ -12,6 +12,15 @@ from app.schemas.messages import MessageIn, MessageOut, MessagesPage
 
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
+# DM conversations are keyed by whatever the bridge stores in
+# `contact_pub_key`. For inbound messages that is the MeshCore
+# `pubkey_prefix` — a short hex prefix (typically 12 chars / 6 bytes),
+# NOT the full 64-char public key, because CONTACT_MSG_RECV events only
+# carry a prefix. Thread links therefore navigate to `/chat/<prefix>`,
+# so the query filter must accept a hex prefix as well as a full key.
+# Bounded, hex-only matching keeps the param defensively validated.
+_CONTACT_PUB_KEY_PATTERN = r"^[0-9a-fA-F]{2,64}$"
+
 
 def _parse_cursor(before: str | None) -> dt.datetime | None:
     if before is None:
@@ -31,7 +40,7 @@ async def list_messages(
     db: Annotated[AsyncSession, Depends(get_db)],
     contact_pub_key: Annotated[
         str | None,
-        Query(pattern=r"^[0-9a-fA-F]{64}$"),
+        Query(pattern=_CONTACT_PUB_KEY_PATTERN),
     ] = None,
     channel_idx: int | None = None,
     before: str | None = None,

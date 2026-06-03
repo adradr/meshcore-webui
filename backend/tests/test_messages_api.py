@@ -9,9 +9,9 @@ from app.db.models import Message
 from app.main import app
 from app.services.read_state import mark_read
 
-# 64-hex pubkeys used in tests. Routes now validate the GET
-# `contact_pub_key` query param against this format, so DB rows and
-# query strings must agree on a hex value.
+# 64-hex pubkeys used in tests. The GET `contact_pub_key` query param is
+# validated as a hex string (full key or a shorter `pubkey_prefix`), so DB
+# rows and query strings must agree on a hex value.
 PK_A = "a" * 64
 PK_B = "b" * 64
 
@@ -353,8 +353,22 @@ async def test_get_messages_rejects_malformed_contact_pub_key(client):
 
 
 @pytest.mark.asyncio
-async def test_get_messages_rejects_short_hex_contact_pub_key(client):
-    r = await client.get("/api/messages?contact_pub_key=" + "a" * 63)
+async def test_get_messages_accepts_pubkey_prefix(client, db):
+    # Inbound DMs are stored keyed by the MeshCore `pubkey_prefix` (a short
+    # hex prefix, not the full 64-char key), so a thread link queries with
+    # that prefix. The filter must accept it rather than 422.
+    prefix = "8a6c42f8cf49"
+    await _insert_messages(db, 2, contact_pub_key=prefix)
+    r = await client.get(f"/api/messages?contact_pub_key={prefix}")
+    assert r.status_code == 200
+    items = r.json()["items"]
+    assert len(items) == 2
+    assert all(i["contact_pub_key"] == prefix for i in items)
+
+
+@pytest.mark.asyncio
+async def test_get_messages_rejects_empty_contact_pub_key(client):
+    r = await client.get("/api/messages?contact_pub_key=")
     assert r.status_code == 422
 
 
