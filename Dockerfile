@@ -25,11 +25,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv for fast deps
 RUN pip install --no-cache-dir uv
 
-# Install runtime deps from the lockfile into a project-local venv (/app/.venv).
+# Install runtime deps into a project-local venv (/app/.venv).
 # --no-install-project keeps this layer cacheable (deps only); --no-editable
 # avoids pulling source into the lock-driven install path.
+# NOT --frozen: re-resolve so the `aiohttp>=3.14.0` security constraint in
+# pyproject.toml is applied (CVE-2026-34993 / CVE-2026-47265) rather than
+# shipping the version pinned in the committed (stale) uv.lock.
 COPY backend/pyproject.toml backend/uv.lock /app/
-RUN uv sync --frozen --no-dev --no-install-project --no-editable
+RUN uv sync --no-dev --no-install-project --no-editable
 
 # Strip system pip so a runtime process that gains a shell can't pip-install
 # a backdoor. uv itself stays for ops use (e.g. one-off `uv pip list`).

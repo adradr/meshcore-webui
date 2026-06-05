@@ -32,6 +32,13 @@ dev = [
   "pip-audit>=2.7",
 ]
 
+[tool.uv]
+# Security floor for a transitive dependency. aiohttp arrives via
+# pywebpush; 3.13.5 carries CVE-2026-34993 and CVE-2026-47265, both fixed
+# in 3.14.0. A constraint (not a direct dependency) keeps the resolver from
+# selecting an affected version without claiming we import it ourselves.
+constraint-dependencies = ["aiohttp>=3.14.0"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
