@@ -137,7 +137,11 @@
    * up to the document root.
    */
   html, body, #root {
-    @apply h-full overflow-hidden;
+    /* Height comes from JS-measured `--app-h` (see pwa/appHeight.ts), not a
+     * CSS viewport unit — iOS standalone PWA mis-resolves 100vh/100dvh/100%.
+     * `100%` is the pre-JS fallback. */
+    height: var(--app-h, 100%);
+    @apply overflow-hidden;
     overscroll-behavior: none;
     }
   body {
