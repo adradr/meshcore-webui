@@ -13,8 +13,12 @@ import { cn } from "@/lib/utils"
  * spot until a scroll forces a reflow. Flow layout sidesteps the bug.
  *
  * The split between the outer wrapper (variable safe-area padding via
- * `safe-bottom`) and the inner `BottomNavList` (fixed `h-16`) keeps the icon
- * row at a stable 4rem regardless of URL-bar transitions in Safari.
+ * `safe-bottom-compact`) and the inner `BottomNavList` (fixed `h-16`) keeps the
+ * icon row at a stable 4rem regardless of URL-bar transitions in Safari.
+ *
+ * We use `safe-bottom-compact` (capped) rather than the full `safe-bottom`
+ * inset — the full ~34px home-indicator band reads as a large empty strip
+ * below the icons; a few pixels of clearance is plenty.
  */
 function BottomNav({
   className,
@@ -26,7 +30,7 @@ function BottomNav({
       data-slot="bottom-nav"
       aria-label={ariaLabel}
       className={cn(
-        "safe-bottom shrink-0 border-t bg-background",
+        "safe-bottom-compact shrink-0 border-t bg-background",
         className
       )}
       {...props}

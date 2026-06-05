@@ -163,6 +163,15 @@
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+/*
+ * Compact variant for the bottom nav: the full home-indicator inset (~34px)
+ * leaves a large empty band below the icons. A few pixels of clearance is
+ * plenty above the indicator, so cap it. `min()` keeps it at 0 on devices
+ * without a home indicator (Touch-ID / desktop), where the inset is 0.
+ */
+.safe-bottom-compact {
+  padding-bottom: min(env(safe-area-inset-bottom, 0px), 0.5rem);
+}
 
 /* Trap Leaflet's z-index world.
  *
