@@ -14,9 +14,15 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="MeshCore" />
+    <!-- `default` (not `black-translucent`): black-translucent gives iOS
+         standalone PWAs a buggy layout viewport ~59px shorter than the
+         physical screen, leaving an unreachable strip below the bottom nav.
+         `default` bounds the web view to the real screen so position:fixed
+         bottom:0 lands on the true bottom. NOTE: this is read at install
+         time — changing it requires removing + re-adding the Home Screen app. -->
     <meta
       name="apple-mobile-web-app-status-bar-style"
-      content="black-translucent"
+      content="default"
     />
     <link
       rel="apple-touch-icon"
