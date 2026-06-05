@@ -137,16 +137,13 @@
    * up to the document root.
    */
   html, body, #root {
-    /* Height = JS-measured visible height (`--app-h`, see pwa/appHeight.ts)
-     * PLUS the top safe-area inset. On an iOS standalone PWA the document is
-     * anchored at the physical top (under the Dynamic Island), but
-     * `innerHeight` EXCLUDES the top inset — so sizing to `--app-h` alone
-     * leaves a strip equal to `safe-area-inset-top` uncovered at the *bottom*
-     * (measured: screen 852 − innerHeight 793 = inset-top 59). Adding the
-     * inset back makes the shell reach the physical bottom. On devices with
-     * no top inset the term is 0, so this is a no-op there. `100%` is the
-     * pre-JS fallback. */
-    height: calc(var(--app-h, 100%) + env(safe-area-inset-top, 0px));
+    /* Height = JS-measured visible viewport height (`--app-h`, see
+     * pwa/appHeight.ts). On this device `innerHeight` (793) == the visible
+     * area; the difference from the physical screen (852) is the *top*
+     * Dynamic-Island inset, which lives at the top, not a bottom strip — so
+     * `--app-h` alone puts the nav exactly at the visible bottom. `100%` is
+     * the pre-JS fallback. */
+    height: var(--app-h, 100%);
     @apply overflow-hidden;
     overscroll-behavior: none;
     }
