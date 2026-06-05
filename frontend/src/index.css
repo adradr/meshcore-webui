@@ -137,14 +137,11 @@
    * up to the document root.
    */
   html, body, #root {
-    /* Height = JS-measured visible viewport height (`--app-h`, see
-     * pwa/appHeight.ts). On this device `innerHeight` (793) == the visible
-     * area; the difference from the physical screen (852) is the *top*
-     * Dynamic-Island inset, which lives at the top, not a bottom strip — so
-     * `--app-h` alone puts the nav exactly at the visible bottom. `100%` is
-     * the pre-JS fallback. */
-    height: var(--app-h, 100%);
-    @apply overflow-hidden;
+    /* Lock the document to the viewport so it can't scroll/rubber-band. The
+     * app shell itself is `position: fixed; inset: 0` (see layout.tsx) — it
+     * anchors to the viewport directly rather than trusting iOS's unstable
+     * height APIs, so these heights are just a backstop. */
+    @apply h-full overflow-hidden;
     overscroll-behavior: none;
     }
   body {

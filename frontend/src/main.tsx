@@ -15,13 +15,8 @@ import {
   resolveWsUrl,
 } from "@/realtime/WebSocketProvider"
 import { ReloadPrompt } from "@/pwa/ReloadPrompt"
-import { installAppHeight } from "@/pwa/appHeight"
 import { HapticProvider } from "@/haptics/HapticProvider"
 import './index.css'
-
-// Pin `--app-h` to the real visible viewport height before first paint —
-// iOS standalone PWAs mis-resolve CSS viewport units (see appHeight.ts).
-installAppHeight()
 
 const queryClient = new QueryClient({
   defaultOptions: {

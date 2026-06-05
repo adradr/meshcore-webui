@@ -47,12 +47,17 @@ export function Layout() {
   useDocumentTitleUnreadBadge(total)
 
   return (
-    // Shell fills the parent via `h-full` (html → body → #root are all
-    // `h-full overflow-hidden` in index.css). Percentage heights avoid
-    // viewport-unit bugs on iOS standalone PWA where `100vh` can overshoot
-    // the visible area by the home-indicator height.
+    // Shell is pinned to the viewport with `position: fixed; inset: 0`, NOT a
+    // height value. iOS standalone PWA reports an UNSTABLE viewport height —
+    // `window.innerHeight` flips between ~793 and 852 on a Dynamic-Island
+    // device, and `100vh` / `100dvh` / `height:100%` / a JS-measured height
+    // each lock onto the wrong one, floating the bottom nav off the real edge.
+    // A fixed box anchors to BOTH the top and bottom of the visual viewport,
+    // so the nav lands at the true bottom regardless of what the height APIs
+    // report (confirmed on-device: `position:fixed; bottom:0` hits the real
+    // screen bottom even when innerHeight is wrong).
     <div
-      className="safe-top flex h-full flex-col"
+      className="safe-top fixed inset-0 flex flex-col"
     >
       <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
         <h1 className="text-base font-semibold tracking-wider">MESHCORE</h1>
