@@ -30,6 +30,10 @@ dev = [
   "mypy>=1.10",
   "freezegun>=1.5",
   "pip-audit>=2.7",
+  # pip ships in the venv as a seed tool; 26.1.1 carries PYSEC-2026-196
+  # (fixed in 26.1.2). Declare a floor so `pip-audit` stays green — it's not
+  # a runtime import, just the bundled installer.
+  "pip>=26.1.2",
 ]
 
 [tool.uv]
