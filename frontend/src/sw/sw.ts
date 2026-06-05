@@ -2,15 +2,24 @@
 import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
 import { resolveTargetUrl } from "./resolveTargetUrl"
-import { installSkipWaitingGate } from "./skipWaitingGate"
 import { stashPendingResubscribe } from "./pendingResubscribe"
 
 declare const self: ServiceWorkerGlobalScope
 
-// Defer skipWaiting() until the page posts {type: "SKIP_WAITING"} after the
-// user clicks the reload prompt. This avoids silently swapping the SW under
-// every open tab when an update lands.
-installSkipWaitingGate(self)
+// Auto-activate a freshly-installed SW, then take control of open clients.
+// vite-plugin-pwa (`registerType: "autoUpdate"`) reloads the page on the
+// resulting `controllerchange`, so a new build lands on the next launch with
+// no user action.
+//
+// This replaces a `skipWaiting()` gate that only fired on a SKIP_WAITING
+// message from the reload prompt — that prompt never surfaces on iOS
+// standalone PWAs, so the waiting SW never activated and devices stayed
+// pinned to stale bundles across every deploy. Auto-activation is the right
+// trade-off for a self-hosted, single-origin app where the SW is served from
+// the operator's own container.
+self.addEventListener("install", () => {
+  self.skipWaiting()
+})
 clientsClaim()
 
 cleanupOutdatedCaches()
