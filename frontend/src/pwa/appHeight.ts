@@ -8,10 +8,12 @@
  *                 which floats the bottom nav up and leaves a body-coloured
  *                 band beneath it.
  *
- * `window.innerHeight` reports the true visible height reliably across iOS
- * versions, so we measure it in JS and expose it as `--app-h`. The shell
- * height chain (`html, body, #root { height: var(--app-h, 100%) }`) consumes
- * it; the `100%` fallback keeps SSR / first-paint correct until this runs.
+ * `window.innerHeight` tracks the visible content height reliably across iOS
+ * versions, so we measure it in JS and expose it as `--app-h`. Note it
+ * EXCLUDES the top safe-area inset on a standalone PWA, so the CSS that
+ * consumes it adds `env(safe-area-inset-top)` back to reach the physical
+ * bottom (see the `html, body, #root` rule in index.css). The `100%`
+ * fallback keeps first-paint correct until this runs.
  *
  * Returns a disposer that detaches the listeners (used by tests; the app
  * installs it for the page lifetime and never disposes).
