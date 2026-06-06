@@ -24,8 +24,8 @@ See the **Public-internet hardening checklist** section of [README.md](README.md
 All images are signed with [cosign](https://github.com/sigstore/cosign) via GitHub Actions OIDC. Verify before deploying:
 
 ```bash
-cosign verify ghcr.io/<owner>/meshcore-webui:<tag> \
-  --certificate-identity-regexp '^https://github\.com/<owner>/meshcore-webui/' \
+cosign verify ghcr.io/adradr/meshcore-webui:<tag> \
+  --certificate-identity-regexp '^https://github\.com/adradr/meshcore-webui/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 
@@ -33,8 +33,8 @@ Build provenance (SLSA v1) and SBOM attestations are also published. Inspect wit
 
 ```bash
 cosign verify-attestation --type spdxjson \
-  ghcr.io/<owner>/meshcore-webui:<tag> \
-  --certificate-identity-regexp '^https://github\.com/<owner>/meshcore-webui/' \
+  ghcr.io/adradr/meshcore-webui:<tag> \
+  --certificate-identity-regexp '^https://github\.com/adradr/meshcore-webui/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
 ```
 

@@ -202,7 +202,7 @@ You need: Docker + Docker Compose, a MeshCore device reachable from the containe
 ### 1. Clone
 
 ```bash
-git clone https://github.com/<you>/meshcore-webui.git
+git clone https://github.com/adradr/meshcore-webui.git
 cd meshcore-webui
 mkdir -p data secrets
 ```
@@ -336,7 +336,7 @@ Example `docker-compose.yml` (see `docker-compose.example.yml` for the fully-ann
 ```yaml
 services:
   meshcore-webui:
-    image: ghcr.io/<owner>/meshcore-webui:latest
+    image: ghcr.io/adradr/meshcore-webui:latest
     restart: unless-stopped
     ports:
       # Loopback-only by default; change to "0.0.0.0:8090:8080" for direct LAN.
@@ -408,7 +408,7 @@ Any reverse proxy works as long as it forwards WebSocket upgrades. Tested with:
 
 ## Image tags
 
-The CI workflow publishes to `ghcr.io/<owner>/meshcore-webui` with three coordinates:
+The CI workflow publishes to `ghcr.io/adradr/meshcore-webui` with three coordinates:
 
 | Tag | When it moves | Use it for |
 |---|---|---|
@@ -503,14 +503,14 @@ If you're exposing this service beyond a trusted LAN, walk through this list:
 6. **Pin the image by digest, not by tag.** Tags are mutable. Once you've verified a build, pin it in your compose file:
 
    ```yaml
-   image: ghcr.io/<owner>/meshcore-webui@sha256:<digest-from-release-notes>
+   image: ghcr.io/adradr/meshcore-webui@sha256:<digest-from-release-notes>
    ```
 
 7. **Verify the image signature with [cosign](https://github.com/sigstore/cosign) before deploying.** Images are signed via GitHub Actions OIDC, with SLSA v1 build provenance and an SPDX SBOM attached as attestations. Verify keylessly:
 
    ```bash
-   cosign verify ghcr.io/<owner>/meshcore-webui:<tag> \
-     --certificate-identity 'https://github.com/<owner>/meshcore-webui/.github/workflows/ci.yml@refs/heads/main' \
+   cosign verify ghcr.io/adradr/meshcore-webui:<tag> \
+     --certificate-identity 'https://github.com/adradr/meshcore-webui/.github/workflows/ci.yml@refs/heads/main' \
      --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'
    ```
 
