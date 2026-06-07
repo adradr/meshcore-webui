@@ -36,6 +36,19 @@ def topic_for_event_type(t: str) -> str:
     return TOPIC_MAP.get(t, "system")
 
 
+# meshcore lib EventType.ERROR payload error codes (src/meshcore/events.py).
+_ERR_CODE_NOT_FOUND = 2
+
+
+def _event_error_code(ev: object) -> int | None:
+    """Extract the firmware error code from an EventType.ERROR event, or
+    None if the event has no structured error payload."""
+    payload = getattr(ev, "payload", None)
+    if isinstance(payload, dict):
+        return payload.get("error_code")
+    return None
+
+
 def _sanitize_rx_log_payload(payload: dict) -> dict:
     """Make an RX_LOG_DATA payload JSON-safe AND consistent with our Zod/pydantic schemas.
 
@@ -587,54 +600,65 @@ class MeshCoreClient:
                 result["coords_reset"] = True
                 log.warning("RESET ACTION=device_coords completed=True")
             if clear_contacts:
-                # Inline the contact-clearing logic here so the whole sweep
-                # stays under one `_lock` and one supervisor wake-up.
-                #
-                # Two real-world quirks of the firmware command queue:
-                #   1. Rapid back-to-back remove_contact calls saturate the
-                #      device's queue and most start returning None (timeout).
-                #      We sleep a short tick between calls to keep the
-                #      device's processor happy.
-                #   2. Each successful remove_contact triggers a
-                #      CONTACT_DELETED push event which the lib processes by
-                #      popping the entry from mc.contacts. Iterating over
-                #      .keys() while that happens is fragile — snapshot
-                #      first.
-                #
-                # We also re-derive the removed count by diffing the
-                # contact dict before/after, because the lib's per-call
-                # OK/ERROR signal is noisy at scale (the user saw 5/258
-                # OK responses even when more were actually removed).
+                # Bulk-remove every contact. Two firmware/lib realities drive
+                # this design:
+                #   1. The lib does NOT pop from `mc.contacts` on a successful
+                #      remove (nor on the CONTACT_DELETED push), and
+                #      `ensure_contacts(follow=False)` is a no-op while the
+                #      cache is non-empty — so we maintain the cache ourselves
+                #      and derive the count from it. (A naive before/after diff
+                #      against ensure_contacts always reported removed=0.)
+                #   2. Rapid back-to-back removes saturate the device's command
+                #      queue; some return None (timeout) or ERROR. We retry the
+                #      stragglers across a few rounds with escalating pacing.
                 keys_before = list((mc.contacts or {}).keys())
                 size_before = len(keys_before)
-                for k in keys_before:
-                    try:
-                        r = await mc.commands.remove_contact(k)
-                    except Exception as e:  # noqa: BLE001 — best-effort sweep
-                        log.warning("clear_contacts: %s raised %s", k, e)
-                        r = None
-                    if r is None or r.type == EventType.ERROR:
-                        log.warning(
-                            "clear_contacts: device rejected remove for %s", k,
-                        )
-                    # Brief breather so the firmware command queue can
-                    # drain before the next remove. Even ~50ms makes a
-                    # large bulk delete go from "5 of 258 OK" to "most or
-                    # all OK".
-                    await asyncio.sleep(0.05)
-                # Re-sync the lib's cache with the device's real state.
-                # CONTACT_DELETED pushes auto-update mc.contacts as they
-                # arrive, but the WS event we forward is best-effort —
-                # explicitly asking the lib to re-walk the device gets
-                # us a truthful post-state count without trusting per-
-                # call OKs (which were unreliable at scale).
-                try:
-                    await mc.ensure_contacts(follow=False)
-                except Exception:
-                    log.exception("clear_contacts: ensure_contacts after sweep")
+                remaining = list(keys_before)
+                removed = 0
+                for round_idx in range(self._CLEAR_CONTACTS_ROUNDS):
+                    if not remaining:
+                        break
+                    pacing = self._CLEAR_CONTACTS_PACING_S * (round_idx + 1)
+                    still_failing: list[str] = []
+                    for k in remaining:
+                        try:
+                            r = await mc.commands.remove_contact(k)
+                        except Exception as e:  # noqa: BLE001 — best-effort sweep
+                            log.warning("clear_contacts: %s raised %s", k, e)
+                            r = None
+                        removed_ok = r is not None and r.type == EventType.OK
+                        # NOT_FOUND means a prior round's remove landed but its
+                        # OK was lost to a timeout — the contact is already gone.
+                        if (
+                            not removed_ok
+                            and r is not None
+                            and r.type == EventType.ERROR
+                            and _event_error_code(r) == _ERR_CODE_NOT_FOUND
+                        ):
+                            removed_ok = True
+                        if removed_ok:
+                            if mc.contacts is not None:
+                                mc.contacts.pop(k, None)
+                            removed += 1
+                        else:
+                            still_failing.append(k)
+                            log.debug(
+                                "clear_contacts: remove failed for %s "
+                                "(will retry if rounds remain)", k,
+                            )
+                        # Brief breather so the firmware command queue can drain.
+                        await asyncio.sleep(pacing)
+                    remaining = still_failing
                 size_after = len(mc.contacts or {})
-                removed = max(0, size_before - size_after)
                 result["removed_contacts"] = removed
+                if remaining:
+                    preview = ", ".join(remaining[:8])
+                    if len(remaining) > 8:
+                        preview += " …"
+                    log.warning(
+                        "clear_contacts: %d contact(s) survived after %d rounds: %s",
+                        len(remaining), self._CLEAR_CONTACTS_ROUNDS, preview,
+                    )
                 log.warning(
                     "RESET ACTION=device_contacts before=%d after=%d removed=%d",
                     size_before, size_after, removed,
@@ -755,6 +779,13 @@ class MeshCoreClient:
     # the lib's post-reconnect `ensure_contacts()` has time to finish
     # repopulating `mc.contacts` before the next REST call lands.
     _RECONNECT_GRACE_S: float = 0.5
+
+    # Bulk contact removal: the firmware command queue saturates under
+    # rapid back-to-back removes, so some calls time out / error. We retry
+    # the stragglers across a few rounds with escalating pacing. Empirically
+    # nearly all clear within 1-2 rounds.
+    _CLEAR_CONTACTS_ROUNDS: int = 3
+    _CLEAR_CONTACTS_PACING_S: float = 0.05
 
     async def _wait_for_reconnect(self, *, timeout: float) -> bool:
         """Wait until the radio drops *then* re-establishes the TCP link.
