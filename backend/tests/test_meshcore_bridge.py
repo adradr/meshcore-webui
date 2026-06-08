@@ -509,6 +509,172 @@ async def test_mute_mode_overrides_per_conversation_mute(
 
 
 @pytest.mark.asyncio
+async def test_new_contact_pushes_when_enabled(db, engine, monkeypatch):
+    """Toggle on → one push with the new-contact title and the adv_name body."""
+    from app.db.models import Base
+    from app.services.new_contact_notify import set_new_contact_notify
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    await set_new_contact_notify(db, True)
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="new_contact",
+        payload={"public_key": "ab" * 32, "adv_name": "Alice"},
+        attributes={"public_key": "ab" * 32, "adv_name": "Alice"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+    note = notify_spy.await_args.args[0]
+    assert note.title == "New contact discovered"
+    assert note.body == "Alice"
+
+
+@pytest.mark.asyncio
+async def test_new_contact_body_falls_back_to_pubkey_prefix(
+    db, engine, monkeypatch,
+):
+    """No adv_name → body is the 8-char pubkey prefix."""
+    from app.db.models import Base
+    from app.services.new_contact_notify import set_new_contact_notify
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    await set_new_contact_notify(db, True)
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="new_contact",
+        payload={"public_key": "ab" * 32},  # 64 hex chars, no adv_name
+        attributes={"public_key": "ab" * 32},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+    note = notify_spy.await_args.args[0]
+    assert note.title == "New contact discovered"
+    assert note.url == "/contacts"
+    assert note.body == ("ab" * 32)[:8] == "abababab"
+
+
+@pytest.mark.asyncio
+async def test_new_contact_body_falls_back_to_unknown(db, engine, monkeypatch):
+    """No adv_name and no public_key → body is 'unknown' (whitespace stripped)."""
+    from app.db.models import Base
+    from app.services.new_contact_notify import set_new_contact_notify
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    await set_new_contact_notify(db, True)
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    # whitespace-only adv_name also exercises the .strip() fallback path.
+    bridge.handle_event(WireEvent(
+        type="new_contact",
+        payload={"adv_name": "  "},
+        attributes={"adv_name": "  "},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_awaited_once()
+    note = notify_spy.await_args.args[0]
+    assert note.body == "unknown"
+
+
+@pytest.mark.asyncio
+async def test_new_contact_silent_by_default(db, engine, monkeypatch):
+    """Default off → no push for a discovered contact."""
+    from app.db.models import Base
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="new_contact",
+        payload={"public_key": "ab" * 32, "adv_name": "Alice"},
+        attributes={"public_key": "ab" * 32, "adv_name": "Alice"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_new_contact_silenced_by_global_mute(db, engine, monkeypatch):
+    """Enabled, but global mode=mute → no push (mute wins)."""
+    from app.db.models import Base
+    from app.services.new_contact_notify import set_new_contact_notify
+    from app.services.push_mode import set_mode
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    await set_new_contact_notify(db, True)
+    await set_mode(db, "mute")
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+    notify_spy = AsyncMock()
+    bridge._notify = notify_spy  # type: ignore[method-assign]
+
+    bridge.handle_event(WireEvent(
+        type="new_contact",
+        payload={"public_key": "ab" * 32, "adv_name": "Alice"},
+        attributes={"public_key": "ab" * 32, "adv_name": "Alice"},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    notify_spy.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
     from app.db.models import Base, Message
     async with engine.begin() as c:

@@ -35,3 +35,24 @@ export function useSetPushMode() {
     },
   })
 }
+
+const NewContactNotifySchema = z.object({ enabled: z.boolean() })
+
+export function useNewContactNotify() {
+  return useQuery({
+    queryKey: ["push", "new-contact"],
+    queryFn: () => api.get("/api/push/new-contact", NewContactNotifySchema),
+    staleTime: 30_000,
+  })
+}
+
+export function useSetNewContactNotify() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      api.put("/api/push/new-contact", { enabled }, NewContactNotifySchema),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["push", "new-contact"] })
+    },
+  })
+}
