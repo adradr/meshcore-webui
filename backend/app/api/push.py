@@ -17,6 +17,9 @@ from app.db.session import get_db
 from app.schemas.push import (
     PushResubscribeIn, PushSubscriptionIn, PushSubscriptionOut, PushUnsubscribeIn,
 )
+from app.services.new_contact_notify import (
+    get_new_contact_notify, set_new_contact_notify,
+)
 from app.services.push_mode import get_mode, set_mode
 
 router = APIRouter(prefix="/api/push", tags=["push"])
@@ -30,6 +33,12 @@ class PushModeOut(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
     mode: Literal["all", "mentions", "mute"]
+
+
+class NewContactNotifyOut(BaseModel):
+    """Wire shape for the new-contact push toggle."""
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
 
 
 async def _upsert_subscription(
@@ -164,6 +173,24 @@ async def put_push_mode(
     """Set the global push mode. Pydantic's ``Literal`` validates the value."""
     await set_mode(db, payload.mode)
     return PushModeOut(mode=payload.mode)
+
+
+@router.get("/new-contact", response_model=NewContactNotifyOut)
+async def get_new_contact_notify_endpoint(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NewContactNotifyOut:
+    """Return whether new-contact push notifications are enabled (default off)."""
+    return NewContactNotifyOut(enabled=await get_new_contact_notify(db))
+
+
+@router.put("/new-contact", response_model=NewContactNotifyOut)
+async def put_new_contact_notify_endpoint(
+    payload: NewContactNotifyOut,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NewContactNotifyOut:
+    """Enable/disable new-contact push notifications."""
+    await set_new_contact_notify(db, payload.enabled)
+    return NewContactNotifyOut(enabled=payload.enabled)
 
 
 @router.get("/vapid-public-key")

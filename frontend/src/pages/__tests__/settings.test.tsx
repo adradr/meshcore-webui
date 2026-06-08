@@ -24,6 +24,10 @@ vi.mock("@/features/push/PushModeRadio", () => ({
   PushModeRadio: () => <div data-testid="push-mode-radio" />,
 }))
 
+vi.mock("@/features/push/NewContactNotifyToggle", () => ({
+  NewContactNotifyToggle: () => <div data-testid="new-contact-notify-toggle" />,
+}))
+
 vi.mock("@/features/admin/DangerZone", () => ({
   DangerZone: () => <div data-testid="danger-zone" />,
 }))
