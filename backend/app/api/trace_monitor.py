@@ -138,8 +138,9 @@ async def start_monitor(
     except AlreadyRunningError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
-        # Shouldn't fire because schema validates interval, but keep the
-        # door honest in case the runtime window narrows below the schema's.
+        # The settings-driven interval window lives in the service — the
+        # schema only requires interval_s > 0 — so this IS the 422 path
+        # for out-of-range intervals.
         raise HTTPException(status_code=422, detail=str(e)) from e
 
     return TraceMonitorStartResponse(
@@ -293,11 +294,24 @@ async def list_sessions(
 
 @router.delete("/sessions/{session_id}")
 async def delete_session(
+    request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     session_id: str = Path(..., pattern=_SESSION_ID_PATTERN),
 ) -> dict[str, int]:
     """Wipe every trace sample for ``session_id``. Idempotent — returns
-    ``{"deleted": 0}`` when nothing matched."""
+    ``{"deleted": 0}`` when nothing matched.
+
+    Refuses (409) to delete the ACTIVE session: the monitor would keep
+    inserting under the same session_id, so the session would "reappear"
+    with a truncated history. Stop the monitor first.
+    """
+    mon = getattr(request.app.state, "trace_monitor", None)
+    live = mon.session if mon is not None else None
+    if live is not None and live.session_id == session_id:
+        raise HTTPException(
+            status_code=409,
+            detail="session is currently recording — stop the monitor first",
+        )
     result = await db.execute(
         delete(TraceSample).where(TraceSample.session_id == session_id)
     )

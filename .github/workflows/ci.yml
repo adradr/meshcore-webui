@@ -19,11 +19,10 @@ jobs:
       - name: Install Python 3.12
         run: uv python install 3.12
       - name: Install deps
-        # NOT --frozen: the committed uv.lock is regenerated here so the
-        # `aiohttp>=3.14.0` security constraint in pyproject.toml is honored
-        # (CVE-2026-34993 / CVE-2026-47265). The PyPI-blocked dev sandbox
-        # can't re-lock locally, so the resolution happens in CI instead.
-        run: uv sync --extra dev
+        # --frozen: honor the committed uv.lock (it satisfies the
+        # `aiohttp>=3.14.0` security floor in pyproject.toml) so CI tests
+        # the exact dependency set the Docker image will ship.
+        run: uv sync --frozen --extra dev
         working-directory: backend
       - name: Run tests
         run: uv run pytest -q

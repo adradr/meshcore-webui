@@ -14,7 +14,8 @@ def test_empty_api_key_string_is_rejected():
     the empty value at startup."""
     with pytest.raises(ValidationError) as exc:
         Settings(MESHCORE_WEBUI_API_KEY="")  # type: ignore[call-arg]
-    assert "at least 1 character" in str(exc.value).lower() or "min_length" in str(exc.value).lower()
+    msg = str(exc.value).lower()
+    assert "at least 1 character" in msg or "min_length" in msg
 
 
 def test_unset_api_key_is_allowed_as_open_mode():
@@ -80,3 +81,42 @@ def test_rejects_private_or_non_http_elevation_urls(bad_url, monkeypatch):
 def test_accepts_public_hostnames(good_url, monkeypatch):
     monkeypatch.setenv("MESHCORE_WEBUI_ELEVATION_BASE_URL", good_url)
     Settings()  # type: ignore[call-arg]  # no raise
+
+
+class TestTraceMonitorIntervalBounds:
+    """Interval bounds must be positive and form a non-inverted window —
+    otherwise TraceMonitor rejects every start with a confusing
+    "must be in [300, 5]"-style error (trace_monitor.py range check)."""
+
+    def test_min_greater_than_max_is_rejected(self, monkeypatch):
+        monkeypatch.setenv("MESHCORE_WEBUI_TRACE_MONITOR_MIN_INTERVAL_S", "600")
+        monkeypatch.setenv("MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S", "5")
+        with pytest.raises(ValidationError) as exc:
+            Settings()  # type: ignore[call-arg]
+        assert "must not exceed" in str(exc.value)
+
+    @pytest.mark.parametrize("env", [
+        "MESHCORE_WEBUI_TRACE_MONITOR_MIN_INTERVAL_S",
+        "MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
+    ])
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_non_positive_interval_is_rejected(self, monkeypatch, env, value):
+        monkeypatch.setenv(env, value)
+        with pytest.raises(ValidationError):
+            Settings()  # type: ignore[call-arg]
+
+    def test_equal_min_max_is_accepted(self, monkeypatch):
+        monkeypatch.setenv("MESHCORE_WEBUI_TRACE_MONITOR_MIN_INTERVAL_S", "30")
+        monkeypatch.setenv("MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S", "30")
+        Settings()  # type: ignore[call-arg]  # no raise
+
+
+@pytest.mark.parametrize("env,value", [
+    ("MESHCORE_WEBUI_RX_LOG_BUFFER_SIZE", "0"),
+    ("MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S", "0"),
+    ("MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S", "-2.5"),
+])
+def test_non_positive_loop_settings_are_rejected(monkeypatch, env, value):
+    monkeypatch.setenv(env, value)
+    with pytest.raises(ValidationError):
+        Settings()  # type: ignore[call-arg]

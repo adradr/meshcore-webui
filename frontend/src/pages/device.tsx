@@ -248,6 +248,7 @@ function PositionCard() {
   useEffect(() => {
     if (!editing) return
     if (latText === "" && self?.adv_lat != null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setLatText(self.adv_lat.toString())
     }
     if (lonText === "" && self?.adv_lon != null) {
@@ -524,7 +525,12 @@ export function DevicePage() {
           onValueChange={handleTabChange}
           className="flex h-full flex-col gap-4"
         >
-          <TabsList className="sticky top-0 z-10 w-full self-stretch">
+          {/* Full-bleed sticky wrapper: negative margins cancel PageShell's
+              p-4 so the stuck strip reaches the true top edge with an opaque
+              background — otherwise scrolled content peeks through the 16px
+              padding gap above/around the TabsList. */}
+          <div className="sticky top-0 z-10 -mx-4 -mt-4 self-stretch bg-background px-4 pb-1 pt-4">
+          <TabsList className="w-full">
             <TabsTrigger value="overview" className="flex-1">
               Overview
             </TabsTrigger>
@@ -541,6 +547,7 @@ export function DevicePage() {
               Noise
             </TabsTrigger>
           </TabsList>
+          </div>
           <TabsContent value="overview" className="mt-0">
             <DeviceInfoPanel />
           </TabsContent>

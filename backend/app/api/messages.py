@@ -1,11 +1,13 @@
 from __future__ import annotations
+
 import datetime as dt
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
-from sqlalchemy import and_, delete, select, text
+from sqlalchemy import and_, delete, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.radio_errors import call_radio
 from app.db.models import Message
 from app.db.session import get_db
 from app.schemas.messages import MessageIn, MessageOut, MessagesPage
@@ -13,26 +15,41 @@ from app.schemas.messages import MessageIn, MessageOut, MessagesPage
 router = APIRouter(prefix="/api/messages", tags=["messages"])
 
 # DM conversations are keyed by whatever the bridge stores in
-# `contact_pub_key`. For inbound messages that is the MeshCore
-# `pubkey_prefix` — a short hex prefix (typically 12 chars / 6 bytes),
-# NOT the full 64-char public key, because CONTACT_MSG_RECV events only
-# carry a prefix. Thread links therefore navigate to `/chat/<prefix>`,
-# so the query filter must accept a hex prefix as well as a full key.
-# Bounded, hex-only matching keeps the param defensively validated.
+# `contact_pub_key`. That is the full 64-hex lowercase pubkey when the
+# contact cache resolves the wire's `pubkey_prefix` (and legacy
+# prefix-keyed rows are re-keyed at startup by DmKeyMigrator), but an
+# unresolvable prefix still falls back to the short hex prefix. Thread
+# links navigate to `/chat/<key>` with either shape, so the query filter
+# must accept a hex prefix as well as a full key. Bounded, hex-only
+# matching keeps the param defensively validated.
 _CONTACT_PUB_KEY_PATTERN = r"^[0-9a-fA-F]{2,64}$"
 
 
-def _parse_cursor(before: str | None) -> dt.datetime | None:
+def _parse_cursor(before: str | None) -> tuple[dt.datetime, int | None] | None:
+    """Parse a pagination cursor.
+
+    Two accepted shapes:
+
+    * ``"<iso-timestamp>"`` — legacy timestamp-only cursor.
+    * ``"<iso-timestamp>|<id>"`` — composite cursor. The id tie-break is
+      required for correctness: ``messages.timestamp`` defaults to SQLite's
+      ``CURRENT_TIMESTAMP`` (1-second resolution), so several rows can share
+      the boundary second; without the id a strict ``timestamp <`` filter
+      silently skips them on the next page.
+    """
     if before is None:
         return None
+    ts_part, sep, id_part = before.partition("|")
     try:
-        return dt.datetime.fromisoformat(before)
+        ts = dt.datetime.fromisoformat(ts_part)
+        cursor_id = int(id_part) if sep else None
     except ValueError:
-        raise HTTPException(400, f"Invalid cursor: {before!r}")
+        raise HTTPException(400, f"Invalid cursor: {before!r}") from None
+    return (ts, cursor_id)
 
 
-def _encode_cursor(ts: dt.datetime) -> str:
-    return ts.isoformat()
+def _encode_cursor(ts: dt.datetime, row_id: int) -> str:
+    return f"{ts.isoformat()}|{row_id}"
 
 
 @router.get("", response_model=MessagesPage)
@@ -42,21 +59,29 @@ async def list_messages(
         str | None,
         Query(pattern=_CONTACT_PUB_KEY_PATTERN),
     ] = None,
-    channel_idx: int | None = None,
+    channel_idx: Annotated[int | None, Query(ge=0, le=255)] = None,
     before: str | None = None,
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ) -> MessagesPage:
-    if limit < 1 or limit > 500:
-        raise HTTPException(400, "limit must be 1..500")
-    cursor_ts = _parse_cursor(before)
+    cursor = _parse_cursor(before)
 
     conds = []
     if contact_pub_key is not None:
         conds.append(Message.contact_pub_key == contact_pub_key)
     if channel_idx is not None:
         conds.append(Message.channel_idx == channel_idx)
-    if cursor_ts is not None:
-        conds.append(Message.timestamp < cursor_ts)
+    if cursor is not None:
+        cursor_ts, cursor_id = cursor
+        if cursor_id is None:
+            conds.append(Message.timestamp < cursor_ts)
+        else:
+            # Composite (timestamp, id) keyset — see _parse_cursor.
+            conds.append(
+                or_(
+                    Message.timestamp < cursor_ts,
+                    and_(Message.timestamp == cursor_ts, Message.id < cursor_id),
+                )
+            )
 
     stmt = (
         select(Message)
@@ -67,7 +92,9 @@ async def list_messages(
     rows = list((await db.execute(stmt)).scalars().all())
     has_more = len(rows) > limit
     items = rows[:limit]
-    next_cursor = _encode_cursor(items[-1].timestamp) if has_more and items else None
+    next_cursor = (
+        _encode_cursor(items[-1].timestamp, items[-1].id) if has_more and items else None
+    )
     return MessagesPage(
         items=[MessageOut.model_validate(m) for m in items],
         next_cursor=next_cursor,
@@ -84,29 +111,37 @@ async def send_message(
     if client is None:
         raise HTTPException(503, "MeshCore client not initialized")
 
-    expected_ack_hex: str | None = None
-    try:
-        if payload.contact_pub_key is not None:
-            result = await client.send_dm(payload.contact_pub_key, payload.text)
-            expected_ack_hex = (result or {}).get("expected_ack")
-            msg_type = "dm"
-        else:
-            await client.send_chan_msg(payload.channel_idx, payload.text)
-            msg_type = "chan"
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
-
+    # Persist the row BEFORE transmitting. On a zero-hop link the RF ACK
+    # can beat this handler's commit; the bridge's _handle_ack looks the
+    # row up by expected_ack_hex and permanently drops the ACK if the row
+    # isn't committed yet. Committing first closes that race — the radio
+    # result is patched in afterwards.
+    msg_type = "dm" if payload.contact_pub_key is not None else "chan"
     row = Message(
         msg_type=msg_type,
         contact_pub_key=payload.contact_pub_key,
         channel_idx=payload.channel_idx,
         direction="out",
         text=payload.text,
-        expected_ack_hex=expected_ack_hex,
     )
     db.add(row)
+    await db.commit()
+
+    try:
+        if payload.contact_pub_key is not None:
+            result = await call_radio(
+                client.send_dm(payload.contact_pub_key, payload.text)
+            )
+            row.expected_ack_hex = (result or {}).get("expected_ack")
+        else:
+            await call_radio(client.send_chan_msg(payload.channel_idx, payload.text))
+    except HTTPException:
+        # The radio never accepted the message — surface that in the
+        # stored row instead of leaving a phantom "pending" entry.
+        row.ack_state = "failed"
+        await db.commit()
+        raise
+
     await db.commit()
     await db.refresh(row)
     return row
@@ -158,19 +193,20 @@ async def list_threads(
         ) AS unread_count
       FROM messages m1
       INNER JOIN (
+        -- MAX(id) (monotonic) rather than MAX(timestamp): the timestamp
+        -- column has 1-second resolution (CURRENT_TIMESTAMP), so two
+        -- messages in the same second would both match a MAX(timestamp)
+        -- join and the thread would be listed twice.
         SELECT
           msg_type,
           COALESCE(contact_pub_key, '') AS pk,
           COALESCE(channel_idx, -1) AS ci,
-          MAX(timestamp) AS max_ts
+          MAX(id) AS max_id
         FROM messages
         GROUP BY msg_type, pk, ci
       ) m2
-      ON m1.msg_type = m2.msg_type
-         AND COALESCE(m1.contact_pub_key, '') = m2.pk
-         AND COALESCE(m1.channel_idx, -1) = m2.ci
-         AND m1.timestamp = m2.max_ts
-      ORDER BY m1.timestamp DESC
+      ON m1.id = m2.max_id
+      ORDER BY m1.timestamp DESC, m1.id DESC
       LIMIT :limit
     """)
     rows = (await db.execute(sql, {"limit": limit})).mappings().all()

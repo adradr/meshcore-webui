@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import select
+
 from app.db.models import PushSubscription
 
 SUB = {
@@ -173,10 +174,15 @@ async def test_resubscribe_at_cap_still_succeeds(client, db, monkeypatch):
 @pytest.mark.asyncio
 async def test_get_vapid_public_key_returns_base64url(client, tmp_path, monkeypatch):
     # Generate a temp keypair for the test
-    import sys; sys.path.insert(0, "scripts")
+    import sys
+
+    sys.path.insert(0, "scripts")
     from scripts.gen_vapid import generate
     _, pub_b64 = generate(tmp_path)
-    monkeypatch.setattr("app.core.config.settings.vapid_private_key_path", str(tmp_path / "vapid_private.pem"))
+    monkeypatch.setattr(
+        "app.core.config.settings.vapid_private_key_path",
+        str(tmp_path / "vapid_private.pem"),
+    )
     from app.core.vapid import load_vapid
     load_vapid.cache_clear()
     r = await client.get("/api/push/vapid-public-key")

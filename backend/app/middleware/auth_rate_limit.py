@@ -97,7 +97,11 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
     Path scope matches `APIKeyMiddleware.GATED_PREFIXES` /
     `GATED_EXACT_PATHS` so the public attachment routes (`/s/`, `/i/`)
     and the always-open endpoints (`/api/health`, `/api/auth/info`,
-    `/api/push/vapid-public-key`) bypass the limiter entirely.
+    `/api/push/vapid-public-key`) bypass the limiter's dispatch entirely.
+    `/api/auth/info` is a special case: its route handler charges
+    presented-but-invalid bearers to this limiter directly (via
+    `get_instance()`), because the endpoint is a key-validity oracle
+    that returns 200 rather than 401.
 
     `trust_x_forwarded_for` MUST be set only when the app is behind a
     reverse proxy that strips/sets the header itself — otherwise any
@@ -153,7 +157,7 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
         # (e.g. tests, future hot-reload) take effect without a restart.
         self.limiter.per_min = self._per_min()
 
-        key = self._client_key(request)
+        key = self.client_key(request)
         if not await self.limiter.allow(key):
             return JSONResponse(
                 {"detail": "too many authentication failures"},
@@ -165,7 +169,13 @@ class AuthRateLimitMiddleware(BaseHTTPMiddleware):
             await self.limiter.record_failure(key)
         return response
 
-    def _client_key(self, request: Request) -> str:
+    def client_key(self, request: Request) -> str:
+        """Resolve the per-IP bucket key for `request`.
+
+        Public so route handlers on middleware-exempt paths (e.g.
+        ``/api/auth/info``) can charge failures to the same bucket with
+        identical XFF-trust semantics.
+        """
         if self.trust_xff:
             xff = request.headers.get("x-forwarded-for", "")
             if xff:

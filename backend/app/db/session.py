@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 from collections.abc import AsyncIterator
 from pathlib import Path
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
-    AsyncSession, async_sessionmaker, create_async_engine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
 )
 
 from app.core.config import settings

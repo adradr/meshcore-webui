@@ -107,3 +107,82 @@ async def test_bucket_dict_bounded():
     for i in range(10):
         await rl.record_failure(f"10.0.0.{i}")
     assert len(rl._buckets) <= 4
+
+
+# ---------------------------------------------------------------------------
+# /api/auth/info brute-force throttling (middleware-exempt oracle)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_auth_info_wrong_bearer_throttled(client, monkeypatch):
+    """Presented-but-invalid bearers on /api/auth/info count toward the
+    per-IP failure limiter and trip 429 — the endpoint is a key-validity
+    oracle and must not be a line-speed brute-force channel."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    monkeypatch.setattr("app.core.config.settings.auth_rate_per_min", 5)
+    arl.reset()
+    for _ in range(5):
+        r = await client.get(
+            "/api/auth/info", headers={"Authorization": "Bearer wrong"},
+        )
+        assert r.status_code == 200
+        assert r.json()["valid"] is False
+    r = await client.get(
+        "/api/auth/info", headers={"Authorization": "Bearer wrong"},
+    )
+    assert r.status_code == 429
+    assert r.headers.get("retry-after") is not None
+
+
+@pytest.mark.asyncio
+async def test_auth_info_headerless_boot_probe_never_throttled(
+    client, monkeypatch,
+):
+    """The SPA's normal unauthenticated boot probe (no Authorization header)
+    must never count as a failure or be throttled."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    monkeypatch.setattr("app.core.config.settings.auth_rate_per_min", 3)
+    arl.reset()
+    for _ in range(20):
+        r = await client.get("/api/auth/info")
+        assert r.status_code == 200
+        assert r.json()["valid"] is False
+
+
+@pytest.mark.asyncio
+async def test_auth_info_valid_bearer_not_counted(client, monkeypatch):
+    """Correct bearers never push the failure counter forward."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    monkeypatch.setattr("app.core.config.settings.auth_rate_per_min", 3)
+    arl.reset()
+    for _ in range(20):
+        r = await client.get(
+            "/api/auth/info", headers={"Authorization": "Bearer secret"},
+        )
+        assert r.status_code == 200
+        assert r.json()["valid"] is True
+
+
+@pytest.mark.asyncio
+async def test_auth_info_failures_share_bucket_with_gated_paths(
+    client, monkeypatch,
+):
+    """auth/info failures and gated-path 401s charge the same per-IP bucket."""
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    monkeypatch.setattr("app.core.config.settings.auth_rate_per_min", 4)
+    arl.reset()
+    for _ in range(2):
+        r = await client.get(
+            "/api/auth/info", headers={"Authorization": "Bearer wrong"},
+        )
+        assert r.status_code == 200
+    for _ in range(2):
+        r = await client.get(
+            "/api/contacts", headers={"Authorization": "Bearer wrong"},
+        )
+        assert r.status_code == 401
+    r = await client.get(
+        "/api/auth/info", headers={"Authorization": "Bearer wrong"},
+    )
+    assert r.status_code == 429

@@ -27,7 +27,6 @@ function makeWsCtx() {
     subscribe,
     status: "open" as const,
     send: () => {},
-    lastMessage: null,
   } as unknown as WebSocketContextValue
   return { value, dispatch }
 }

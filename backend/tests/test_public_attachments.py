@@ -113,3 +113,34 @@ async def test_rate_limit_kicks_in(client, monkeypatch):
     assert ok2.status_code == 200
     assert blocked.status_code == 429
     assert "retry-after" in {k.lower() for k in blocked.headers.keys()}
+
+
+@pytest.mark.asyncio
+async def test_i_returns_410_when_file_missing_on_disk(client):
+    """DB row exists but bytes are gone — must be 410, not a 500."""
+    from app.services.attachments.storage import AttachmentStorage
+
+    r = await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    slug = r.json()["slug"]
+    full, thumb = AttachmentStorage(global_settings.attachments_dir).paths(slug)
+    full.unlink()
+    g = await client.get(f"/i/{slug}")
+    assert g.status_code == 410
+    # Thumb still exists, so the thumb route keeps serving.
+    t = await client.get(f"/i/{slug}/thumb")
+    assert t.status_code == 200
+    thumb.unlink()
+    t2 = await client.get(f"/i/{slug}/thumb")
+    assert t2.status_code == 410
+
+
+@pytest.mark.asyncio
+async def test_s_og_image_falls_back_to_request_base_url(client, monkeypatch):
+    """og:image must stay absolute even when PUBLIC_BASE_URL is unset."""
+    r = await client.post("/api/attachments", files={"file": ("a.jpg", _jpeg(), "image/jpeg")})
+    slug = r.json()["slug"]
+    monkeypatch.setattr(global_settings, "public_base_url", None)
+    v = await client.get(f"/s/{slug}")
+    assert v.status_code == 200
+    assert f'content="/i/{slug}"' not in v.text  # never relative
+    assert 'og:image" content="http' in v.text

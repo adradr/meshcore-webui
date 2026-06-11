@@ -42,3 +42,27 @@ class SensitiveQueryFilter(logging.Filter):
             record.msg = scrubbed
             record.args = None
         return True
+
+
+class AccessLogQueryFilter(logging.Filter):
+    """Scrub sensitive query params from uvicorn.access records.
+
+    uvicorn's ``AccessFormatter.formatMessage`` destructures
+    ``record.args`` as a 5-tuple ``(client_addr, method, full_path,
+    http_version, status_code)``, so :class:`SensitiveQueryFilter` —
+    which collapses the rendered message and clears ``args`` — would
+    crash the formatter. Instead, scrub each *string* element of the
+    args tuple in place, preserving its shape, so both the default
+    percent-formatting path and the AccessFormatter destructuring path
+    keep working while the path element loses any bearer-like query
+    value.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                _scrub(a) if isinstance(a, str) else a for a in record.args
+            )
+        if isinstance(record.msg, str):
+            record.msg = _scrub(record.msg)
+        return True

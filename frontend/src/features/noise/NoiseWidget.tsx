@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import {
   Card,
   CardContent,
@@ -21,11 +22,13 @@ function formatDbm(v: number | null | undefined): string {
  */
 export function NoiseWidget() {
   const { data, isLoading, isError } = useNoiseSamples()
-  const samples = data ?? []
-
-  // Limit to last 5 min for display.
-  const cutoff = Date.now() - 5 * 60 * 1000
-  const recent = samples.filter((s) => s.t_ms >= cutoff)
+  // Limit to last 5 min for display. The cutoff is computed when the sample
+  // set changes (samples arrive continuously, so the window stays fresh).
+  const recent = useMemo(() => {
+    // eslint-disable-next-line react-hooks/purity
+    const cutoff = Date.now() - 5 * 60 * 1000
+    return (data ?? []).filter((s) => s.t_ms >= cutoff)
+  }, [data])
 
   if (isLoading) {
     return (

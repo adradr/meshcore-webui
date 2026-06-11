@@ -88,11 +88,15 @@ export function useReset() {
     onMutate: () => {
       haptic.warn()
     },
-    onSuccess: (r) => {
+    onSuccess: async (r) => {
       notifySuccess(`Reset complete — ${totalTargetsRun(r)} target(s) cleared`)
       // Cancel any in-flight reads that started against the pre-reset
-      // state so they don't overwrite the post-reset fetch.
-      qc.cancelQueries()
+      // state so they don't overwrite the post-reset fetch. MUST be
+      // awaited: if removeQueries runs before the aborts have settled,
+      // a pre-reset fetch can resolve afterwards and re-seed a
+      // device-state cache with stale rows — exactly the flash the
+      // removeQueries strategy exists to prevent.
+      await qc.cancelQueries()
       // Hard-evict device-state caches: with just `invalidateQueries`
       // React Query returns the stale cached rows on mount + refetches
       // in the background, so the user briefly sees the OLD contacts /

@@ -50,7 +50,7 @@ async def test_reset_local_messages_clears_messages_only(session_factory):
 async def test_reset_local_diagnostic_runs_clears_diagnostic_runs_only(
     session_factory,
 ):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     async with session_factory() as db:
         db.add(DiagnosticRun(
             target_pubkey="ab" * 32,
@@ -132,7 +132,7 @@ async def test_reset_local_push_subscribers_clears_push_only(session_factory):
 
 @pytest.mark.asyncio
 async def test_reset_local_trace_samples_clears_trace_samples_only(session_factory):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     async with session_factory() as db:
         db.add(TraceSample(
             session_id="11111111-1111-1111-1111-111111111111",

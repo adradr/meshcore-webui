@@ -7,8 +7,10 @@ import { GapSeparator } from "./GapSeparator"
 import { NewMessagesPill } from "./NewMessagesPill"
 import { ChatEmpty } from "./ChatEmpty"
 import { Skeleton } from "@/components/ui/skeleton"
+import { QueryErrorState } from "@/components/query-error-state"
 import { useContacts } from "@/features/contacts/queries"
 import { parseChannelSender, type ChannelSender } from "./channelSender"
+import { gapLabel } from "./gapLabel"
 
 export interface EnrichedMessage extends Message {
   /** Parsed channel sender — populated only when isChannel and parse succeeded. */
@@ -53,13 +55,6 @@ function dayLabel(d: Date): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })
 }
 
-function gapLabel(ms: number): string {
-  const m = Math.round(ms / 60_000)
-  if (m < 120) return `${m} minutes later`
-  const h = Math.round(m / 3_600_000)
-  if (h < 24) return `${h} hours later`
-  return `${Math.round(h / 24)} days later`
-}
 
 function senderIdOf(m: EnrichedMessage, isChannel: boolean): string | null {
   if (m.direction === "out") return "self"
@@ -254,9 +249,11 @@ export function MessageList({ contactPubKey, channelIdx, onReply }: Props) {
   }
   if (q.isError) {
     return (
-      <div className="p-4 text-sm text-destructive">
-        Failed to load messages: {q.error instanceof Error ? q.error.message : "unknown error"}
-      </div>
+      <QueryErrorState
+        title="Failed to load messages"
+        error={q.error}
+        onRetry={() => void q.refetch()}
+      />
     )
   }
   if (messages.length === 0) {

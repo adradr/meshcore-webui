@@ -73,3 +73,32 @@ async def test_tile_returns_503_when_proxy_not_initialised(client):
     finally:
         if old is not None:
             app.state.tile_proxy = old
+
+
+@pytest.mark.asyncio
+async def test_tile_rejects_zoom_above_frontend_max(client):
+    """z=21/22 exceed the SPA's Leaflet maxZoom; the proxy must not serve
+    them (they only enlarge the unauthenticated cache keyspace)."""
+    r = await client.get("/api/tiles/light/21/0/0.png")
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_tile_rate_limit_returns_429(client, monkeypatch):
+    from app.api import tiles as tiles_mod
+
+    monkeypatch.setattr(
+        tiles_mod._rate_limiter, "allow", lambda client_id: False
+    )
+    r = await client.get("/api/tiles/light/1/0/0.png")
+    assert r.status_code == 429
+    assert r.headers.get("retry-after") == "60"
+
+
+@pytest.mark.asyncio
+async def test_tile_errors_use_json_detail_shape(client):
+    # Error bodies must be FastAPI's JSON {"detail": ...} shape so the
+    # frontend's shared error handling can parse them.
+    r = await client.get("/api/tiles/nope/1/0/0.png")
+    assert r.status_code == 400
+    assert r.json() == {"detail": "invalid layer"}

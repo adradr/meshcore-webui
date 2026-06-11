@@ -26,6 +26,7 @@ function isVibrateSupported(): boolean {
 // is mounted at a time (see main.tsx), so this is single-writer by design.
 let _globalHandle: HapticHandle | null = null
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function getGlobalHaptic(): HapticHandle | null {
   return _globalHandle
 }
@@ -107,6 +108,7 @@ export function HapticProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={handle}>{children}</Ctx.Provider>
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useHaptic(): HapticHandle {
   const v = useContext(Ctx)
   if (!v) {

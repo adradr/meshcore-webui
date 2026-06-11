@@ -130,5 +130,6 @@ export {
   BottomNavIcon,
   BottomNavBadge,
   BottomNavLabel,
+  // eslint-disable-next-line react-refresh/only-export-components
   bottomNavItemVariants,
 }

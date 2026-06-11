@@ -156,6 +156,34 @@ async def test_start_idempotent_same_pubkey(client):
 
 
 @pytest.mark.asyncio
+async def test_start_same_pubkey_new_interval_echoes_updated_interval(client):
+    """Re-issuing start with a different interval keeps the session id but
+    the response (and status) must reflect the NEW interval."""
+    mc = _make_fake_meshcore()
+    mon = _make_monitor(mc)
+    try:
+        with _state(meshcore_client=mc, trace_monitor=mon):
+            r1 = await client.post(
+                "/api/trace/monitor/start",
+                json={"pubkey": PUBKEY_A, "interval_s": 5},
+            )
+            sid1 = r1.json()["session_id"]
+
+            r2 = await client.post(
+                "/api/trace/monitor/start",
+                json={"pubkey": PUBKEY_A, "interval_s": 30},
+            )
+            assert r2.status_code == 200, r2.text
+            assert r2.json()["session_id"] == sid1
+            assert r2.json()["interval_s"] == 30
+
+            s = await client.get("/api/trace/monitor/status")
+            assert s.json()["interval_s"] == 30
+    finally:
+        await mon.stop()
+
+
+@pytest.mark.asyncio
 async def test_start_different_pubkey_returns_409_without_force(client):
     """Starting on a second pubkey while one is running -> 409.
     Status must still reflect the original session."""
@@ -211,7 +239,7 @@ async def test_start_different_pubkey_with_force_replaces_session(client):
 
 @pytest.mark.asyncio
 async def test_start_rejects_interval_below_min(client):
-    """interval_s=1 < schema min (5) -> 422."""
+    """interval_s=1 < settings-driven min (5) -> 422 via the service check."""
     mc = _make_fake_meshcore()
     mon = _make_monitor(mc)
     try:
@@ -227,7 +255,7 @@ async def test_start_rejects_interval_below_min(client):
 
 @pytest.mark.asyncio
 async def test_start_rejects_interval_above_max(client):
-    """interval_s=10000 > schema max (300) -> 422."""
+    """interval_s=10000 > settings-driven max (300) -> 422 via the service check."""
     mc = _make_fake_meshcore()
     mon = _make_monitor(mc)
     try:

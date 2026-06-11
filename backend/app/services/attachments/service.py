@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 from pathlib import Path
 
+from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -61,13 +62,19 @@ class AttachmentService:
         except Exception as e:
             raise UnsupportedImage(f"image processing failed: {e}") from e
 
-        # Quota check against current filesystem usage + this attachment.
+        # Quota check against DB-accounted usage + this attachment. One
+        # indexed query, and consistent with the total_bytes the admin UI
+        # shows via list(). (storage.total_bytes() rglobs the whole tree —
+        # O(n) stats — and counts orphan files; keep it for diagnostics only.)
         # v1: quota check is non-atomic; concurrent uploads from a single
         # operator could race past the cap by O(in-flight requests). The
         # self-hosted single-operator model accepts this; revisit if we add
         # multi-user uploads.
         new_size = len(full) + len(thumb)
-        current = await asyncio.to_thread(self.storage.total_bytes)
+        current_row = await session.execute(
+            sa_func.coalesce(sa_func.sum(Attachment.size_bytes), 0).select()
+        )
+        current = current_row.scalar_one()
         if current + new_size > self.quota_bytes:
             raise QuotaExceeded(
                 f"would exceed quota {self.quota_bytes} (have {current}, +{new_size})"
@@ -147,7 +154,6 @@ class AttachmentService:
             stmt = stmt.where(Attachment.id < before_id)
         items = (await session.execute(stmt)).scalars().all()
 
-        from sqlalchemy import func as sa_func
         count_row = await session.execute(sa_func.count(Attachment.id).select())
         total_count = count_row.scalar_one()
         sum_row = await session.execute(

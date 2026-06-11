@@ -66,3 +66,5 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "RUF"]
+# B008: `Depends(...)` in argument defaults is standard FastAPI idiom.
+ignore = ["B008"]

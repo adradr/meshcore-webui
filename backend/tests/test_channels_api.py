@@ -6,7 +6,6 @@ import pytest
 
 from app.main import app
 
-
 # ---------- GET ----------
 
 @pytest.mark.asyncio
@@ -292,3 +291,41 @@ async def test_delete_channel_503_when_no_client(client):
         del app.state.meshcore_client
     r = await client.delete("/api/channels/4")
     assert r.status_code == 503
+
+
+# ---------- audit fixes: status mapping + idx bounds ----------
+
+
+@pytest.mark.asyncio
+async def test_get_channels_504_on_timeout(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_channels = AsyncMock(side_effect=TimeoutError("slow"))
+    try:
+        r = await client.get("/api/channels")
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_channels_504_on_no_reply_runtime_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.get_channels = AsyncMock(
+        side_effect=RuntimeError("no reply from device")
+    )
+    try:
+        r = await client.get("/api/channels")
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_delete_channel_rejects_out_of_range_idx(client):
+    app.state.meshcore_client = AsyncMock()
+    try:
+        assert (await client.delete("/api/channels/256")).status_code == 422
+        assert (await client.delete("/api/channels/-1")).status_code == 422
+        app.state.meshcore_client.delete_channel.assert_not_awaited()
+    finally:
+        del app.state.meshcore_client

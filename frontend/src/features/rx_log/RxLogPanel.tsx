@@ -33,11 +33,8 @@ import {
 } from "@/components/ui/tooltip"
 
 // Re-exports for tests that still import these helpers from the panel module.
-export {
-  deriveOptions,
-  formatRecvClock,
-  relativeTime,
-} from "@/features/rx_log/format"
+// eslint-disable-next-line react-refresh/only-export-components
+export { deriveOptions, formatRecvClock, relativeTime } from "@/features/rx_log/format"
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 40
 
@@ -57,7 +54,7 @@ export function RxLogPanel() {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null)
 
   const { data } = useRxLog({ paused })
-  const rows = data ?? []
+  const rows = useMemo(() => data ?? [], [data])
 
   const routeOptions = useMemo(
     () => deriveOptions(rows, "route_typename"),

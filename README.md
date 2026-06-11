@@ -259,6 +259,15 @@ sudo chown -R 1001:1001 ./data ./backend/secrets/
 ### 3. Build the image
 
 ```bash
+docker build -t meshcore-webui:dev .
+```
+
+The `VITE_VAPID_PUBLIC_KEY` build-arg is optional: when omitted, the app
+fetches the public key at runtime from the backend
+(`GET /api/push/vapid-public-key`). Baking it in at build time merely skips
+that one request:
+
+```bash
 VITE_VAPID_PUBLIC_KEY=$(cat secrets/vapid_public.txt) \
   docker build -t meshcore-webui:dev \
   --build-arg VITE_VAPID_PUBLIC_KEY="$VITE_VAPID_PUBLIC_KEY" .

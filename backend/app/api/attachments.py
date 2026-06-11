@@ -3,7 +3,16 @@ from __future__ import annotations
 import hmac
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Query,
+    Request,
+    UploadFile,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -76,6 +85,7 @@ async def _read_with_cap(file: UploadFile, cap: int) -> bytes:
 
 @router.post("", response_model=AttachmentOut, status_code=201)
 async def upload(
+    request: Request,
     file: Annotated[UploadFile, File(...)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
@@ -88,12 +98,17 @@ async def upload(
 
     svc = _service()
 
-    # Fingerprint (8 chars) comes from the authenticated key, if any.
-    # In tests `settings.api_key` is None so this branch is skipped.
+    # Fingerprint (8 chars) is derived from the credential the request
+    # actually presented — not the server-side configured key — so the
+    # stored audit attribute stays accurate if multiple keys are ever
+    # supported. With auth disabled (no Authorization header) it is None.
     uploader_fp: str | None = None
-    if settings.api_key:
+    auth_header = request.headers.get("authorization")
+    if auth_header:
         from app.middleware.request_audit import key_fingerprint
-        uploader_fp = key_fingerprint(settings.api_key)
+        token = auth_header.removeprefix("Bearer ").strip()
+        if token:
+            uploader_fp = key_fingerprint(token)
 
     try:
         att = await svc.create(

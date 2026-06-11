@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -48,7 +50,7 @@ class ResetRequest(BaseModel):
     confirm: str = Field(..., min_length=1)
 
     @model_validator(mode="after")
-    def _at_least_one_target(self) -> "ResetRequest":
+    def _at_least_one_target(self) -> ResetRequest:
         if not (self.local.any_selected() or self.device.any_selected()):
             raise ValueError("at least one local or device flag must be true")
         return self

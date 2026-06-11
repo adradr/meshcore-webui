@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { NODE_TYPE_PALETTE, type NodeType } from "./nodeIcons"
 
 const STORAGE_KEY = "meshcore.map.legend.open"
@@ -42,13 +42,9 @@ const ORDERED_TYPES: NodeType[] = ["SELF", "CLI", "REP", "ROOM", "UNKNOWN"]
  * inherits the map's positioning context.
  */
 export function MapLegend() {
-  const [open, setOpen] = useState<boolean>(true)
-
-  // Hydrate from localStorage on mount only — avoids SSR mismatch and
-  // means subsequent renders don't re-read storage.
-  useEffect(() => {
-    setOpen(readPersistedOpen())
-  }, [])
+  // Lazy initializer: read localStorage once on first render only —
+  // subsequent renders don't re-read storage.
+  const [open, setOpen] = useState<boolean>(() => readPersistedOpen())
 
   const toggle = () => {
     setOpen((prev) => {

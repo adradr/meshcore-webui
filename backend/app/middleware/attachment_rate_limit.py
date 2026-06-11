@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 from fastapi import Request
@@ -34,6 +35,10 @@ class RateLimiter:
         self._hour = BoundedSlidingWindow(
             window_seconds=3600.0, max_per_window=per_hour, clock=clock,
         )
+        # Serialises probe + record so concurrent in-flight requests for
+        # the same key can't all pass the probes before any records land
+        # (which would let the cap be exceeded by O(concurrency)).
+        self._gate = asyncio.Lock()
 
     @property
     def per_min(self) -> int:
@@ -62,20 +67,22 @@ class RateLimiter:
         # Probe both windows BEFORE recording so an over-cap request
         # doesn't pollute the count further. This preserves the original
         # contract that the (N+1)-th call inside a window returns False
-        # without consuming a slot.
-        if await self._minute.is_over_limit(key):
-            oldest = await self._minute.oldest(key)
-            retry = int(60 - (_now() - oldest)) + 1 if oldest is not None else 60
-            return False, max(retry, 1)
-        if await self._hour.is_over_limit(key):
-            oldest = await self._hour.oldest(key)
-            retry = (
-                int(3600 - (_now() - oldest)) + 1 if oldest is not None else 3600
-            )
-            return False, max(retry, 1)
-        await self._minute.record(key)
-        await self._hour.record(key)
-        return True, 0
+        # without consuming a slot. The whole probe+record sequence is
+        # under `_gate` so it is atomic w.r.t. concurrent requests.
+        async with self._gate:
+            if await self._minute.is_over_limit(key):
+                oldest = await self._minute.oldest(key)
+                retry = int(60 - (_now() - oldest)) + 1 if oldest is not None else 60
+                return False, max(retry, 1)
+            if await self._hour.is_over_limit(key):
+                oldest = await self._hour.oldest(key)
+                retry = (
+                    int(3600 - (_now() - oldest)) + 1 if oldest is not None else 3600
+                )
+                return False, max(retry, 1)
+            await self._minute.record(key)
+            await self._hour.record(key)
+            return True, 0
 
     def reset(self) -> None:
         """Clear all per-key state. Intended for test isolation."""

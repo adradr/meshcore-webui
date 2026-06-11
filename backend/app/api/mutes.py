@@ -3,13 +3,15 @@
 The API is a thin adapter over `app.services.mute`:
 
 - GET   /api/mutes                  — list every currently muted (kind, key)
-- PATCH /api/mutes/contact/{key}    — toggle a DM mute (key = 64-hex pubkey)
+- PATCH /api/mutes/contact/{key}    — toggle a DM mute (key = hex pubkey
+  prefix or full pubkey; canonicalized to the lowercase 12-char prefix)
 - PATCH /api/mutes/channel/{key}    — toggle a channel mute (key = 0..255)
 
 The two PATCH routes are split by kind so FastAPI validates the path
-parameter at the type boundary: contact keys must be 64-char hex pubkeys
-and channel keys must be ints in the firmware range [0, 255]. Garbage
-values get a 422 before any service-layer code runs.
+parameter at the type boundary: contact keys must be 12..64-char hex
+(prefix or full pubkey) and channel keys must be ints in the firmware
+range [0, 255]. Garbage values get a 422 before any service-layer code
+runs.
 
 Mute state only affects Web Push fan-out. Messages keep flowing into the
 DB and over the WebSocket whether muted or not.
@@ -52,8 +54,15 @@ async def get_mutes(db: Annotated[AsyncSession, Depends(get_db)]) -> MuteListOut
 async def patch_contact_mute(
     payload: SetMuteIn,
     db: Annotated[AsyncSession, Depends(get_db)],
-    key: Annotated[str, Path(pattern=r"^[0-9a-fA-F]{64}$")],
+    key: Annotated[str, Path(pattern=r"^[0-9a-fA-F]{12,64}$")],
 ) -> MutePref:
+    # The canonical contact mute key is the lowercase 12-char pubkey
+    # PREFIX — it's the only identifier inbound DM payloads carry
+    # (CONTACT_MSG_RECV events have `pubkey_prefix`, never the full key),
+    # and it's what the bridge's is_muted() gate looks up. Accept either
+    # the prefix or a full 64-char key and canonicalize here so the
+    # stored row always matches the bridge's lookup.
+    key = key[:12].lower()
     await set_mute(db, kind="contact", key=key, muted=payload.muted)
     # Always return the canonical (kind, key) — even after an unmute the
     # response carries enough info for the client to cache-evict the row.

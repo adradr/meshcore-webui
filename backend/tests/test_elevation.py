@@ -194,3 +194,41 @@ async def test_elevation_rate_limit_does_not_serialize_concurrent_requests_into_
         # as it would be if the sleep were inside the lock BEFORE the HTTP call.
         gap = call_times[1] - call_times[0]
         assert 0.04 <= gap <= 0.15  # generous upper bound for CI flake
+
+
+@pytest.mark.asyncio
+async def test_null_elevation_maps_to_sea_level():
+    """OpenTopoData returns elevation=null over water / outside DEM
+    coverage; those samples must read as 0.0 m, not fail the lookup."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"results": [{"elevation": None}, {"elevation": 12.5}]},
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        provider = ElevationProvider("http://x/v1", "srtm30m", client, rate_limit_s=0)
+        result = await provider.lookup([(0.0, 0.0), (1.0, 1.0)])
+    assert result == [0.0, 12.5]
+
+
+@pytest.mark.asyncio
+async def test_single_request_does_not_pay_rate_limit_tail():
+    """A lone lookup must return immediately — the rate-limit window only
+    delays a SUBSEQUENT batch, not the current one."""
+    import time as time_mod
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [{"elevation": 1.0}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        provider = ElevationProvider(
+            "http://x/v1", "srtm30m", client, rate_limit_s=0.5
+        )
+        t0 = time_mod.monotonic()
+        await provider.lookup([(0.0, 0.0)])
+        elapsed = time_mod.monotonic() - t0
+    assert elapsed < 0.25, f"single batch waited {elapsed:.3f}s on rate limit"

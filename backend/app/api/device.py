@@ -96,15 +96,15 @@ async def _call(coro):
     try:
         return await coro
     except ConnectionError as e:
-        raise HTTPException(503, str(e))
+        raise HTTPException(503, str(e)) from e
     except TimeoutError as e:
-        raise HTTPException(504, str(e))
+        raise HTTPException(504, str(e)) from e
     except RuntimeError as e:
         msg = str(e)
         lower = msg.lower()
         if "no reply" in lower or "timed out" in lower:
-            raise HTTPException(504, msg)
-        raise HTTPException(502, msg)
+            raise HTTPException(504, msg) from e
+        raise HTTPException(502, msg) from e
 
 
 @router.get("/status")
@@ -128,15 +128,8 @@ async def get_status(request: Request) -> dict:
 
 @router.get("/info")
 async def get_info(request: Request) -> dict:
-    client = getattr(request.app.state, "meshcore_client", None)
-    if client is None:
-        raise HTTPException(503, "MeshCore client not initialised")
-    try:
-        return await client.get_device_info()
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    client = _require_client(request)
+    return await _call(client.get_device_info())
 
 
 @router.get("/self-info", response_model=SelfInfo)
@@ -150,28 +143,14 @@ async def get_self_info(request: Request) -> dict:
     so the API surface never leaks unreviewed bytes. When a new field is
     needed by the UI, add it to ``SelfInfo`` explicitly.
     """
-    client = getattr(request.app.state, "meshcore_client", None)
-    if client is None:
-        raise HTTPException(503, "MeshCore client not initialised")
-    try:
-        return await client.get_self_info()
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    client = _require_client(request)
+    return await _call(client.get_self_info())
 
 
 @router.post("/advert")
 async def send_advert(request: Request, flood: bool = False) -> dict:
-    client = getattr(request.app.state, "meshcore_client", None)
-    if client is None:
-        raise HTTPException(503, "MeshCore client not initialised")
-    try:
-        await client.send_advert(flood=flood)
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    client = _require_client(request)
+    await _call(client.send_advert(flood=flood))
     return {"sent": True, "flood": flood}
 
 
@@ -184,15 +163,8 @@ async def set_position(body: PositionIn, request: Request) -> dict:
     200 on success, 422 (from Pydantic) on out-of-range, 502 if the
     radio is up but rejected the command, 503 if not connected.
     """
-    client = getattr(request.app.state, "meshcore_client", None)
-    if client is None:
-        raise HTTPException(503, "MeshCore client not initialised")
-    try:
-        await client.set_coords(body.lat, body.lon)
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    client = _require_client(request)
+    await _call(client.set_coords(body.lat, body.lon))
     return {"lat": body.lat, "lon": body.lon}
 
 
@@ -205,17 +177,10 @@ async def reset_device(body: DeviceResetRequest, request: Request):
     device-side clears (channels, coords, contacts) live in the
     unified ``POST /api/admin/reset`` toggle endpoint instead.
     """
-    client = getattr(request.app.state, "meshcore_client", None)
-    if client is None:
-        raise HTTPException(503, "MeshCore client not initialised")
+    client = _require_client(request)
     if not hmac.compare_digest(body.confirm, _FACTORY_CONFIRM_TOKEN):
         raise HTTPException(422, "confirm must be 'FACTORY RESET'")
-    try:
-        await client.factory_reset()
-    except ConnectionError as e:
-        raise HTTPException(503, str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(502, str(e)) from e
+    await _call(client.factory_reset())
     return JSONResponse(
         status_code=202,
         content={

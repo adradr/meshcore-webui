@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { renderHook, waitFor, act } from "@testing-library/react"
+import { render, renderHook, waitFor, act } from "@testing-library/react"
+import type { WSStatus } from "@/realtime/useWebSocket"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 
@@ -58,7 +59,6 @@ function makeWsCtx() {
     subscribe,
     status: "open" as const,
     send: () => {},
-    lastMessage: null,
   } as unknown as WebSocketContextValue
   return { value, dispatch }
 }
@@ -307,6 +307,45 @@ describe("useTraceMonitorSamples", () => {
     expect(result.current.data?.at(-1)?.started_at).toBe(
       "2026-05-23T12:00:699Z",
     )
+  })
+
+  it("re-fetches samples when the WS reconnects (backfills outage gap)", async () => {
+    ;(api.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      session_id: "sid-x",
+      target_pubkey: "ab".repeat(32),
+      count: 0,
+      items: [],
+    })
+    const ws = makeWsCtx()
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    function Probe() {
+      useTraceMonitorSamples("sid-x")
+      return null
+    }
+    function Harness({ status }: { status: WSStatus }) {
+      return (
+        <QueryClientProvider client={qc}>
+          <WebSocketContext.Provider value={{ ...ws.value, status }}>
+            <Probe />
+          </WebSocketContext.Provider>
+        </QueryClientProvider>
+      )
+    }
+    const { rerender } = render(<Harness status="open" />)
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(1))
+
+    // Socket drops, then comes back — the hook must invalidate + refetch so
+    // samples produced during the outage land in the cache.
+    rerender(<Harness status="closed" />)
+    rerender(<Harness status="open" />)
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2))
+
+    // A status flap that never leaves "open" must NOT refetch again.
+    rerender(<Harness status="open" />)
+    await act(async () => {})
+    expect(api.get).toHaveBeenCalledTimes(2)
   })
 })
 

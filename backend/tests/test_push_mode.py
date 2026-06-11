@@ -84,3 +84,16 @@ def test_is_mention_no_mention_returns_false():
 def test_is_mention_at_end_of_string():
     # Bare form at end-of-string — no trailing char, word-boundary should hold.
     assert is_mention("ping @Mail03", "Mail03") is True
+
+
+def test_is_mention_left_boundary_rejects_email_like_tokens():
+    # `bob@Alice.net` is an email, not a mention of Alice.
+    assert is_mention("contact me at bob@Alice.net", "Alice") is False
+    assert is_mention("foo@Alice ok", "Alice") is False
+    assert is_mention("v1.2@Alice", "Alice") is False
+
+
+def test_is_mention_left_boundary_allows_punctuation_prefixes():
+    assert is_mention("(@Alice) hi", "Alice") is True
+    assert is_mention("hey,@Alice", "Alice") is True
+    assert is_mention("@Alice leading", "Alice") is True

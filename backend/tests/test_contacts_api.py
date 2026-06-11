@@ -286,10 +286,13 @@ async def test_timeout_runtime_error_returns_504():
     Those are upstream timeouts (504), not upstream brokenness (502).
     """
     from fastapi import HTTPException
+
     from app.api.contacts import _call
 
     async def coro_timeout():
-        raise RuntimeError("Telemetry: no reply from abcd1234… within 15s — peer may be unreachable")
+        raise RuntimeError(
+            "Telemetry: no reply from abcd1234… within 15s — peer may be unreachable"
+        )
 
     with pytest.raises(HTTPException) as ei:
         await _call(coro_timeout())
@@ -300,6 +303,7 @@ async def test_timeout_runtime_error_returns_504():
 async def test_timeout_runtime_error_with_legacy_phrasing_returns_504():
     """Also classify legacy 'timed out' phrasing as 504, for resilience."""
     from fastapi import HTTPException
+
     from app.api.contacts import _call
 
     async def coro_legacy():
@@ -314,6 +318,7 @@ async def test_timeout_runtime_error_with_legacy_phrasing_returns_504():
 async def test_non_timeout_runtime_error_still_502():
     """Non-timeout RuntimeError (real upstream brokenness) stays at 502."""
     from fastapi import HTTPException
+
     from app.api.contacts import _call
 
     async def coro_bad():
@@ -328,6 +333,7 @@ async def test_non_timeout_runtime_error_still_502():
 async def test_timeout_error_returns_504():
     """asyncio TimeoutError surfaces as 504 directly."""
     from fastapi import HTTPException
+
     from app.api.contacts import _call
 
     async def coro_timeout():
@@ -386,7 +392,7 @@ async def test_contacts_stats_aggregates_per_pubkey(client, db):
     and 1 message for pubkey B (out). The endpoint must return the correct
     msg_count and first/last timestamps for each pubkey.
     """
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     pk_a = "a" * 64
     pk_b = "b" * 64
     a_first = base
@@ -501,7 +507,7 @@ async def test_contacts_accept_uppercase_pubkey(client):
 @pytest.mark.asyncio
 async def test_contacts_stats_excludes_channel_messages(client, db):
     """Channel messages (contact_pub_key=NULL) must NOT appear in the map."""
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     db.add(Message(msg_type="chan", contact_pub_key=None, channel_idx=0,
                    direction="in", text="channel-only", timestamp=base))
     await db.commit()

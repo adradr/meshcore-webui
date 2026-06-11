@@ -43,6 +43,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
+import { QueryErrorState } from "@/components/query-error-state"
 
 const NODE_TYPE_LABEL: Record<number, string> = {
   1: "CLI",
@@ -121,7 +122,7 @@ function ImportDialog({ open, onOpenChange }: ImportDialogProps) {
 }
 
 export function ContactsPage() {
-  const { data, isLoading, isError, error } = useContacts()
+  const { data, isLoading, isError, error, refetch } = useContacts()
   const { data: stats } = useContactsStats()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -166,6 +167,7 @@ export function ContactsPage() {
     )
   }, [sorted, filter])
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => parentRef.current,
@@ -190,13 +192,30 @@ export function ContactsPage() {
   )
 
   if (isLoading) {
+    // Mirror the loaded layout (sticky search/sort bar + 64px rows, the
+    // virtualizer's estimateSize) so first paint doesn't jump when data lands.
     return (
       <PageShell
         header={<PageHeader title="Contacts" actions={importAction} />}
+        contentClassName="p-0"
       >
-        <div className="space-y-2">
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              disabled
+              placeholder="Search contacts..."
+              className="pl-8"
+              aria-label="Search contacts"
+            />
+          </div>
+          <Skeleton className="h-9 w-[140px] shrink-0 rounded-md" />
+        </div>
+        <div>
           {Array.from({ length: 10 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-md" />
+            <div key={i} className="flex h-16 items-center border-b px-3">
+              <Skeleton className="h-10 w-full rounded-md" />
+            </div>
           ))}
         </div>
         <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
@@ -209,10 +228,11 @@ export function ContactsPage() {
       <PageShell
         header={<PageHeader title="Contacts" actions={importAction} />}
       >
-        <div className="text-sm text-destructive">
-          Failed to load contacts:{" "}
-          {error instanceof Error ? error.message : "unknown"}
-        </div>
+        <QueryErrorState
+          title="Failed to load contacts"
+          error={error}
+          onRetry={() => void refetch()}
+        />
         <ImportDialog open={importOpen} onOpenChange={setImportOpen} />
       </PageShell>
     )

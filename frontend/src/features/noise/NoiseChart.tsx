@@ -82,6 +82,7 @@ export function NoiseChart({
       cursor: { drag: { x: false, y: false } },
     }
     // themeTick is intentional - it forces re-read of CSS vars on theme toggle.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [width, height, yLabel, themeTick])
 
   // uPlot expects timestamps in seconds (not ms) for default time formatting.

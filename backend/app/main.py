@@ -31,7 +31,7 @@ from app.api.trace import router as trace_router
 from app.api.trace_monitor import router as trace_monitor_router
 from app.api.ws import router as ws_router
 from app.core.config import settings
-from app.core.logging_filters import SensitiveQueryFilter
+from app.core.logging_filters import AccessLogQueryFilter, SensitiveQueryFilter
 from app.core.vapid import VapidLoadError, load_vapid
 from app.db.models import Base
 from app.db.session import SessionLocal, engine
@@ -40,6 +40,8 @@ from app.middleware.attachment_rate_limit import AttachmentRateLimitMiddleware
 from app.middleware.auth_rate_limit import AuthRateLimitMiddleware
 from app.middleware.request_audit import RequestAuditMiddleware
 from app.middleware.security_headers import SecurityHeadersMiddleware
+from app.services.ack_sweeper import AckTimeoutSweeper
+from app.services.dm_key_migration import DmKeyMigrator
 from app.services.elevation import ElevationProvider
 from app.services.meshcore_bridge import MeshCoreBridge
 from app.services.meshcore_client import MeshCoreClient, WireEvent
@@ -100,15 +102,21 @@ def _configure_logging() -> None:
     # surface request URLs. Filters bound to a logger only run for records
     # emitted by that logger (not parent/child), so we explicitly cover each
     # named source: our own app + audit channels and uvicorn's error logger.
-    # NOTE: uvicorn.access is intentionally excluded — its AccessFormatter
-    # destructures record.args in formatMessage(), which breaks after the
-    # filter clears args. The RequestAuditMiddleware already provides
-    # complete per-request logging with key fingerprints.
+    # NOTE: uvicorn.access cannot take SensitiveQueryFilter — its
+    # AccessFormatter destructures record.args in formatMessage(), which
+    # breaks after the filter clears args. It gets the tuple-preserving
+    # AccessLogQueryFilter instead, so a query-string token on an HTTP
+    # route never lands in the container's access log unredacted.
     redactor = SensitiveQueryFilter()
     for name in ("uvicorn.error", "app", "app.audit"):
         logger = logging.getLogger(name)
         if not any(isinstance(f, SensitiveQueryFilter) for f in logger.filters):
             logger.addFilter(redactor)
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(
+        isinstance(f, AccessLogQueryFilter) for f in access_logger.filters
+    ):
+        access_logger.addFilter(AccessLogQueryFilter())
 
 
 _configure_logging()
@@ -127,7 +135,7 @@ async def _ensure_schema() -> None:
       1. Fresh DB (no tables)       → upgrade head creates everything
       2. Migrated DB (with version) → upgrade head applies any pending revisions
       3. LEGACY DB (tables created via Base.metadata.create_all but no
-         `alembic_version` row, e.g. anyone upgrading from v1.0–v1.4) →
+         `alembic_version` row, e.g. anyone upgrading from v1.0-v1.4) →
          stamp at the BASE revision so subsequent migrations run their
          column-additions cleanly without colliding on CREATE TABLE.
     """
@@ -187,6 +195,17 @@ async def _ensure_schema() -> None:
         bases = script.get_bases()
         if not bases:
             log.error("No alembic migrations found — cannot stamp legacy DB")
+        elif len(bases) > 1:
+            # `get_bases()` ordering is unspecified; stamping an arbitrary
+            # base on a multi-base script directory could land on the wrong
+            # lineage, after which `upgrade head` re-runs create_table on
+            # existing tables and crashes startup. Refuse loudly instead.
+            log.error(
+                "Multiple alembic base revisions found (%s) — refusing to "
+                "stamp legacy DB at an arbitrary base. Resolve to a single "
+                "base (merge migration) or stamp manually.",
+                ", ".join(bases),
+            )
         else:
             base_rev = bases[0]
             log.warning(
@@ -244,6 +263,14 @@ async def lifespan(app: FastAPI):
 
     log.info("Ensuring database schema")
     await _ensure_schema()
+
+    # One-shot data migration: re-key legacy prefix-keyed DM rows to the
+    # full 64-hex contact pubkey (when a unique contact match exists) so
+    # pre-/post-upgrade messages land in the same conversation thread.
+    try:
+        await DmKeyMigrator(SessionLocal).run()
+    except Exception:
+        log.exception("dm key migration failed — continuing with legacy keys")
 
     log.info("Loading VAPID")
     try:
@@ -311,6 +338,19 @@ async def lifespan(app: FastAPI):
     )
     await noise_poller.start()
 
+    log.info(
+        "Starting AckTimeoutSweeper (timeout=%.0fs, interval=%.0fs)",
+        settings.dm_ack_timeout_s, settings.dm_ack_sweep_interval_s,
+    )
+    ack_sweeper = AckTimeoutSweeper(
+        client,
+        SessionLocal,
+        timeout_s=settings.dm_ack_timeout_s,
+        interval_s=settings.dm_ack_sweep_interval_s,
+    )
+    await ack_sweeper.start()
+    app.state.ack_sweeper = ack_sweeper
+
     app.state.meshcore_client = client
     app.state.push_sender = sender
     app.state.task_pool = pool
@@ -376,6 +416,7 @@ async def lifespan(app: FastAPI):
             app.state.elevation_provider = None
             app.state.tile_proxy = None
             await trace_monitor.stop()
+            await ack_sweeper.stop()
             await noise_poller.stop()
             client.unsubscribe(q)
             await client.stop()

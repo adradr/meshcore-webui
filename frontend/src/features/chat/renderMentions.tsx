@@ -44,7 +44,7 @@ function decorateText(text: string, keyPrefix: string): React.ReactNode[] {
     cursor = match.index + match[0].length
   }
   if (cursor < text.length) {
-    out.push(...decorateHex(text.slice(cursor), `${keyPrefix}-t${idx++}`))
+    out.push(...decorateHex(text.slice(cursor), `${keyPrefix}-t${idx}`))
   }
   return out
 }

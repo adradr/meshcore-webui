@@ -11,6 +11,9 @@ import { takePendingResubscribe } from "@/sw/pendingResubscribe"
 /** Message type the SW posts on `pushsubscriptionchange`. */
 export const PUSH_RESUBSCRIBE_MSG = "PUSH_RESUBSCRIBE" as const
 
+/** Message type the SW posts on `notificationclick` to request an in-app navigation. */
+export const PUSH_NAVIGATE_MSG = "PUSH_NAVIGATE" as const
+
 export function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
@@ -83,6 +86,27 @@ async function resolveVapidPublicKey(apiKey?: string): Promise<string> {
   return body.key
 }
 
+/**
+ * Compare an existing subscription's `applicationServerKey` bytes with the
+ * VAPID public key we are about to subscribe under. A mismatch means the
+ * server keypair was rotated (or the baked build-time key drifted from the
+ * backend's actual key) — pushes signed with the new key would be rejected
+ * by the push service with 403, never 410, so no self-healing happens.
+ */
+export function applicationServerKeyMatches(
+  existing: ArrayBuffer | null | undefined,
+  vapidPublicKey: string,
+): boolean {
+  if (!existing) return false
+  const a = new Uint8Array(existing)
+  const b = urlBase64ToUint8Array(vapidPublicKey)
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 export async function subscribeToPush(
   apiKey?: string,
 ): Promise<PushSubscription> {
@@ -95,6 +119,13 @@ export async function subscribeToPush(
 
   const reg = await getRegistration()
   let sub = await reg.pushManager.getSubscription()
+  // A subscription created under a *different* VAPID key is useless: the
+  // backend's signed pushes get 403'd by the push service. Drop it and
+  // re-subscribe under the current key (standard key-rotation pattern).
+  if (sub && !applicationServerKeyMatches(sub.options.applicationServerKey, vapid)) {
+    await sub.unsubscribe().catch(() => {})
+    sub = null
+  }
   if (!sub) {
     sub = await reg.pushManager.subscribe({
       userVisibleOnly: true,
@@ -142,8 +173,21 @@ export function installResubscribeBridge(): () => void {
     return () => {}
   }
   const handler = (event: MessageEvent): void => {
-    const data = event.data as { type?: string; payload?: unknown } | null
-    if (!data || data.type !== PUSH_RESUBSCRIBE_MSG) return
+    const data = event.data as
+      | { type?: string; payload?: unknown; url?: string }
+      | null
+    if (!data) return
+    if (data.type === PUSH_NAVIGATE_MSG) {
+      // Notification click: navigate client-side so the SPA isn't reloaded
+      // (a hard `client.navigate()` would drop the WS, query cache and any
+      // draft input). react-router's BrowserRouter listens to popstate, so
+      // pushState + a synthetic popstate performs an in-app route change.
+      if (typeof data.url === "string") {
+        navigateInPage(data.url)
+      }
+      return
+    }
+    if (data.type !== PUSH_RESUBSCRIBE_MSG) return
     // Fire-and-forget — the SW already considers the event handled. If the
     // call fails (e.g. 401 because the user logged out), the next rotation
     // will retry. We deliberately don't surface a toast here.
@@ -155,6 +199,19 @@ export function installResubscribeBridge(): () => void {
   void replayPendingResubscribe()
   return () => {
     navigator.serviceWorker.removeEventListener("message", handler)
+  }
+}
+
+/** Soft client-side navigation; falls back to a hard load if pushState fails. */
+function navigateInPage(url: string): void {
+  try {
+    const target = new URL(url, window.location.origin)
+    if (target.origin !== window.location.origin) return
+    const path = target.pathname + target.search + target.hash
+    window.history.pushState(null, "", path)
+    window.dispatchEvent(new PopStateEvent("popstate"))
+  } catch {
+    window.location.assign(url)
   }
 }
 
@@ -178,11 +235,21 @@ export async function unsubscribeFromPush(apiKey?: string): Promise<boolean> {
   }
   if (apiKey) headers.authorization = `Bearer ${apiKey}`
 
-  await fetch("/api/push/unsubscribe", {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ endpoint: sub.endpoint }),
-  }).catch(() => {})
+  // Backend route is `DELETE /api/push/subscribe` (backend/app/api/push.py).
+  // If the server-side delete fails we still unsubscribe locally, but log it:
+  // a silently-kept row keeps fanning out pushes to a dead endpoint.
+  try {
+    const res = await fetch("/api/push/subscribe", {
+      method: "DELETE",
+      headers,
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    })
+    if (!res.ok) {
+      console.error(`[push] server unsubscribe failed: ${res.status}`)
+    }
+  } catch (err) {
+    console.error("[push] server unsubscribe failed", err)
+  }
 
   return sub.unsubscribe()
 }

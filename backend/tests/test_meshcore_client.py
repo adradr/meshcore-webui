@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from meshcore import EventType
+
 from app.services.meshcore_client import (
     MeshCoreClient,
     PingResult,
@@ -100,11 +101,48 @@ class TestSendTrace:
         assert result.hops[2] == TraceHop(hash="", snr=5.5)
 
     @pytest.mark.asyncio
-    async def test_send_trace_raises_runtime_error_when_not_connected(self):
+    async def test_send_trace_raises_connection_error_when_not_connected(self):
+        # ConnectionError (not RuntimeError) so the API layer maps it to
+        # 503 instead of 502 — same convention as every other command.
         client = MeshCoreClient(host="x", port=5000)
         client._mc = None
-        with pytest.raises(RuntimeError, match="not connected"):
+        with pytest.raises(ConnectionError, match="not connected"):
             await client.send_trace()
+
+    @pytest.mark.asyncio
+    async def test_send_trace_holds_lock_during_ack_exchange_only(self):
+        """The command/ack round trip must run under client._lock (the lib
+        matches the first MSG_SENT with no tag filter), but the long
+        TRACE_DATA wait must run with the lock RELEASED so other radio
+        commands aren't starved for up to 60s."""
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock()
+        locked_during: dict[str, bool] = {}
+
+        ack = MagicMock()
+        ack.type = MagicMock()
+        ack.type.name = "MSG_SENT"
+        ack.payload = {
+            "expected_ack": (1).to_bytes(4, "little"),
+            "suggested_timeout": 100,
+        }
+
+        async def _send_trace(**_kw):
+            locked_during["ack"] = client._lock.locked()
+            return ack
+
+        async def _wait(*_a, **_kw):
+            locked_during["trace_wait"] = client._lock.locked()
+            return None
+
+        fake_mc.commands.send_trace = _send_trace
+        fake_mc.dispatcher.wait_for_event = _wait
+        client._mc = fake_mc
+
+        with pytest.raises(TimeoutError):
+            await client.send_trace(timeout=0.1)
+
+        assert locked_during == {"ack": True, "trace_wait": False}
 
     @pytest.mark.asyncio
     async def test_send_trace_raises_timeout_error_when_no_trace_data(self):
@@ -141,7 +179,7 @@ class TestSendTraceAckTagging:
     (matching meshcore-cli) so that wait_for_event filters on the same
     value the firmware will stamp on the returning TRACE_DATA event. The
     wait-timeout must also come from the ack's `suggested_timeout` (in
-    ms, scaled × 1.2 for safety margin) — not a hardcoded constant.
+    ms, scaled x 1.2 for safety margin) — not a hardcoded constant.
 
     Reference: docs/external/meshcore-cli-reference/meshcore_cli.py:2724-2745"""
 
@@ -576,7 +614,7 @@ class TestRequestTimeouts:
 
         fake_mc.commands.req_status_sync = _hang
         client._mc = fake_mc
-        with pytest.raises(RuntimeError, match="within 0.1s"):
+        with pytest.raises(RuntimeError, match=r"within 0\.1s"):
             await client.req_status("ab" * 32, max_wait=0.1)
 
     @pytest.mark.asyncio
@@ -591,7 +629,7 @@ class TestRequestTimeouts:
         fake_mc.commands.send_trace = AsyncMock(return_value=ack)
         fake_mc.dispatcher.wait_for_event = AsyncMock(return_value=None)
         client._mc = fake_mc
-        with pytest.raises(TimeoutError, match="within 60.0s"):
+        with pytest.raises(TimeoutError, match=r"within 60\.0s"):
             await client.send_trace()
 
     @pytest.mark.asyncio
@@ -738,8 +776,9 @@ class TestRxLogBufferIntegration:
 
     @pytest.mark.asyncio
     async def test_rx_log_buffer_receives_rx_log_data_events(self):
-        from app.services.rx_log_buffer import RxLogBuffer
         from meshcore.events import Event, EventType
+
+        from app.services.rx_log_buffer import RxLogBuffer
 
         buf = RxLogBuffer(capacity=10)
         client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
@@ -764,8 +803,9 @@ class TestRxLogBufferIntegration:
     @pytest.mark.asyncio
     async def test_rx_log_buffer_only_receives_rx_log_data_events(self):
         """Non-RX_LOG_DATA events do NOT go into the buffer."""
-        from app.services.rx_log_buffer import RxLogBuffer
         from meshcore.events import Event, EventType
+
+        from app.services.rx_log_buffer import RxLogBuffer
 
         buf = RxLogBuffer(capacity=10)
         client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
@@ -794,8 +834,9 @@ class TestRxLogSanitization:
     @pytest.mark.asyncio
     async def test_rx_log_data_event_strips_pkt_payload_bytes(self):
         """Bug #8: pkt_payload (bytes) must be removed before WS broadcast."""
-        from app.services.rx_log_buffer import RxLogBuffer
         from meshcore.events import Event, EventType
+
+        from app.services.rx_log_buffer import RxLogBuffer
 
         buf = RxLogBuffer(capacity=10)
         client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
@@ -818,8 +859,9 @@ class TestRxLogSanitization:
     @pytest.mark.asyncio
     async def test_rx_log_data_event_converts_pkt_hash_int_to_hex(self):
         """Bug #7: pkt_hash int must be coerced to 8-char hex string."""
-        from app.services.rx_log_buffer import RxLogBuffer
         from meshcore.events import Event, EventType
+
+        from app.services.rx_log_buffer import RxLogBuffer
 
         buf = RxLogBuffer(capacity=10)
         client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
@@ -835,6 +877,7 @@ class TestRxLogSanitization:
     async def test_rx_log_data_broadcast_is_json_serializable(self):
         """Bug #8 end-to-end: WireEvent for RX_LOG_DATA must round-trip through json.dumps."""
         import json
+
         from meshcore.events import Event, EventType
 
         client = MeshCoreClient(host="x", port=5000)
@@ -862,8 +905,9 @@ class TestRxLogSanitization:
     @pytest.mark.asyncio
     async def test_rx_log_data_other_bytes_fields_become_hex(self):
         """Defense in depth: any other bytes-typed field should also be hexed."""
-        from app.services.rx_log_buffer import RxLogBuffer
         from meshcore.events import Event, EventType
+
+        from app.services.rx_log_buffer import RxLogBuffer
 
         buf = RxLogBuffer(capacity=10)
         client = MeshCoreClient(host="x", port=5000, rx_log_buffer=buf)
@@ -2232,3 +2276,300 @@ class TestBlePin:
         # …and none of them contain the pin digits.
         for record in caplog.records:
             assert "987654" not in record.getMessage()
+
+
+class TestGetAdvertPathHashSize:
+    """`get_advert_path` must derive the per-hop hash size as
+    `path_hash_mode + 1` bytes — the CLI convention (`out_path_hash_mode
+    + 1`, meshcore_cli.py:939/1240/1784) — NOT `1 << mode`."""
+
+    @staticmethod
+    def _client_with_advert_path(payload: dict) -> MeshCoreClient:
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        ev = MagicMock()
+        ev.type = EventType.ADVERT_PATH if hasattr(EventType, "ADVERT_PATH") else MagicMock()
+        ev.payload = payload
+        fake_mc.commands.get_advert_path = AsyncMock(return_value=ev)
+        client._mc = fake_mc
+        return client
+
+    @pytest.mark.asyncio
+    async def test_mode_zero_one_byte_hops(self):
+        client = self._client_with_advert_path(
+            {"path": "3cb9", "path_len": 2, "path_hash_mode": 0},
+        )
+        assert await client.get_advert_path("ab" * 32) == "3c,b9"
+
+    @pytest.mark.asyncio
+    async def test_mode_one_two_byte_hops(self):
+        client = self._client_with_advert_path(
+            {"path": "3c11b922", "path_len": 2, "path_hash_mode": 1},
+        )
+        assert await client.get_advert_path("ab" * 32) == "3c11,b922"
+
+    @pytest.mark.asyncio
+    async def test_mode_two_three_byte_hops(self):
+        # mode 2 → 3 bytes/hop (CLI: mode+1), NOT 4 (the old 1<<mode bug).
+        client = self._client_with_advert_path(
+            {"path": "3c11b9b922cc", "path_len": 2, "path_hash_mode": 2},
+        )
+        assert await client.get_advert_path("ab" * 32) == "3c11b9,b922cc"
+
+    @pytest.mark.asyncio
+    async def test_unknown_mode_minus_one_treated_as_one_byte(self):
+        client = self._client_with_advert_path(
+            {"path": "3c", "path_len": 1, "path_hash_mode": -1},
+        )
+        assert await client.get_advert_path("ab" * 32) == "3c"
+
+
+class TestTraceToContactResolution:
+    """trace_to must lowercase the pubkey (mc.contacts is keyed by
+    bytes.hex() lowercase) and survive the post-reconnect window where
+    the lib's contact cache is momentarily empty."""
+
+    @pytest.mark.asyncio
+    async def test_uppercase_pubkey_resolves(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = TestPingViaTrace._fake_mc_with_stored_path()
+        client._mc = fake_mc
+        result = await client.trace_to(("ee10f91c" + "00" * 28).upper())
+        assert isinstance(result, TracePathResult)
+
+    @pytest.mark.asyncio
+    async def test_empty_cache_triggers_ensure_contacts(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = TestPingViaTrace._fake_mc_with_stored_path()
+        contacts = fake_mc.contacts
+        fake_mc.contacts = {}
+
+        async def _repopulate(**_kw):
+            fake_mc.contacts = contacts
+
+        fake_mc.ensure_contacts = AsyncMock(side_effect=_repopulate)
+        client._mc = fake_mc
+        result = await client.trace_to("ee10f91c" + "00" * 28)
+        assert isinstance(result, TracePathResult)
+        fake_mc.ensure_contacts.assert_awaited_once()
+
+
+class TestSendDmFailureMapping:
+    """A radio timeout on send must surface as a RuntimeError whose
+    message contains 'timed out' (→ 504 at mappers that inspect it),
+    never an AttributeError on a None result."""
+
+    @pytest.mark.asyncio
+    async def test_none_result_raises_timed_out(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.send_msg = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="timed out"):
+            await client.send_dm("ab" * 32, "hi")
+
+    @pytest.mark.asyncio
+    async def test_error_event_with_timeout_reason_raises_timed_out(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        res = MagicMock()
+        res.is_error.return_value = True
+        res.payload = {"reason": "timeout"}
+        fake_mc.commands.send_msg = AsyncMock(return_value=res)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="timed out"):
+            await client.send_dm("ab" * 32, "hi")
+
+    @pytest.mark.asyncio
+    async def test_other_error_payload_propagates(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        res = MagicMock()
+        res.is_error.return_value = True
+        res.payload = {"reason": "table_full"}
+        fake_mc.commands.send_msg = AsyncMock(return_value=res)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="table_full"):
+            await client.send_dm("ab" * 32, "hi")
+
+    @pytest.mark.asyncio
+    async def test_send_chan_msg_none_result_raises_timed_out(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"name": "me"}
+        fake_mc.commands.send_chan_msg = AsyncMock(return_value=None)
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="timed out"):
+            await client.send_chan_msg(0, "hi")
+
+
+class TestSubscriberOverflowResync:
+    """A subscriber that overflowed must receive a synthetic `resync`
+    WireEvent once its queue has room again, so the consumer knows its
+    view has a gap and can refetch."""
+
+    @pytest.mark.asyncio
+    async def test_drop_then_resync_marker(self, caplog):
+        import logging
+
+        client = MeshCoreClient(host="x", port=5000, max_queue=1)
+        q = client.subscribe()
+        from app.services.meshcore_client import WireEvent
+
+        e1 = WireEvent(type="contact_message", payload={"n": 1}, topic="messages")
+        e2 = WireEvent(type="contact_message", payload={"n": 2}, topic="messages")
+        e3 = WireEvent(type="contact_message", payload={"n": 3}, topic="messages")
+
+        with caplog.at_level(
+            logging.WARNING, logger="app.services.meshcore_client",
+        ):
+            client._fan_out(e1)   # fills the 1-slot queue
+            client._fan_out(e2)   # dropped → gap recorded + warning
+
+        dropped = [r for r in caplog.records if "queue full" in r.getMessage()]
+        assert dropped and "contact_message" in dropped[0].getMessage()
+
+        # Drain, then the next fan-out must inject the resync marker first.
+        assert (await q.get()).payload == {"n": 1}
+        client._fan_out(e3)
+        first = await q.get()
+        assert first.type == "resync"
+        assert first.topic == "system"
+        # max_queue=1 means e3 itself was dropped to make room for the
+        # marker — verify the gap flag re-arms rather than vanishing.
+        assert id(q) in client._gapped
+
+    def test_unsubscribe_clears_gap_marker(self):
+        client = MeshCoreClient(host="x", port=5000, max_queue=1)
+        q = client.subscribe()
+        client._gapped.add(id(q))
+        client.unsubscribe(q)
+        assert id(q) not in client._gapped
+
+
+class TestConnectOncePublishOrder:
+    """`_connect_once` must NOT publish `self._mc` until ensure_contacts /
+    start_auto_message_fetching complete — otherwise REST handlers can
+    issue commands concurrently with the unlocked init tail."""
+
+    @staticmethod
+    def _fake_mc(client, seen):
+        mc = MagicMock()
+        mc.set_decrypt_channel_logs = MagicMock()
+        mc.subscribe = MagicMock()
+
+        async def _ensure(**_kw):
+            seen["mc_during_init"] = client._mc
+
+        mc.ensure_contacts = AsyncMock(side_effect=_ensure)
+        mc.start_auto_message_fetching = AsyncMock()
+        mc.disconnect = AsyncMock()
+        return mc
+
+    @pytest.mark.asyncio
+    async def test_mc_published_after_init_tail(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=5000)
+        seen: dict = {}
+        mc = self._fake_mc(client, seen)
+        monkeypatch.setattr(
+            "app.services.meshcore_client.MeshCore.create_tcp",
+            AsyncMock(return_value=mc),
+        )
+        await client._connect_once()
+        assert seen["mc_during_init"] is None
+        assert client._mc is mc
+
+    @pytest.mark.asyncio
+    async def test_failed_init_disconnects_and_leaves_mc_unset(self, monkeypatch):
+        client = MeshCoreClient(host="x", port=5000)
+        mc = self._fake_mc(client, {})
+        mc.ensure_contacts = AsyncMock(side_effect=RuntimeError("boom"))
+        monkeypatch.setattr(
+            "app.services.meshcore_client.MeshCore.create_tcp",
+            AsyncMock(return_value=mc),
+        )
+        with pytest.raises(RuntimeError, match="boom"):
+            await client._connect_once()
+        assert client._mc is None
+        mc.disconnect.assert_awaited_once()
+
+
+class TestResolveFullPubkey:
+    def _client(self, contacts):
+        client = MeshCoreClient(host="x", port=5000)
+        client._mc = MagicMock(contacts=contacts)
+        return client
+
+    def test_resolves_unique_prefix(self):
+        full = "ab12cd34" + "00" * 28
+        client = self._client({full: {}})
+        assert client.resolve_full_pubkey("AB12CD34") == full
+
+    def test_ambiguous_prefix_returns_none(self):
+        client = self._client({"ab" + "00" * 31: {}, "ab" + "11" * 31: {}})
+        assert client.resolve_full_pubkey("ab") is None
+
+    def test_unknown_or_empty_returns_none(self):
+        client = self._client({"cd" + "00" * 31: {}})
+        assert client.resolve_full_pubkey("ab12") is None
+        assert client.resolve_full_pubkey("") is None
+        client._mc = None
+        assert client.resolve_full_pubkey("cd") is None
+
+
+class TestSetChannelRefreshesSelfInfo:
+    @pytest.mark.asyncio
+    async def test_set_channel_sends_appstart_after_write(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.OK),
+        )
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+        await client.set_channel(1, "#test")
+        fake_mc.commands.send_appstart.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_rejected_set_channel_skips_appstart(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.commands.set_channel = AsyncMock(
+            return_value=MagicMock(type=EventType.ERROR),
+        )
+        fake_mc.commands.send_appstart = AsyncMock()
+        client._mc = fake_mc
+        with pytest.raises(RuntimeError, match="rejected set_channel"):
+            await client.set_channel(1, "#test")
+        fake_mc.commands.send_appstart.assert_not_awaited()
+
+
+class TestGetChannelsRobustness:
+    @pytest.mark.asyncio
+    async def test_none_slot_reply_is_skipped(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 2}
+
+        ev = MagicMock(type=EventType.CHANNEL_INFO)
+        ev.payload = {"channel_idx": 1, "channel_name": "Friends"}
+        fake_mc.commands.get_channel = AsyncMock(side_effect=[None, ev])
+        client._mc = fake_mc
+        out = await client.get_channels()
+        assert [c["channel_name"] for c in out] == ["Friends"]
+
+    @pytest.mark.asyncio
+    async def test_sweep_holds_lock(self):
+        client = MeshCoreClient(host="x", port=5000)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.self_info = {"max_channels": 1}
+        locked: list[bool] = []
+
+        async def _get_channel(_i):
+            locked.append(client._lock.locked())
+            return None
+
+        fake_mc.commands.get_channel = _get_channel
+        client._mc = fake_mc
+        await client.get_channels()
+        assert locked == [True]

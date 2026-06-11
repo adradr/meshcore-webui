@@ -17,7 +17,7 @@ Task 1.4 we only implement the local-stack walk.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.schemas.diagnostics import StepResult, StepStatus
@@ -43,14 +43,14 @@ class DiagnosticOrchestrator:
         name: str,
         fn: Callable[[], Awaitable[dict[str, Any]]],
     ) -> StepResult:
-        started = datetime.now(timezone.utc)
+        started = datetime.now(UTC)
         try:
             data = await fn()
             return StepResult(
                 step=name,
                 status=StepStatus.RESPONDED,
                 started_at=started,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
                 data=data,
                 attempts=1,
                 successes=1,
@@ -60,7 +60,7 @@ class DiagnosticOrchestrator:
                 step=name,
                 status=StepStatus.NO_RESPONSE,
                 started_at=started,
-                finished_at=datetime.now(timezone.utc),
+                finished_at=datetime.now(UTC),
                 error=str(exc),
                 attempts=1,
                 successes=0,

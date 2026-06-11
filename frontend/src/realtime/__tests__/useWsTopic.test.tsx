@@ -28,7 +28,6 @@ function makeFakeProvider(): FakeProvider {
   const value = {
     status: "open" as const,
     send: () => {},
-    lastMessage: null,
     subscribe,
   }
   const wrapper = ({ children }: { children: ReactNode }) => (

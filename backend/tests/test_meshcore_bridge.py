@@ -1,12 +1,13 @@
 import asyncio
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.db.models import PushSubscription
 from app.services.meshcore_bridge import MeshCoreBridge
+from app.services.meshcore_client import WireEvent
 from app.services.push_sender import PushSender
 from app.services.task_pool import TaskPool
-from app.services.meshcore_client import WireEvent
 
 
 @pytest.mark.asyncio
@@ -475,7 +476,7 @@ async def test_mute_mode_overrides_per_conversation_mute(
     db, engine, monkeypatch,
 ):
     """Mode=mute short-circuits before the per-conversation check — global wins."""
-    from app.db.models import Base, Setting, MutePreference
+    from app.db.models import Base, MutePreference, Setting
     async with engine.begin() as c:
         await c.run_sync(Base.metadata.create_all)
 
@@ -547,3 +548,66 @@ async def test_ack_event_unknown_code_noop(db, engine, monkeypatch):
     refreshed = (await db.execute(select(Message).where(Message.id == msg_id))).scalar_one()
     assert refreshed.ack_state == "pending"
     assert refreshed.ack_received_at is None
+
+
+@pytest.mark.asyncio
+async def test_inbound_dm_keyed_by_full_pubkey_when_enriched(db, engine, monkeypatch):
+    """Canonical DM conversation key: when the wire payload carries the
+    resolved full `pubkey` (added by MeshCoreClient._on_event), the bridge
+    must persist `contact_pub_key` as the full 64-hex LOWERCASE key so
+    inbound rows land in the same thread as outbound rows keyed by the
+    full key (DM identity split fix)."""
+    from sqlalchemy import select
+
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    full = "AB12CD34EF56" + "00" * 26
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "hi", "pubkey_prefix": "ab12cd34ef56", "pubkey": full},
+        attributes={},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    async with Session() as s:
+        row = (await s.execute(select(Message))).scalars().one()
+    assert row.contact_pub_key == full.lower()
+    assert row.pubkey_prefix == "ab12cd34ef56"
+
+
+@pytest.mark.asyncio
+async def test_inbound_dm_falls_back_to_prefix_when_unresolved(db, engine, monkeypatch):
+    from sqlalchemy import select
+
+    from app.db.models import Base, Message
+    async with engine.begin() as c:
+        await c.run_sync(Base.metadata.create_all)
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    Session = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr("app.services.meshcore_bridge.SessionLocal", Session)
+    monkeypatch.setattr("app.services.push_sender.webpush_async", AsyncMock())
+
+    pool = TaskPool()
+    sender = PushSender(vapid=MagicMock(), subject="mailto:t@x.com")
+    bridge = MeshCoreBridge(sender=sender, pool=pool)
+
+    bridge.handle_event(WireEvent(
+        type="contact_message",
+        payload={"text": "hi", "pubkey_prefix": "AB12CD34EF56"},
+        attributes={},
+    ))
+    await asyncio.gather(*pool._tasks)
+
+    async with Session() as s:
+        row = (await s.execute(select(Message))).scalars().one()
+    assert row.contact_pub_key == "ab12cd34ef56"

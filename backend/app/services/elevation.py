@@ -59,6 +59,7 @@ class ElevationProvider:
         self._client = client
         self._rate_limit_s = rate_limit_s
         self._lock = asyncio.Lock()
+        self._next_allowed_at = 0.0
         self._cache: OrderedDict[CoordKey, float] = OrderedDict()
 
     async def lookup(self, coords: list[tuple[float, float]]) -> list[float]:
@@ -116,19 +117,24 @@ class ElevationProvider:
         """POST one batch (<= 100 coords) to OpenTopoData; return elevations in order."""
         body = {"locations": "|".join(f"{lat},{lon}" for lat, lon in keys)}
         async with self._lock:
+            # Deficit-based pacing: instead of always sleeping after the HTTP
+            # call (which made even a SINGLE request pay the full rate-limit
+            # tail, and serialized all LoS requests at ~1 batch/s regardless
+            # of demand), sleep only for whatever remains of the rate-limit
+            # window opened by the PREVIOUS batch. A lone request proceeds
+            # immediately; back-to-back batches are still spaced
+            # >= rate_limit_s apart, which is the OpenTopoData courtesy
+            # limit this exists for.
+            if self._rate_limit_s:
+                loop = asyncio.get_running_loop()
+                wait_s = self._next_allowed_at - loop.time()
+                if wait_s > 0:
+                    await asyncio.sleep(wait_s)
+                self._next_allowed_at = loop.time() + self._rate_limit_s
             try:
                 resp = await self._client.post(self._url, json=body)
             except httpx.HTTPError as exc:
                 raise ElevationLookupError(f"elevation HTTP error: {exc}") from exc
-            # Sleep is held INSIDE the lock but AFTER the HTTP call: the lock
-            # is released only once the rate-limit window has elapsed, so the
-            # next concurrent waiter can issue its HTTP call immediately on
-            # acquisition without stacking the rate-limit delay on top of its
-            # own wait. (Putting the sleep BEFORE the POST would force the
-            # next acquirer to wait `rate_limit_s + http_time` before its own
-            # `rate_limit_s` sleep even started — doubling tail latency.)
-            if self._rate_limit_s:
-                await asyncio.sleep(self._rate_limit_s)
         if not (200 <= resp.status_code < 300):
             # Log the raw upstream body at DEBUG for operator forensics, but
             # NEVER include it in the exception — the exception's ``detail`` is
@@ -145,7 +151,14 @@ class ElevationProvider:
             )
         try:
             payload = resp.json()
-            return [float(r["elevation"]) for r in payload["results"]]
+            # OpenTopoData returns ``"elevation": null`` for points with no
+            # DEM coverage (ocean for most datasets, dataset edges). Treat
+            # those as sea level (0.0 m) instead of failing the whole
+            # profile — coastal LoS paths routinely cross water.
+            return [
+                float(r["elevation"]) if r["elevation"] is not None else 0.0
+                for r in payload["results"]
+            ]
         except (KeyError, ValueError, TypeError) as exc:
             raise ElevationLookupError(f"malformed elevation response: {exc}") from exc
 

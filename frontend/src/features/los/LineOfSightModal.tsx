@@ -61,7 +61,21 @@ interface ChartRow {
   fresnel_lower_m: number
 }
 
-function buildChartData(out: LosOut, hTx: number, hRx: number): ChartRow[] {
+/**
+ * Build the profile rows for the chart. Mirrors the backend clearance math
+ * (`backend/app/services/fresnel.py:verdict_from_profile`): the terrain
+ * series is `ground_m + bulge_m` — the 4/3-effective-earth bulge raised
+ * above the chord — so the picture matches the CLEAR / PARTIAL / BLOCKED
+ * verdict on long links (~13 m at the midpoint of a 30 km path).
+ *
+ * Exported for unit tests only.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildChartData(
+  out: LosOut,
+  hTx: number,
+  hRx: number,
+): ChartRow[] {
   if (!out.samples.length) return []
   const first = out.samples[0]
   const last = out.samples[out.samples.length - 1]
@@ -72,7 +86,7 @@ function buildChartData(out: LosOut, hTx: number, hRx: number): ChartRow[] {
     const losH = txMsl + ((rxMsl - txMsl) * s.distance_m) / D
     return {
       distance_km: s.distance_m / 1000,
-      ground_m: s.ground_m,
+      ground_m: s.ground_m + s.bulge_m,
       los_h_m: losH,
       fresnel_lower_m: losH - 0.6 * s.fresnel_m,
     }

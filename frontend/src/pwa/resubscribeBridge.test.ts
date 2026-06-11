@@ -143,6 +143,38 @@ describe("installResubscribeBridge", () => {
     teardown()
   })
 
+  it("handles PUSH_NAVIGATE with a soft client-side navigation", async () => {
+    const sw = installFakeServiceWorker()
+    const { installResubscribeBridge } = await import("./push")
+    const teardown = installResubscribeBridge()
+
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+    const popstateSpy = vi.fn()
+    window.addEventListener("popstate", popstateSpy)
+
+    sw.emit({ type: "PUSH_NAVIGATE", url: "/chat/abc?x=1" })
+
+    expect(pushStateSpy).toHaveBeenCalledWith(null, "", "/chat/abc?x=1")
+    expect(popstateSpy).toHaveBeenCalledTimes(1)
+    expect(postMock).not.toHaveBeenCalled()
+
+    window.removeEventListener("popstate", popstateSpy)
+    pushStateSpy.mockRestore()
+    teardown()
+  })
+
+  it("ignores PUSH_NAVIGATE to a different origin", async () => {
+    const sw = installFakeServiceWorker()
+    const { installResubscribeBridge } = await import("./push")
+    const teardown = installResubscribeBridge()
+
+    const pushStateSpy = vi.spyOn(window.history, "pushState")
+    sw.emit({ type: "PUSH_NAVIGATE", url: "https://evil.example/phish" })
+    expect(pushStateSpy).not.toHaveBeenCalled()
+    pushStateSpy.mockRestore()
+    teardown()
+  })
+
   it("no-ops when serviceWorker is unavailable", async () => {
     Object.defineProperty(navigator, "serviceWorker", {
       configurable: true,

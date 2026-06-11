@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import Coroutine
@@ -11,7 +12,9 @@ class TaskPool:
     def __init__(self) -> None:
         self._tasks: set[asyncio.Task[Any]] = set()
 
-    def spawn(self, coro: Coroutine[Any, Any, Any], *, name: str | None = None) -> asyncio.Task[Any]:
+    def spawn(
+        self, coro: Coroutine[Any, Any, Any], *, name: str | None = None
+    ) -> asyncio.Task[Any]:
         task = asyncio.create_task(coro, name=name)
         self._tasks.add(task)
         task.add_done_callback(self._on_done)
@@ -31,4 +34,11 @@ class TaskPool:
         for t in self._tasks:
             t.cancel()
         await asyncio.wait(self._tasks, timeout=timeout)
+        pending = [t.get_name() for t in self._tasks if not t.done()]
+        if pending:
+            log.warning(
+                "TaskPool shutdown: %d task(s) ignored cancellation within"
+                " %.1fs and were orphaned: %s",
+                len(pending), timeout, ", ".join(pending),
+            )
         self._tasks.clear()

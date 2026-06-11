@@ -23,7 +23,6 @@ import io
 import json
 import logging
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -50,10 +49,32 @@ CSV_COLUMNS = [
 ]
 
 
+# Leading characters that spreadsheet apps (Excel, Sheets, LibreOffice)
+# interpret as a formula. RX-log fields are radio-derived — any nearby
+# node can transmit them — so a cell like "=CMD(...)" must never reach
+# an operator's spreadsheet unescaped.
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _csv_safe(value: object) -> object:
+    """Neutralize spreadsheet formula injection in string cells.
+
+    Strings starting with a formula trigger are prefixed with a single
+    quote (the conventional spreadsheet 'treat as text' escape). Numeric
+    values pass through untouched so negative SNR/RSSI stay numbers.
+    ``None`` becomes the empty string (matches the previous behaviour).
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str) and value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 @router.get("", response_model=RxLogResponse)
 def get_rx_log(
     limit: int = Query(default=200, ge=1, le=1000),
-    since: Optional[int] = Query(default=None, ge=0),
+    since: int | None = Query(default=None, ge=0),
     client: MeshCoreClient = Depends(get_meshcore_client),
 ) -> RxLogResponse:
     """Return a snapshot of the RX buffer, optionally filtered.
@@ -119,7 +140,9 @@ def export_rx_log(
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(CSV_COLUMNS)
     for e in snap:
-        writer.writerow([e.get(c, "") if e.get(c) is not None else "" for c in CSV_COLUMNS])
+        writer.writerow(
+            [_csv_safe(e.get(c)) for c in CSV_COLUMNS]
+        )
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

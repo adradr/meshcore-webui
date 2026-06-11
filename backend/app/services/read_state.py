@@ -1,9 +1,12 @@
 """Helpers for the conversation read-pointer (stored in `settings` table)."""
 from __future__ import annotations
+
 import datetime as dt
+
 from sqlalchemy import select, text
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import Setting
 
 EPOCH = "1970-01-01T00:00:00+00:00"
@@ -38,7 +41,7 @@ async def mark_read(
         contact_pub_key=contact_pub_key,
         channel_idx=channel_idx,
     )
-    ts = (when or dt.datetime.now(dt.timezone.utc)).isoformat()
+    ts = (when or dt.datetime.now(dt.UTC)).isoformat()
     stmt = (
         sqlite_insert(Setting)
         .values(key=key, value=ts)
@@ -55,7 +58,7 @@ async def mark_all_read(
 ) -> int:
     """Upsert the read pointer to `when` for every conversation observed in
     the messages table. Returns the number of read pointers updated."""
-    ts = (when or dt.datetime.now(dt.timezone.utc)).isoformat()
+    ts = (when or dt.datetime.now(dt.UTC)).isoformat()
     rows = (await db.execute(text("""
         SELECT DISTINCT
           CASE msg_type

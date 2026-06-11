@@ -139,3 +139,38 @@ async def test_rejects_oversized_file(tmp_path, session_factory):
         with pytest.raises(TooLarge):
             await svc.create(s, data=b"x" * 11, original_filename=None,
                              uploader_fingerprint=None)
+
+
+@pytest.mark.asyncio
+async def test_quota_uses_db_accounting_not_filesystem(tmp_path, session_factory):
+    """Orphan files on disk must not count against the quota — the quota
+    enforced must match the DB-side total_bytes the admin UI reports."""
+    svc = AttachmentService(tmp_path, 10_000_000, quota_bytes=10_000_000)
+    # Drop a large orphan blob into the storage tree.
+    orphan = tmp_path / "aa"
+    orphan.mkdir(parents=True, exist_ok=True)
+    (orphan / "orphan.webp").write_bytes(b"x" * 9_999_999)
+    async with session_factory() as s:
+        att = await svc.create(
+            s, data=_jpeg(), original_filename="ok.jpg",
+            uploader_fingerprint=None,
+        )
+        assert att is not None
+
+
+@pytest.mark.asyncio
+async def test_quota_counts_prior_db_rows(tmp_path, session_factory):
+    svc = AttachmentService(tmp_path, 10_000_000, quota_bytes=10_000_000)
+    async with session_factory() as s:
+        first = await svc.create(
+            s, data=_jpeg(), original_filename="a.jpg",
+            uploader_fingerprint=None,
+        )
+        # Shrink the quota to just under what's already stored: next upload
+        # must be rejected based on DB accounting.
+        svc.quota_bytes = first.size_bytes
+        with pytest.raises(QuotaExceeded):
+            await svc.create(
+                s, data=_jpeg(), original_filename="b.jpg",
+                uploader_fingerprint=None,
+            )

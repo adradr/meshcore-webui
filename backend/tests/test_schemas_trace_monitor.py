@@ -14,14 +14,21 @@ from app.schemas.trace_monitor import (
 )
 
 
-def test_start_request_rejects_interval_below_minimum():
+def test_start_request_rejects_non_positive_interval():
+    # The settings-driven [min, max] window is enforced by the SERVICE
+    # (TraceMonitor.start), not the schema — hardcoding 5..300 here would
+    # silently override an operator-widened window. The schema only
+    # rejects nonsensical values.
     with pytest.raises(ValidationError):
-        TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=1)
+        TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=0)
+    with pytest.raises(ValidationError):
+        TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=-5)
 
 
-def test_start_request_rejects_interval_above_maximum():
-    with pytest.raises(ValidationError):
-        TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=10_000)
+def test_start_request_accepts_intervals_outside_default_window():
+    # Bounds checking deferred to the service — see comment above.
+    TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=1)
+    TraceMonitorStartRequest(pubkey="ab" * 32, interval_s=10_000)
 
 
 def test_start_request_pubkey_must_be_64_hex():

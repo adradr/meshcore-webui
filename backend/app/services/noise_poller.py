@@ -90,7 +90,7 @@ class NoisePoller:
                     self._stop_event.wait(), timeout=self._interval,
                 )
                 break  # stop() was called
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def _poll_once(self) -> None:
