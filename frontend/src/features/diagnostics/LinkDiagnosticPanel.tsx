@@ -97,6 +97,7 @@ function ReportView({ report }: { report: DiagnosticReport }) {
 
 type VerdictTier = "HEALTHY" | "DEGRADED" | "UNREACHABLE"
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function verdictTier(report: DiagnosticReport): VerdictTier {
   if (report.verdict === "healthy") return "HEALTHY"
 

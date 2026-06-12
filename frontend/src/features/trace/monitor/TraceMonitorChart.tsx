@@ -30,6 +30,11 @@ export interface TraceMonitorChartProps {
   title?: string
 }
 
+// Failure-rail Y constant. Sits below the SNR working range so the markers
+// are clearly separated from real data. Y scale is forced to include this
+// value (see `scales.y.range` below) so the markers are always on-screen.
+const FAILURE_RAIL_Y = -25
+
 // Fallback palette for per-hop series when --chart-N vars are absent or for
 // hops past the first two; chosen as evenly-spaced hues for stable visual
 // separation between traces.
@@ -137,11 +142,6 @@ export function TraceMonitorChart({
     }
     return c
   }, [samples])
-
-  // Failure-rail Y constant. Sits below the SNR working range so the markers
-  // are clearly separated from real data. Y scale is forced to include this
-  // value (see `scales.y.range` below) so the markers are always on-screen.
-  const FAILURE_RAIL_Y = -25
 
   const aligned: uPlot.AlignedData = useMemo(() => {
     const xs = samples.map((s) => Date.parse(s.finished_at) / 1000)

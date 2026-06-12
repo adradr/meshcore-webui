@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
-import { Activity, Monitor, Moon, Sun } from "lucide-react"
+import { Activity, Eye, EyeOff, Monitor, Moon, Sun } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -43,11 +43,13 @@ export function SettingsPage() {
       ? (localStorage.getItem("apiKey") ?? "")
       : "",
   )
+  const [showApiKey, setShowApiKey] = useState(false)
   const [pushOn, setPushOn] = useState(false)
-  const [pushAvailable, setPushAvailable] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
+  // Lazy initializer: feature detection is stable for the page lifetime.
+  const [pushAvailable] = useState(() => canUsePush())
 
   useEffect(() => {
-    setPushAvailable(canUsePush())
     navigator.serviceWorker?.ready
       .then((r) => r.pushManager.getSubscription())
       .then((s) => setPushOn(!!s))
@@ -57,6 +59,8 @@ export function SettingsPage() {
   }, [])
 
   const togglePush = async () => {
+    if (pushBusy) return
+    setPushBusy(true)
     try {
       // Read the LATEST stored key, not the in-memory `apiKey` state — that
       // one only updates after Save, while push toggles should respect what's
@@ -76,6 +80,8 @@ export function SettingsPage() {
       }
     } catch (e) {
       notifyError(pushOn ? "Turn off notifications" : "Turn on notifications", e)
+    } finally {
+      setPushBusy(false)
     }
   }
 
@@ -181,6 +187,7 @@ export function SettingsPage() {
               <Switch
                 id="push"
                 checked={pushOn}
+                disabled={pushBusy}
                 onCheckedChange={togglePush}
               />
             </div>
@@ -224,19 +231,38 @@ export function SettingsPage() {
               <code className="rounded bg-muted px-1 text-[11px]">
                 MESHCORE_WEBUI_API_KEY
               </code>{" "}
-              set. Reloading the page applies the change.
+              set. Saving applies the change immediately — no reload needed.
             </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="api-key">API key</Label>
             <div className="flex gap-2">
-              <Input
-                id="api-key"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="bearer token"
-                className="flex-1"
-              />
+              <div className="relative flex-1">
+                <Input
+                  id="api-key"
+                  type={showApiKey ? "text" : "password"}
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="bearer token"
+                  className="pr-9"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="absolute right-0.5 top-1/2 h-8 w-8 -translate-y-1/2 text-muted-foreground"
+                  onClick={() => setShowApiKey((v) => !v)}
+                  aria-label={showApiKey ? "Hide API key" : "Show API key"}
+                  aria-pressed={showApiKey}
+                >
+                  {showApiKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
               <Button onClick={saveApiKey}>Save</Button>
             </div>
           </div>

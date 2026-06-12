@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -117,3 +118,55 @@ async def test_persist_survives_bad_payload(session_factory):
         assert "cc" in hashes
     finally:
         await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_flushes_pending_entries(session_factory):
+    """stop() must drain the queue + flush the final batch, not drop it."""
+    service = RxLogPersistService(session_factory)
+    await service.start()
+    for i in range(120):  # multiple batches' worth
+        service.enqueue({"recv_time": i, "pkt_hash": f"h{i}"})
+    await service.stop()
+
+    async with session_factory() as s:
+        rows = list((await s.execute(select(RxLogEntry))).scalars().all())
+    assert len(rows) == 120
+
+
+@pytest.mark.asyncio
+async def test_retention_prunes_to_cap(session_factory):
+    """The persist loop must prune rx_log_entries down to the configured cap."""
+    service = RxLogPersistService(session_factory, max_rows=10)
+    # Force a prune on every flushed batch.
+    service._PRUNE_EVERY_BATCHES = 1
+    await service.start()
+    try:
+        for i in range(60):
+            service.enqueue({"recv_time": i, "pkt_hash": f"h{i}"})
+        rows: list[RxLogEntry] = []
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            async with session_factory() as s:
+                rows = list((await s.execute(select(RxLogEntry))).scalars().all())
+            if rows and len(rows) <= 10 and max(r.recv_time_ms for r in rows) == 59:
+                break
+    finally:
+        await service.stop()
+    assert 0 < len(rows) <= 10
+    # Newest rows survive, oldest are pruned.
+    assert max(r.recv_time_ms for r in rows) == 59
+    assert min(r.recv_time_ms for r in rows) >= 49
+
+
+@pytest.mark.asyncio
+async def test_retention_disabled_when_cap_nonpositive(session_factory):
+    service = RxLogPersistService(session_factory, max_rows=0)
+    service._PRUNE_EVERY_BATCHES = 1
+    await service.start()
+    for i in range(30):
+        service.enqueue({"recv_time": i})
+    await service.stop()
+    async with session_factory() as s:
+        rows = list((await s.execute(select(RxLogEntry))).scalars().all())
+    assert len(rows) == 30

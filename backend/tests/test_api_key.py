@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-
 # `/api/health` is intentionally exempt from the API key check (Docker
 # HEALTHCHECK + k8s probes can't carry a bearer). Test the gate against
 # `/api/contacts`, which the middleware does protect.

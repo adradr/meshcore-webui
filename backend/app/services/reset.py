@@ -1,9 +1,17 @@
 from __future__ import annotations
+
 import logging
+
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models import (
-    Message, DiagnosticRun, MutePreference, Setting, RxLogEntry, PushSubscription,
+    DiagnosticRun,
+    Message,
+    MutePreference,
+    PushSubscription,
+    RxLogEntry,
+    Setting,
     TraceSample,
 )
 

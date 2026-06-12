@@ -10,8 +10,6 @@ metadata is present without having to special-case missing keys.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -32,20 +30,20 @@ class RxLogEntry(BaseModel):
     # so the UI can render any future metadata without a backend bump.
     model_config = ConfigDict(extra="allow")
 
-    recv_time: Optional[int] = None
-    snr: Optional[float] = None
-    rssi: Optional[int] = None
-    payload: Optional[str] = None
-    payload_length: Optional[int] = None
-    route_type: Optional[int] = None
-    route_typename: Optional[str] = None
-    payload_type: Optional[int] = None
-    payload_typename: Optional[str] = None
-    path_len: Optional[int] = None
-    path_hash_size: Optional[int] = None
-    path: Optional[str] = None
-    pkt_hash: Optional[str] = None
-    raw_hex: Optional[str] = None
+    recv_time: int | None = None
+    snr: float | None = None
+    rssi: int | None = None
+    payload: str | None = None
+    payload_length: int | None = None
+    route_type: int | None = None
+    route_typename: str | None = None
+    payload_type: int | None = None
+    payload_typename: str | None = None
+    path_len: int | None = None
+    path_hash_size: int | None = None
+    path: str | None = None
+    pkt_hash: str | None = None
+    raw_hex: str | None = None
 
 
 class RxLogResponse(BaseModel):

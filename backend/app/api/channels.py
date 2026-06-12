@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.radio_errors import call_radio
 from app.db.models import Message, Setting
 from app.db.session import get_db
 from app.schemas.channels import ChannelIn, ChannelOut
@@ -36,7 +37,7 @@ def _parse_psk(psk: str | None) -> bytes | None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             f"psk must be valid hex: {e}",
-        )
+        ) from e
     if len(raw) != 16:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -53,12 +54,7 @@ async def list_channels(request: Request) -> list[dict]:
     below push directly to the firmware via ``set_channel``.
     """
     client = _require_client(request)
-    try:
-        return await client.get_channels()
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    return await call_radio(client.get_channels())
 
 
 @router.post("", response_model=ChannelOut, status_code=status.HTTP_201_CREATED)
@@ -73,12 +69,7 @@ async def create_channel(payload: ChannelIn, request: Request) -> dict:
     """
     client = _require_client(request)
     secret = _parse_psk(payload.psk)
-    try:
-        await client.set_channel(payload.idx, payload.name, secret)
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    await call_radio(client.set_channel(payload.idx, payload.name, secret))
     # Read back so the response reflects the firmware's view, including
     # the derived secret when caller didn't provide one.
     try:
@@ -100,7 +91,7 @@ async def create_channel(payload: ChannelIn, request: Request) -> dict:
 
 @router.delete("/{idx}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_channel(
-    idx: int,
+    idx: Annotated[int, Path(ge=0, le=255)],
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
@@ -113,12 +104,7 @@ async def delete_channel(
     future channel on the same index starts with a clean slate.
     """
     client = _require_client(request)
-    try:
-        await client.delete_channel(idx)
-    except ConnectionError as e:
-        raise HTTPException(503, str(e))
-    except RuntimeError as e:
-        raise HTTPException(502, str(e))
+    await call_radio(client.delete_channel(idx))
     await db.execute(delete(Message).where(Message.channel_idx == idx))
     await db.execute(
         delete(Setting).where(Setting.key == f"read:chan:{idx}")

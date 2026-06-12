@@ -5,7 +5,7 @@ import { MessageList } from "@/features/chat/MessageList"
 import { MessageInput } from "@/features/chat/MessageInput"
 import { ThreadsList } from "@/features/chat/ThreadsList"
 import { useMarkRead } from "@/features/chat/queries"
-import { useRealtime } from "@/realtime/WebSocketProvider"
+import { useWsTopic } from "@/realtime/useWsTopic"
 
 interface IncomingMatch {
   contactPubKey?: string
@@ -13,26 +13,45 @@ interface IncomingMatch {
 }
 
 /**
- * Decide whether the latest WS message belongs to the currently-viewed
- * conversation and, if so, what mark-read arg to send.
+ * Decide whether an incoming `messages`-topic payload belongs to the
+ * currently-viewed conversation and, if so, what mark-read arg to send.
+ *
+ * The topic carries several event payloads (contact/channel messages, acks,
+ * advertisements, …) without a type discriminator, so the shape itself
+ * disambiguates: only actual messages carry `text`, channel messages carry
+ * `channel_idx`, and DMs carry `pubkey` (full, enriched server-side) and/or
+ * the legacy short `pubkey_prefix`.
  */
-function matchIncoming(
-  lastMessage: unknown,
+// eslint-disable-next-line react-refresh/only-export-components
+export function matchIncoming(
+  payload: unknown,
   pubKey: string | undefined,
   channelIdx: number | undefined,
 ): IncomingMatch | null {
-  if (!lastMessage || typeof lastMessage !== "object") return null
-  const m = lastMessage as { type?: string; payload?: Record<string, unknown> }
-  if (m.type === "contact_message" && pubKey) {
-    const prefix = m.payload?.pubkey_prefix
-    if (typeof prefix === "string" && pubKey.toLowerCase().startsWith(prefix.toLowerCase())) {
-      return { contactPubKey: pubKey }
-    }
+  if (!payload || typeof payload !== "object") return null
+  const p = payload as Record<string, unknown>
+  if (typeof p.text !== "string") return null // acks / adverts / path updates
+  if (typeof p.channel_idx === "number") {
+    return channelIdx !== undefined && p.channel_idx === channelIdx
+      ? { channelIdx }
+      : null
   }
-  if (m.type === "channel_message" && channelIdx !== undefined) {
-    if (m.payload?.channel_idx === channelIdx) {
-      return { channelIdx }
-    }
+  if (!pubKey) return null
+  // When the backend resolved the full pubkey, it is authoritative — a
+  // prefix collision must not mark a different conversation as read.
+  const full = typeof p.pubkey === "string" ? p.pubkey : undefined
+  if (full) {
+    return full.toLowerCase() === pubKey.toLowerCase()
+      ? { contactPubKey: pubKey }
+      : null
+  }
+  const prefix = p.pubkey_prefix
+  if (
+    typeof prefix === "string" &&
+    prefix.length > 0 &&
+    pubKey.toLowerCase().startsWith(prefix.toLowerCase())
+  ) {
+    return { contactPubKey: pubKey }
   }
   return null
 }
@@ -41,7 +60,6 @@ export function ChatPage() {
   const { pubKey, idx } = useParams()
   const channelIdx = idx ? parseInt(idx, 10) : undefined
   const markRead = useMarkRead()
-  const { lastMessage } = useRealtime()
 
   // Composer draft is lifted so swipe-to-reply on a channel bubble can
   // prefill `@SenderName ` and bump `seedKey` to refocus the textarea.
@@ -61,12 +79,17 @@ export function ChatPage() {
   }, [pubKey, channelIdx])
 
   // Re-mark when a new message arrives via WS for the active conversation.
-  useEffect(() => {
-    const match = matchIncoming(lastMessage, pubKey, channelIdx)
-    if (!match) return
-    markRead.mutate(match)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastMessage, pubKey, channelIdx])
+  // Topic subscription (not context lastMessage) so unrelated WS traffic
+  // never re-renders this page.
+  const markReadMutate = markRead.mutate
+  const onIncoming = useCallback(
+    (payload: unknown) => {
+      const match = matchIncoming(payload, pubKey, channelIdx)
+      if (match) markReadMutate(match)
+    },
+    [pubKey, channelIdx, markReadMutate],
+  )
+  useWsTopic("messages", onIncoming)
 
   if (!pubKey && channelIdx === undefined) {
     return (

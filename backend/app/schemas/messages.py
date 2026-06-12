@@ -1,5 +1,7 @@
 from __future__ import annotations
+
 import datetime as dt
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -30,12 +32,18 @@ class MessagesPage(BaseModel):
 
 
 class MessageIn(BaseModel):
-    contact_pub_key: str | None = None
-    channel_idx: int | None = None
+    # Even-length hex only (1..32 bytes / 2..64 chars): the meshcore lib's
+    # destination validation does bytes.fromhex() — odd-length or non-hex
+    # input would raise ValueError deep in the radio layer and surface as
+    # an unhandled 500 instead of a 422.
+    contact_pub_key: str | None = Field(
+        default=None, pattern=r"^([0-9a-fA-F]{2}){1,32}$"
+    )
+    channel_idx: int | None = Field(default=None, ge=0, le=255)
     text: str = Field(..., min_length=1, max_length=2048)
 
     @model_validator(mode="after")
-    def _exactly_one_target(self) -> "MessageIn":
+    def _exactly_one_target(self) -> MessageIn:
         if (self.contact_pub_key is None) == (self.channel_idx is None):
             raise ValueError("exactly one of contact_pub_key or channel_idx is required")
         return self

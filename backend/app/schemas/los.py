@@ -27,6 +27,8 @@ class LosIn(BaseModel):
     a: Point
     b: Point
     freq_hz: float = Field(default=868e6, gt=0, le=10e9)
+    # Values below the endpoint's density floor (64) are accepted here but
+    # clamped up in ``compute_los`` — coarse profiles can miss terrain.
     samples: int | None = Field(default=None, ge=8, le=512)
 
 

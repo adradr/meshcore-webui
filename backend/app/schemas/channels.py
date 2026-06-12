@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -18,8 +19,14 @@ class ChannelIn(BaseModel):
 class ChannelOut(BaseModel):
     """Response shape for POST /api/channels — mirrors the device's
     CHANNEL_INFO payload so the frontend's read-and-write code paths
-    can share a Zod schema. All byte fields are hex-encoded."""
-    model_config = ConfigDict(extra="allow")
+    can share a Zod schema. All byte fields are hex-encoded.
+
+    ``extra="ignore"`` keeps this a **closed allowlist** (same rationale
+    as ``SelfInfo`` in api/device.py): fields a newer firmware adds to
+    CHANNEL_INFO are dropped until they're explicitly reviewed and
+    enumerated here, so unreviewed bytes never reach API callers.
+    """
+    model_config = ConfigDict(extra="ignore")
     channel_idx: int
     channel_name: str
     channel_hash: str | None = None

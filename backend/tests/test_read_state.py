@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import datetime as dt
 
 import pytest
@@ -44,7 +45,8 @@ async def test_mark_read_dm_persists_setting(client, db):
 @pytest.mark.asyncio
 async def test_mark_read_chan_persists_setting(client, db):
     ts = await mark_read(db, contact_pub_key=None, channel_idx=2)
-    rows = (await db.execute(select(Setting).where(Setting.key.like("read:chan:%")))).scalars().all()
+    result = await db.execute(select(Setting).where(Setting.key.like("read:chan:%")))
+    rows = result.scalars().all()
     assert len(rows) == 1
     assert rows[0].key == "read:chan:2"
     assert rows[0].value == ts
@@ -52,8 +54,8 @@ async def test_mark_read_chan_persists_setting(client, db):
 
 @pytest.mark.asyncio
 async def test_mark_read_upserts(client, db):
-    t1 = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
-    t2 = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    t1 = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
+    t2 = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=t1)
     await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=t2)
     rows = (await db.execute(select(Setting))).scalars().all()
@@ -77,7 +79,7 @@ async def test_get_last_read_returns_epoch_when_unset(client, db):
 
 @pytest.mark.asyncio
 async def test_get_last_read_returns_value_when_set(client, db):
-    when = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key="abc", channel_idx=None, when=when)
     val = await get_last_read(db, contact_pub_key="abc", channel_idx=None)
     assert val == when.isoformat()
@@ -136,7 +138,7 @@ async def test_unread_total_empty_when_no_messages(client):
 async def test_unread_total_sums_across_conversations(client, db):
     from app.db.models import Message
 
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     # 2 unread DMs for abc + 3 unread channel msgs on idx 2 = 5 total
     for i in range(2):
         db.add(Message(
@@ -162,7 +164,7 @@ async def test_unread_total_sums_across_conversations(client, db):
 @pytest.mark.asyncio
 async def test_mark_all_read_updates_all_observed_threads(client, db):
     from app.db.models import Message
-    from app.services.read_state import mark_all_read, get_last_read
+    from app.services.read_state import get_last_read, mark_all_read
 
     db.add(Message(
         msg_type="dm",
@@ -170,7 +172,7 @@ async def test_mark_all_read_updates_all_observed_threads(client, db):
         channel_idx=None,
         direction="in",
         text="hi",
-        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
         ack_state="pending",
     ))
     db.add(Message(
@@ -179,7 +181,7 @@ async def test_mark_all_read_updates_all_observed_threads(client, db):
         channel_idx=2,
         direction="in",
         text="hello",
-        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
         ack_state="pending",
     ))
     await db.commit()
@@ -201,7 +203,7 @@ async def test_mark_all_read_returns_0_with_no_messages(client, db):
 @pytest.mark.asyncio
 async def test_mark_all_read_is_idempotent(client, db):
     from app.db.models import Message
-    from app.services.read_state import mark_all_read, get_last_read
+    from app.services.read_state import get_last_read, mark_all_read
 
     db.add(Message(
         msg_type="dm",
@@ -209,7 +211,7 @@ async def test_mark_all_read_is_idempotent(client, db):
         channel_idx=None,
         direction="in",
         text="hi",
-        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
         ack_state="pending",
     ))
     await db.commit()
@@ -232,7 +234,7 @@ async def test_mark_all_read_ignores_outbound_messages(client, db):
         channel_idx=None,
         direction="out",
         text="me",
-        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
         ack_state="pending",
     ))
     await db.commit()
@@ -249,7 +251,7 @@ async def test_endpoint_mark_all_read(client, db):
         channel_idx=None,
         direction="in",
         text="x",
-        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.timezone.utc),
+        timestamp=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
         ack_state="pending",
     ))
     await db.commit()
@@ -271,7 +273,7 @@ async def test_endpoint_mark_all_read_zero_when_empty(client):
 async def test_unread_total_respects_mark_read(client, db):
     from app.db.models import Message
 
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     for i in range(4):
         db.add(Message(
             msg_type="dm", contact_pub_key="abc", direction="in",
@@ -283,8 +285,32 @@ async def test_unread_total_respects_mark_read(client, db):
     assert r.json()["total"] == 4
 
     # mark read after the last message
-    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key="abc", channel_idx=None, when=when)
 
     r2 = await client.get("/api/conversations/unread-total")
     assert r2.json()["total"] == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_read_rejects_non_hex_contact_pub_key(client):
+    # Garbage keys would otherwise persist as unmatchable `read:dm:<junk>`
+    # settings rows — the body schema now enforces bounded hex.
+    r = await client.post(
+        "/api/conversations/read", json={"contact_pub_key": "not-hex!"}
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_mark_read_rejects_out_of_range_channel_idx(client):
+    r = await client.post("/api/conversations/read", json={"channel_idx": 256})
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_delete_conversation_rejects_non_hex_contact_pub_key(client):
+    r = await client.request(
+        "DELETE", "/api/conversations", json={"contact_pub_key": "zz!"}
+    )
+    assert r.status_code == 422

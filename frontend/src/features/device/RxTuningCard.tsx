@@ -31,6 +31,7 @@ export function RxTuningCard() {
   // Seed form from query data once loaded (or when it refreshes)
   useEffect(() => {
     if (data) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({ rx_delay: data.rx_delay, airtime_factor: data.airtime_factor })
     }
   }, [data])

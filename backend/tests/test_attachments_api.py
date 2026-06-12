@@ -126,3 +126,53 @@ async def test_purge_clears_everything(client):
     assert r.json()["freed_bytes"] > 0
     listing = await client.get("/api/attachments")
     assert listing.json()["total_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_upload_fingerprints_presented_credential(client):
+    """uploader_fingerprint must reflect the request's bearer token."""
+    from app.db.session import get_db
+    from app.main import app
+    from app.middleware.request_audit import key_fingerprint
+
+    files = {"file": ("hi.jpg", _jpeg(), "image/jpeg")}
+    r = await client.post(
+        "/api/attachments",
+        files=files,
+        headers={"Authorization": "Bearer some-presented-key"},
+    )
+    assert r.status_code == 201
+    slug = r.json()["slug"]
+
+    from sqlalchemy import select
+
+    from app.db.models import Attachment
+
+    get_session = app.dependency_overrides[get_db]
+    async for s in get_session():
+        att = (
+            await s.execute(select(Attachment).where(Attachment.slug == slug))
+        ).scalar_one()
+        assert att.uploader_fingerprint == key_fingerprint("some-presented-key")
+
+
+@pytest.mark.asyncio
+async def test_upload_without_auth_header_has_no_fingerprint(client):
+    from app.db.session import get_db
+    from app.main import app
+
+    files = {"file": ("hi.jpg", _jpeg(), "image/jpeg")}
+    r = await client.post("/api/attachments", files=files)
+    assert r.status_code == 201
+    slug = r.json()["slug"]
+
+    from sqlalchemy import select
+
+    from app.db.models import Attachment
+
+    get_session = app.dependency_overrides[get_db]
+    async for s in get_session():
+        att = (
+            await s.execute(select(Attachment).where(Attachment.slug == slug))
+        ).scalar_one()
+        assert att.uploader_fingerprint is None

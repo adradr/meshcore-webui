@@ -257,3 +257,43 @@ async def test_delete_session_wipes_rows(client, session_factory):
             select(TraceSample).where(TraceSample.session_id == sid)
         )).scalars().all()
         assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_delete_active_session_returns_409(client, session_factory):
+    """Deleting the LIVE session's rows must 409 — the monitor would keep
+    writing under the same session_id and the session would 'reappear'
+    with a truncated history. Rows must be untouched."""
+    mc = _make_fake_meshcore()
+    mon = _make_monitor(mc)
+    try:
+        with _state(meshcore_client=mc, trace_monitor=mon):
+            r = await client.post(
+                "/api/trace/monitor/start",
+                json={"pubkey": PUBKEY_A, "interval_s": 5},
+            )
+            assert r.status_code == 200, r.text
+            sid = r.json()["session_id"]
+
+            t0 = dt.datetime(2026, 5, 23, 12, 0, 0, tzinfo=dt.UTC)
+            await _insert_sample(
+                session_factory, session_id=sid, target_pubkey=PUBKEY_A,
+                finished_at=t0,
+            )
+
+            rd = await client.delete(f"/api/trace/monitor/sessions/{sid}")
+            assert rd.status_code == 409, rd.text
+
+            async with session_factory() as s:
+                rows = (await s.execute(
+                    select(TraceSample).where(TraceSample.session_id == sid)
+                )).scalars().all()
+                assert len(rows) == 1
+
+            # After stopping, deletion proceeds normally.
+            await client.post("/api/trace/monitor/stop")
+            rd2 = await client.delete(f"/api/trace/monitor/sessions/{sid}")
+            assert rd2.status_code == 200, rd2.text
+            assert rd2.json() == {"deleted": 1}
+    finally:
+        await mon.stop()

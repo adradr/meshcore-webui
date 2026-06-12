@@ -8,7 +8,19 @@ import {
   type Channel,
 } from "@/features/channels/queries"
 import { AddChannelSheet } from "@/features/channels/AddChannelSheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { QueryErrorState } from "@/components/query-error-state"
 import { Card, CardHeader, CardTitle } from "@/components/ui/card"
 import { PageShell } from "@/components/page-shell"
 import { PageHeader } from "@/components/page-header"
@@ -21,16 +33,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
   const remove = useRemoveChannel()
   const name = channel.channel_name ?? `Channel ${channel.channel_idx}`
 
-  const onRemove = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (
-      !window.confirm(
-        `Remove channel "${name}" (idx ${channel.channel_idx}) from the ` +
-          `device? This clears the slot in radio flash and cannot be undone.`,
-      )
-    ) {
-      return
-    }
+  const onRemove = () => {
     remove.mutate(channel.channel_idx, {
       onSuccess: () => toast.success(`Removed channel ${name}`),
       onError: (err) => notifyError("Remove channel", err),
@@ -59,16 +62,36 @@ function ChannelCard({ channel }: { channel: Channel }) {
             name={name}
             size="icon"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 text-destructive hover:text-destructive"
-            onClick={onRemove}
-            disabled={remove.isPending}
-            aria-label="Remove channel"
-          >
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-destructive hover:text-destructive"
+                onClick={(e) => e.stopPropagation()}
+                disabled={remove.isPending}
+                aria-label="Remove channel"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  Remove channel “{name}” (idx {channel.channel_idx})?
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  This clears the slot in radio flash and cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={onRemove}>
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </CardHeader>
     </Card>
@@ -76,7 +99,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
 }
 
 export function ChannelsPage() {
-  const { data, isLoading, isError, error } = useChannels()
+  const { data, isLoading, isError, error, refetch } = useChannels()
 
   return (
     <PageShell
@@ -89,10 +112,11 @@ export function ChannelsPage() {
           ))}
         </div>
       ) : isError ? (
-        <div className="text-sm text-destructive">
-          Failed to load channels:{" "}
-          {error instanceof Error ? error.message : "unknown"}
-        </div>
+        <QueryErrorState
+          title="Failed to load channels"
+          error={error}
+          onRetry={() => void refetch()}
+        />
       ) : !data || data.length === 0 ? (
         <div className="p-8 text-center text-sm text-muted-foreground">
           No channels yet.

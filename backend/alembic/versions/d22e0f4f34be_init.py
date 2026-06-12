@@ -5,17 +5,17 @@ Revises:
 Create Date: 2026-05-18 23:29:11.282334
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'd22e0f4f34be'
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -26,7 +26,12 @@ def upgrade() -> None:
     sa.Column('idx', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(length=64), nullable=False),
     sa.Column('psk', sa.String(length=128), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column(
+        'created_at',
+        sa.DateTime(timezone=True),
+        server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        nullable=False,
+    ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('idx')
     )
@@ -39,7 +44,12 @@ def upgrade() -> None:
     sa.Column('gps_lon', sa.Float(), nullable=True),
     sa.Column('path', sa.String(length=128), nullable=True),
     sa.Column('flags', sa.Integer(), nullable=False),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column(
+        'updated_at',
+        sa.DateTime(timezone=True),
+        server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        nullable=False,
+    ),
     sa.PrimaryKeyConstraint('pub_key')
     )
     op.create_table('messages',
@@ -49,7 +59,12 @@ def upgrade() -> None:
     sa.Column('channel_idx', sa.Integer(), nullable=True),
     sa.Column('direction', sa.String(length=3), nullable=False),
     sa.Column('text', sa.Text(), nullable=False),
-    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column(
+        'timestamp',
+        sa.DateTime(timezone=True),
+        server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        nullable=False,
+    ),
     sa.Column('ack_state', sa.String(length=16), nullable=False),
     sa.Column('ack_received_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('expected_ack_hex', sa.String(length=8), nullable=True),
@@ -58,9 +73,21 @@ def upgrade() -> None:
     with op.batch_alter_table('messages', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_messages_channel_idx'), ['channel_idx'], unique=False)
         batch_op.create_index('ix_messages_channel_ts', ['channel_idx', 'timestamp'], unique=False)
-        batch_op.create_index(batch_op.f('ix_messages_contact_pub_key'), ['contact_pub_key'], unique=False)
-        batch_op.create_index('ix_messages_contact_ts', ['contact_pub_key', 'timestamp'], unique=False)
-        batch_op.create_index(batch_op.f('ix_messages_expected_ack_hex'), ['expected_ack_hex'], unique=False)
+        batch_op.create_index(
+            batch_op.f('ix_messages_contact_pub_key'),
+            ['contact_pub_key'],
+            unique=False,
+        )
+        batch_op.create_index(
+            'ix_messages_contact_ts',
+            ['contact_pub_key', 'timestamp'],
+            unique=False,
+        )
+        batch_op.create_index(
+            batch_op.f('ix_messages_expected_ack_hex'),
+            ['expected_ack_hex'],
+            unique=False,
+        )
         batch_op.create_index(batch_op.f('ix_messages_timestamp'), ['timestamp'], unique=False)
 
     op.create_table('push_subscriptions',
@@ -69,7 +96,12 @@ def upgrade() -> None:
     sa.Column('p256dh', sa.String(length=128), nullable=False),
     sa.Column('auth', sa.String(length=64), nullable=False),
     sa.Column('ua', sa.String(length=255), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+    sa.Column(
+        'created_at',
+        sa.DateTime(timezone=True),
+        server_default=sa.text('(CURRENT_TIMESTAMP)'),
+        nullable=False,
+    ),
     sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('endpoint', name='uq_push_endpoint')

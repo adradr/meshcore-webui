@@ -31,6 +31,7 @@ import {
   type Contact,
 } from "@/features/contacts/queries"
 import { isMessageableContact } from "@/features/contacts/types"
+import { AclView, TelemetryView } from "@/features/contacts/TelemetryView"
 import { useSelfInfo, type SelfInfo } from "@/features/device/queries"
 import { parseRepeaterPath } from "@/features/chat/repeaterPath"
 import { formatLastSeen } from "@/features/rx_log/format"
@@ -618,9 +619,7 @@ export function ContactDetailPage() {
             </CardHeader>
             <CardContent>
               {aclData ? (
-                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs">
-                  {JSON.stringify(aclData, null, 2)}
-                </pre>
+                <AclView data={aclData} />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   Tap “Request ACL” to query the access control list from this
@@ -664,6 +663,7 @@ export function ContactDetailPage() {
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
                   <AlertDialogAction
+                    variant="destructive"
                     onClick={() =>
                       removeContact.mutate(
                         { pubkey: pubKey },
@@ -714,12 +714,12 @@ export function ContactDetailPage() {
           <DialogHeader>
             <DialogTitle>Telemetry response</DialogTitle>
             <DialogDescription>
-              Raw telemetry payload received from {displayName}.
+              Telemetry received from {displayName}.
             </DialogDescription>
           </DialogHeader>
-          <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 text-xs">
-            {JSON.stringify(telemetryData, null, 2)}
-          </pre>
+          <div className="max-h-[60vh] overflow-auto">
+            <TelemetryView data={telemetryData} />
+          </div>
         </DialogContent>
       </Dialog>
     </PageShell>

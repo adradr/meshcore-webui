@@ -12,8 +12,6 @@ them ``None`` so the API contract is stable before resolution lands.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, ConfigDict
 
 
@@ -29,10 +27,10 @@ class TraceHopCandidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: Optional[str] = None
+    name: str | None = None
     pub_key: str
-    lat: Optional[float] = None
-    lon: Optional[float] = None
+    lat: float | None = None
+    lon: float | None = None
 
 
 class TraceHopOut(BaseModel):
@@ -44,10 +42,10 @@ class TraceHopOut(BaseModel):
     snr: float
     # Resolved fields — populated by Task 2.4 (resolver) when the hop hash
     # matches *exactly one* known contact; otherwise left as ``None``.
-    name: Optional[str] = None
-    pub_key: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
+    name: str | None = None
+    pub_key: str | None = None
+    lat: float | None = None
+    lon: float | None = None
     # Populated when the hash matches *more than one* known contact.
     # Empty list for unique-match, no-match, and empty-hash cases.
     candidates: list[TraceHopCandidate] = []

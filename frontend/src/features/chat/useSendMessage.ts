@@ -25,6 +25,18 @@ interface MessagesPage {
 }
 type MessagesData = InfiniteData<MessagesPage>
 
+/**
+ * Mirrors the backend's `_with_sender_prefix` (meshcore_client.py):
+ * channel message bodies are stored as "<self name>: <text>", so the
+ * optimistic bubble must carry the same prefix or it visibly rewrites
+ * itself when the canonical refetch lands.
+ */
+function withSenderPrefix(text: string, selfName: string | undefined): string {
+  if (!selfName) return text
+  const prefix = `${selfName}: `
+  return text.startsWith(prefix) ? text : prefix + text
+}
+
 export function useSendMessage() {
   const qc = useQueryClient()
   return useMutation({
@@ -42,11 +54,15 @@ export function useSendMessage() {
       await qc.cancelQueries({ queryKey: key })
       const previous = qc.getQueryData<MessagesData>(key)
       const tempId = crypto.randomUUID()
+      const isChannel = vars.channelIdx !== undefined
+      const selfName = isChannel
+        ? qc.getQueryData<{ name?: string }>(["device", "self-info"])?.name
+        : undefined
       const optimistic: OptimisticMessage = {
         id: tempId,
         tempId,
         direction: "out",
-        text: vars.text,
+        text: isChannel ? withSenderPrefix(vars.text, selfName) : vars.text,
         timestamp: new Date().toISOString(),
         ack_state: "sending",
       }
@@ -74,6 +90,9 @@ export function useSendMessage() {
     },
     onSettled: (_d, _e, _v, ctx) => {
       if (ctx) qc.invalidateQueries({ queryKey: ctx.key })
+      // The Conversations list shows last_text/timestamp — refresh it too,
+      // otherwise the thread row stays stale until an unrelated event.
+      qc.invalidateQueries({ queryKey: ["threads"] })
     },
   })
 }

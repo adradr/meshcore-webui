@@ -119,13 +119,14 @@ export function AttachmentsPage() {
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
 
-  const items = list.data?.items ?? []
+  const items = useMemo(() => list.data?.items ?? [], [list.data])
   const sliced = useMemo(() => items.slice(0, visible), [items, visible])
   const hasMore = items.length > visible
 
   // Reset visible count if the list shrinks below it (e.g. after delete/purge).
   useEffect(() => {
     if (visible > items.length && items.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setVisible(Math.max(PAGE_SIZE, Math.min(items.length, visible)))
     }
   }, [items.length, visible])

@@ -12,13 +12,13 @@ whether a missing value means absence or failure.
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class StepStatus(str, Enum):
+class StepStatus(StrEnum):
     """Outcome of a single diagnostic probe step."""
 
     NOT_ATTEMPTED = "not_attempted"

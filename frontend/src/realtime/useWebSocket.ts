@@ -14,6 +14,12 @@ export interface UseWebSocketOptions {
   maxBackoffMs?: number
   /** Disable auto-connect (defaults false). */
   autoConnect?: boolean
+  /**
+   * Called when the server closes with an auth-rejection code
+   * (1008 policy violation, or 4400–4403). Reconnection stops —
+   * retrying with the same bad token would just hammer the server.
+   */
+  onAuthFail?: () => void
 }
 
 interface UseWebSocketReturn {
@@ -40,6 +46,7 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
     pingIntervalMs = 25_000,
     maxBackoffMs = 30_000,
     autoConnect = true,
+    onAuthFail,
   } = opts
 
   const [status, setStatus] = useState<WSStatus>("closed")
@@ -52,6 +59,10 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const onMessageRef = useRef(onMessage)
   const initialMessageRef = useRef(initialMessage)
+  const onAuthFailRef = useRef(onAuthFail)
+  // Latest `connect` — lets `scheduleReconnect` (declared first, mutually
+  // recursive with `connect`) always invoke the current closure.
+  const connectRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     onMessageRef.current = onMessage
@@ -59,6 +70,9 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
   useEffect(() => {
     initialMessageRef.current = initialMessage
   }, [initialMessage])
+  useEffect(() => {
+    onAuthFailRef.current = onAuthFail
+  }, [onAuthFail])
 
   const clearTimers = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -79,14 +93,33 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
     const delay = base + jitter
     attemptRef.current = attempt + 1
     reconnectTimerRef.current = setTimeout(() => {
-      connect()
+      connectRef.current?.()
     }, delay)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxBackoffMs])
+
+  // Detach handlers BEFORE closing so a superseded socket's onclose can't
+  // schedule a duplicate reconnect (stale-url socket leak).
+  const detachAndClose = useCallback((ws: WebSocket | null) => {
+    if (!ws) return
+    ws.onopen = null
+    ws.onmessage = null
+    ws.onerror = null
+    ws.onclose = null
+    if (ws.readyState <= 1) {
+      try {
+        ws.close()
+      } catch {
+        // ignore
+      }
+    }
+  }, [])
 
   const connect = useCallback(() => {
     if (stoppedRef.current) return
     clearTimers()
+    // Never allow two live sockets: supersede any existing one silently.
+    detachAndClose(wsRef.current)
+    wsRef.current = null
     setStatus("connecting")
 
     let ws: WebSocket
@@ -136,40 +169,43 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
       console.warn("[ws] error", ev)
     }
 
-    ws.onclose = () => {
+    ws.onclose = (ev: CloseEvent) => {
+      // Ignore close events from sockets we've already superseded.
+      if (wsRef.current !== ws) return
       setStatus("closed")
       clearTimers()
+      const authRejected =
+        ev.code === 1008 || (ev.code >= 4400 && ev.code <= 4403)
+      if (authRejected) {
+        // Server explicitly rejected our token — retrying with the same
+        // credentials is pointless. Stop and surface to the caller.
+        stoppedRef.current = true
+        onAuthFailRef.current?.()
+        return
+      }
       if (!stoppedRef.current) scheduleReconnect()
     }
-  }, [url, protocols, pingIntervalMs, clearTimers, scheduleReconnect])
+  }, [url, protocols, pingIntervalMs, clearTimers, scheduleReconnect, detachAndClose])
+
+  useEffect(() => {
+    connectRef.current = connect
+  }, [connect])
 
   const disconnect = useCallback(() => {
     stoppedRef.current = true
     clearTimers()
-    const ws = wsRef.current
-    if (ws && ws.readyState <= 1) {
-      setStatus("closing")
-      try {
-        ws.close()
-      } catch {
-        // ignore
-      }
-    }
+    // Detach handlers before closing so the async onclose doesn't fire a
+    // second setStatus("closed") later; with handlers gone the synchronous
+    // "closed" below is final and accurate from the consumer's view.
+    detachAndClose(wsRef.current)
+    wsRef.current = null
     setStatus("closed")
-  }, [clearTimers])
+  }, [clearTimers, detachAndClose])
 
   const reconnect = useCallback(() => {
     stoppedRef.current = false
     attemptRef.current = 0
-    const ws = wsRef.current
-    if (ws && ws.readyState <= 1) {
-      try {
-        ws.close()
-      } catch {
-        // ignore
-      }
-    }
-    connect()
+    connect() // connect() supersedes/closes any existing socket itself
   }, [connect])
 
   const send = useCallback((msg: unknown) => {
@@ -191,14 +227,7 @@ export function useWebSocket(opts: UseWebSocketOptions): UseWebSocketReturn {
     return () => {
       stoppedRef.current = true
       clearTimers()
-      const ws = wsRef.current
-      if (ws && ws.readyState <= 1) {
-        try {
-          ws.close()
-        } catch {
-          // ignore
-        }
-      }
+      detachAndClose(wsRef.current)
       wsRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

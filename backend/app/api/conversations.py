@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, delete, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,11 +13,19 @@ from app.services.read_state import mark_all_read, mark_read
 
 router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
+# DM conversations are keyed by whatever the bridge stores in
+# `contact_pub_key` — a hex prefix (typically 12 chars) or a full
+# 64-char pubkey. Bounded hex-only matching keeps garbage out of the
+# `read:dm:<key>` settings rows (mirrors api/messages.py's GET filter).
+_CONTACT_PUB_KEY_PATTERN = r"^[0-9a-fA-F]{2,64}$"
+
 
 class MarkReadIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    contact_pub_key: str | None = None
-    channel_idx: int | None = None
+    contact_pub_key: str | None = Field(
+        default=None, pattern=_CONTACT_PUB_KEY_PATTERN
+    )
+    channel_idx: int | None = Field(default=None, ge=0, le=255)
 
 
 @router.post("/read")
@@ -81,8 +90,10 @@ async def get_unread_total(
 
 class DeleteConversationIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    contact_pub_key: str | None = None
-    channel_idx: int | None = None
+    contact_pub_key: str | None = Field(
+        default=None, pattern=_CONTACT_PUB_KEY_PATTERN
+    )
+    channel_idx: int | None = Field(default=None, ge=0, le=255)
 
 
 @router.delete("")

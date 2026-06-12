@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import asyncio
 import contextlib
 import logging
-from dataclasses import dataclass, asdict, field
-from typing import Any, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
-from meshcore import MeshCore, EventType
+from meshcore import EventType, MeshCore
 
 from app.services.rx_log_buffer import RxLogBuffer
 from app.services.rx_log_persist import RxLogPersistService
@@ -164,7 +165,7 @@ class MeshCoreClient:
         self._host = host
         self._port = port
         self._mc: MeshCore | None = None
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
         self._subscribers: set[asyncio.Queue[WireEvent]] = set()
         self._max_queue = max_queue
@@ -172,6 +173,12 @@ class MeshCoreClient:
         self._lock = asyncio.Lock()
         self._rx_log_buffer = rx_log_buffer
         self._rx_log_persist_service = rx_log_persist_service
+        # Subscriber queues that dropped at least one event because they
+        # were full. Once space frees up we inject a synthetic "resync"
+        # WireEvent so the consumer knows its view may have gaps and can
+        # refetch (the frontend treats unknown system-topic events as
+        # no-ops, so this is safe even for clients that don't handle it).
+        self._gapped: set[int] = set()
 
     async def start(self) -> None:
         self._stopping.clear()
@@ -201,7 +208,7 @@ class MeshCoreClient:
             try:
                 await asyncio.wait_for(self._stopping.wait(), timeout=delay)
                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 delay = min(delay * 2, 60)
 
     async def _connect_once(self) -> None:
@@ -219,12 +226,22 @@ class MeshCoreClient:
         # without this our channel messages would arrive without those
         # fields and the "Heard via repeaters" panel could not render.
         mc.set_decrypt_channel_logs(True)
-        self._mc = mc
         self._disconnect_evt = asyncio.Event()
         for et in self._FORWARDED_EVENTS:
             mc.subscribe(et, self._on_event)
-        await mc.ensure_contacts()
-        await mc.start_auto_message_fetching()
+        # Run the initialization tail BEFORE publishing `self._mc` — once
+        # published, `_require_mc()` lets REST handlers issue commands, and
+        # those would race the unlocked ensure_contacts below. If init
+        # fails, tear the local connection down so it isn't leaked (the
+        # supervisor's `_shutdown_mc()` only knows about `self._mc`).
+        try:
+            await mc.ensure_contacts()
+            await mc.start_auto_message_fetching()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await mc.disconnect()
+            raise
+        self._mc = mc
         log.info("MeshCore connected to %s:%d", self._host, self._port)
 
     async def _wait_disconnect(self) -> None:
@@ -250,17 +267,27 @@ class MeshCoreClient:
             sanitized_payload = _sanitize_rx_log_payload(event.payload)
         else:
             sanitized_payload = None
+        if sanitized_payload is not None:
+            wire_payload = sanitized_payload
+        elif hasattr(event.payload, "items"):
+            wire_payload = dict(event.payload)
+        else:
+            wire_payload = event.payload
+        # Enrich inbound DMs with the resolved full 64-hex pubkey so that
+        # downstream consumers (bridge persistence, WS clients) can key
+        # the conversation canonically instead of by the wire's short
+        # `pubkey_prefix`. Best-effort — the prefix stays authoritative
+        # when the contact cache can't resolve it.
+        if (
+            event.type == EventType.CONTACT_MSG_RECV
+            and isinstance(wire_payload, dict)
+        ):
+            full = self.resolve_full_pubkey(wire_payload.get("pubkey_prefix") or "")
+            if full:
+                wire_payload.setdefault("pubkey", full)
         wire = WireEvent(
             type=wire_type,
-            payload=(
-                sanitized_payload
-                if sanitized_payload is not None
-                else (
-                    dict(event.payload)
-                    if hasattr(event.payload, "items")
-                    else event.payload
-                )
-            ),
+            payload=wire_payload,
             attributes=dict(event.attributes),
             topic=topic_for_event_type(wire_type),
         )
@@ -284,11 +311,39 @@ class MeshCoreClient:
             and sanitized_payload is not None
         ):
             self._rx_log_persist_service.enqueue(dict(sanitized_payload))
+        self._fan_out(wire)
+
+    def _fan_out(self, wire: WireEvent) -> None:
+        """Enqueue a WireEvent on every subscriber queue.
+
+        A full queue means a slow consumer; the event is DROPPED for that
+        subscriber (never block the radio event loop). We record the gap
+        and, once the queue has room again, inject a synthetic
+        `resync` event so the consumer can invalidate its caches —
+        otherwise the loss of a contact/channel message would silently
+        diverge the frontend cache from the DB.
+        """
         for q in list(self._subscribers):
+            qid = id(q)
+            if qid in self._gapped:
+                try:
+                    q.put_nowait(WireEvent(
+                        type="resync",
+                        payload={"reason": "subscriber queue overflow"},
+                        topic="system",
+                    ))
+                    self._gapped.discard(qid)
+                except asyncio.QueueFull:
+                    pass  # still saturated — keep the gap marker
             try:
                 q.put_nowait(wire)
             except asyncio.QueueFull:
-                log.warning("WS subscriber queue full — dropping")
+                self._gapped.add(qid)
+                log.warning(
+                    "WS subscriber queue full — dropping %s event"
+                    " (subscriber=%x, qsize=%d)",
+                    wire.type, qid, q.qsize(),
+                )
 
     def rx_log_snapshot(self) -> list[dict]:
         """Return a list copy of recent RX log entries, oldest first.
@@ -307,6 +362,22 @@ class MeshCoreClient:
 
     def unsubscribe(self, q: asyncio.Queue[WireEvent]) -> None:
         self._subscribers.discard(q)
+        self._gapped.discard(id(q))
+
+    def resolve_full_pubkey(self, prefix: str) -> str | None:
+        """Resolve a pubkey prefix to the full 64-hex lowercase pubkey via
+        the lib's in-memory contact cache. Pure dict scan — no radio
+        command, no lock needed. Returns None when unknown/ambiguous."""
+        prefix = (prefix or "").lower()
+        if not prefix:
+            return None
+        contacts = getattr(self._mc, "contacts", None) if self._mc else None
+        if not contacts:
+            return None
+        matches = [k for k in contacts if k.lower().startswith(prefix)]
+        if len(matches) == 1:
+            return matches[0].lower()
+        return None
 
     async def _require_mc(self):
         if self._mc is None or not self._mc.is_connected:
@@ -373,18 +444,30 @@ class MeshCoreClient:
         dispatcher. Bypasses `_on_event` entirely — this is a direct enqueue
         into the subscriber queues, matching `_on_event`'s broadcast pattern.
         """
-        for q in list(self._subscribers):
-            try:
-                q.put_nowait(wire_event)
-            except asyncio.QueueFull:
-                log.warning("WS subscriber queue full — dropping")
+        self._fan_out(wire_event)
+
+    @staticmethod
+    def _raise_command_failure(op: str, res) -> None:
+        """Normalize a failed/missing command result into a RuntimeError.
+
+        `None` and `Event(ERROR, {"reason": "timeout"|"no_event_received"})`
+        both mean the radio didn't reply — the message includes "timed out"
+        so the API layer's status mapper surfaces 504 instead of 502.
+        """
+        if res is None:
+            raise RuntimeError(f"{op} timed out — no reply from radio")
+        payload = getattr(res, "payload", None)
+        reason = payload.get("reason") if isinstance(payload, dict) else None
+        if reason in ("timeout", "no_event_received"):
+            raise RuntimeError(f"{op} timed out — no reply from radio")
+        raise RuntimeError(payload)
 
     async def send_dm(self, dst, text: str) -> dict:
         mc = await self._require_mc()
         async with self._lock:
             res = await mc.commands.send_msg(dst, text)
-            if res.is_error():
-                raise RuntimeError(res.payload)
+            if res is None or res.is_error():
+                self._raise_command_failure("send_msg", res)
             return {
                 "expected_ack": res.payload["expected_ack"].hex(),
                 "suggested_timeout_ms": res.payload["suggested_timeout"],
@@ -400,8 +483,8 @@ class MeshCoreClient:
             # the text already starts with "<our_name>: ").
             payload = self._with_sender_prefix(mc, text)
             res = await mc.commands.send_chan_msg(idx, payload)
-            if res.is_error():
-                raise RuntimeError(res.payload)
+            if res is None or res.is_error():
+                self._raise_command_failure("send_chan_msg", res)
 
     @staticmethod
     def _with_sender_prefix(mc, text: str) -> str:
@@ -417,7 +500,8 @@ class MeshCoreClient:
 
     async def get_contacts(self) -> dict:
         mc = await self._require_mc()
-        await mc.ensure_contacts(follow=True)
+        async with self._lock:
+            await mc.ensure_contacts(follow=True)
         return mc.contacts
 
     async def set_channel(
@@ -449,6 +533,11 @@ class MeshCoreClient:
                     f"Device rejected set_channel(idx={channel_idx}, "
                     f"name={channel_name!r})"
                 )
+            # The lib caches self_info from the initial appstart and does
+            # NOT refresh it on channel writes — re-issue appstart so the
+            # next /api/device/self-info reflects the new state (same
+            # convention as set_coords / set_tuning).
+            await mc.commands.send_appstart()
 
     async def delete_channel(self, channel_idx: int) -> None:
         """Clear a channel slot on the device.
@@ -470,7 +559,7 @@ class MeshCoreClient:
         mc = await self._require_mc()
         async with self._lock:
             r = await mc.commands.get_channel(channel_idx)
-            if r.type != EventType.CHANNEL_INFO:
+            if r is None or r.type != EventType.CHANNEL_INFO:
                 return None
             name = (r.payload.get("channel_name") or "").strip()
             if not name:
@@ -482,30 +571,40 @@ class MeshCoreClient:
 
     async def get_channels(self) -> list[dict]:
         mc = await self._require_mc()
-        max_ch = mc.self_info.get("max_channels", 0) if mc.self_info else 0
-        if not max_ch:
-            info = await mc.commands.send_device_query()
-            max_ch = info.payload.get("max_channels", 0)
-        # MeshCore firmware allocates MAX_GROUP_CHANNELS slots (typically 40).
-        # Most are empty; the device returns CHANNEL_INFO with empty name for
-        # unused slots. Filter those out so the UI shows only real channels.
-        out = []
-        for i in range(max_ch):
-            r = await mc.commands.get_channel(i)
-            if r.type != EventType.CHANNEL_INFO:
-                continue
-            name = (r.payload.get("channel_name") or "").strip()
-            if not name:
-                continue
-            out.append({
-                k: v.hex() if isinstance(v, bytes) else v
-                for k, v in r.payload.items()
-            })
+        # Hold the lock for the whole sweep — interleaving another
+        # command's request/response inside the per-slot loop corrupts
+        # the lib's reply correlation (see class lock convention).
+        async with self._lock:
+            max_ch = mc.self_info.get("max_channels", 0) if mc.self_info else 0
+            if not max_ch:
+                info = await mc.commands.send_device_query()
+                if info is None or info.payload is None:
+                    raise RuntimeError("device query timed out — no reply")
+                max_ch = info.payload.get("max_channels", 0)
+            # MeshCore firmware allocates MAX_GROUP_CHANNELS slots
+            # (typically 40). Most are empty; the device returns
+            # CHANNEL_INFO with empty name for unused slots. Filter those
+            # out so the UI shows only real channels.
+            out = []
+            for i in range(max_ch):
+                r = await mc.commands.get_channel(i)
+                if r is None or r.type != EventType.CHANNEL_INFO:
+                    continue
+                name = (r.payload.get("channel_name") or "").strip()
+                if not name:
+                    continue
+                out.append({
+                    k: v.hex() if isinstance(v, bytes) else v
+                    for k, v in r.payload.items()
+                })
         return out
 
     async def get_device_info(self) -> dict:
         mc = await self._require_mc()
-        r = await mc.commands.send_device_query()
+        async with self._lock:
+            r = await mc.commands.send_device_query()
+        if r is None:
+            raise RuntimeError("device query timed out — no reply")
         if r.is_error():
             raise RuntimeError(r.payload)
         return r.payload
@@ -591,6 +690,10 @@ class MeshCoreClient:
                             f"Device rejected clear_channel(idx={i})"
                         )
                     cleared += 1
+                    # Same firmware-queue pacing rationale as the contacts
+                    # sweep below: back-to-back writes saturate the device's
+                    # command queue and start returning None.
+                    await asyncio.sleep(0.05)
                 result["cleared_channels"] = cleared
                 log.warning("RESET ACTION=device_channels cleared=%d", cleared)
             if reset_coords:
@@ -623,7 +726,7 @@ class MeshCoreClient:
                     for k in remaining:
                         try:
                             r = await mc.commands.remove_contact(k)
-                        except Exception as e:  # noqa: BLE001 — best-effort sweep
+                        except Exception as e:
                             log.warning("clear_contacts: %s raised %s", k, e)
                             r = None
                         removed_ok = r is not None and r.type == EventType.OK
@@ -840,7 +943,8 @@ class MeshCoreClient:
         mc = await self._require_mc()
         if not mc.self_info:
             # Refresh by re-sending appstart so meshcore repopulates self_info.
-            await mc.commands.send_appstart()
+            async with self._lock:
+                await mc.commands.send_appstart()
         if not mc.self_info:
             raise RuntimeError("self_info unavailable after appstart")
         return dict(mc.self_info)
@@ -861,7 +965,8 @@ class MeshCoreClient:
         """Resolve a (full or prefix) pubkey hex to the cached contact dict."""
         mc = await self._require_mc()
         if not mc.contacts:
-            await mc.ensure_contacts()
+            async with self._lock:
+                await mc.ensure_contacts()
         # Try exact key lookup first.
         if pubkey in mc.contacts:
             return mc.contacts[pubkey]
@@ -896,8 +1001,8 @@ class MeshCoreClient:
         mc = await self._require_mc()
         async with self._lock:
             r = await mc.commands.export_contact(pubkey)
-            if r.is_error():
-                raise RuntimeError(r.payload)
+            if r is None or r.is_error():
+                self._raise_command_failure("export_contact", r)
             return self._serialize(r.payload)
 
     async def remove_contact(self, pubkey: str) -> None:
@@ -923,7 +1028,7 @@ class MeshCoreClient:
 
     # Outer safety cap on a single binary-request round trip. The lib's
     # `suggested_timeout` from the firmware ack scales with mesh
-    # complexity (flood routes through many repeaters can need 30–45s);
+    # complexity (flood routes through many repeaters can need 30-45s);
     # we cap at 60s so a misbehaving firmware can't stall a request
     # forever. See `_req_with_firmware_timeout` for the wrapper that
     # honours firmware's suggestion while enforcing this ceiling.
@@ -949,7 +1054,7 @@ class MeshCoreClient:
         cap = max_wait if max_wait is not None else self._REQ_MAX_WAIT_S
         try:
             return await asyncio.wait_for(call(), timeout=cap)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.warning(
                 "%s wrapper outer-cap fired at %.1fs for %s…",
                 op_name, cap, pubkey[:8],
@@ -1113,8 +1218,8 @@ class MeshCoreClient:
         mc = await self._require_mc()
         async with self._lock:
             r = await mc.commands.reset_path(pubkey)
-            if hasattr(r, "is_error") and r.is_error():
-                raise RuntimeError(r.payload)
+            if r is None or (hasattr(r, "is_error") and r.is_error()):
+                self._raise_command_failure("reset_path", r)
 
     async def get_advert_path(self, pubkey: str) -> str | None:
         """Ask the firmware for the most recent advert path it has for
@@ -1139,14 +1244,16 @@ class MeshCoreClient:
         # The reader stores the path bytes as a single hex string; the
         # send_trace lib API wants comma-separated hex hashes (one per
         # repeater). path_hash_mode tells us the hash size in bytes:
-        # 0 -> 1B, 1 -> 2B, 2 -> 4B, 3 -> 8B per hop. path_len is the
-        # number of hops.
+        # mode + 1 (0 -> 1B, 1 -> 2B, 2 -> 3B, 3 -> 4B per hop) — the
+        # same convention the CLI uses everywhere (`out_path_hash_mode
+        # + 1`, `get_path_hash_mode() + 1`); -1 means "unknown", treat
+        # as 1 byte. path_len is the number of hops.
         path_hex = p.get("path") or ""
         path_len = p.get("path_len", 0)
         hash_mode = p.get("path_hash_mode", 0)
         if not path_hex or path_len <= 0:
             return None
-        hash_bytes = 1 << max(0, hash_mode)
+        hash_bytes = max(0, hash_mode) + 1
         chars = hash_bytes * 2
         # Split the hex string into chunks of `chars` per hop, take
         # only `path_len` hops (the firmware sometimes zero-pads).
@@ -1177,12 +1284,18 @@ class MeshCoreClient:
         back to the caller-supplied `timeout` only when the firmware
         omits a suggestion.
         """
-        if self._mc is None:
-            raise RuntimeError("MeshCore not connected")
+        mc = await self._require_mc()
 
-        ack = await self._mc.commands.send_trace(
-            auth_code=0, tag=None, flags=None, path=target_path,
-        )
+        # Only the command/ack round trip needs the radio lock — the lib
+        # matches the first MSG_SENT/ERROR event with no tag filtering, so
+        # a concurrent locked command (e.g. send_msg, which also yields
+        # MSG_SENT) would cross-match with the trace ack. The TRACE_DATA
+        # wait below is tag-filtered passive listening and stays OUTSIDE
+        # the lock so a 60s trace doesn't starve every other command.
+        async with self._lock:
+            ack = await mc.commands.send_trace(
+                auth_code=0, tag=None, flags=None, path=target_path,
+            )
         if ack is None or (
             hasattr(ack, "type")
             and getattr(ack.type, "name", None) != "MSG_SENT"
@@ -1200,7 +1313,7 @@ class MeshCoreClient:
         else:
             wait_s = timeout
 
-        trace_event = await self._mc.dispatcher.wait_for_event(
+        trace_event = await mc.dispatcher.wait_for_event(
             EventType.TRACE_DATA,
             attribute_filters={"tag": tag},
             timeout=wait_s,
@@ -1248,15 +1361,21 @@ class MeshCoreClient:
         path = contact.get("out_path", "") or ""
         path_len = contact.get("out_path_len", -1)
 
-        # 3-byte hash mode requests a 2-byte path; mirror the CLI quirk.
-        # The dest_prefix below is sized against the post-rewrite
-        # path_hash_len so all elements stay the same width.
-        if path_hash_len == 3 and path_len > 0:
-            path_hash_len = 2
+        # 3-byte hash mode requests a 2-byte path; mirror the CLI quirk
+        # (meshcore_cli.py:1790-1796). The dest_prefix below is sized
+        # against the post-rewrite path_hash_len so all elements stay the
+        # same width — this matters even for the zero-hop fallback, since
+        # the lib's send_trace string parser only accepts element widths
+        # of 1/2/4/8 bytes (a 3-byte element is rejected outright). The
+        # comma-separated form makes the lib auto-derive the trace flags
+        # from the element width, which is the equivalent of the CLI's
+        # ":1" suffix on its concatenated form.
+        if path_hash_len == 3:
             new_path = ""
-            for i in range(0, path_len):
+            for i in range(0, max(0, path_len)):
                 new_path += path[6 * (path_len - i - 1):6 * (path_len - i - 1) + 4]
             path = new_path
+            path_hash_len = 2
 
         dest_prefix = pubkey[0:2 * path_hash_len] if is_traceable_target else ""
 
@@ -1281,7 +1400,7 @@ class MeshCoreClient:
             else:
                 # Wrap symmetrically — same shape as the CLI but expressed
                 # as a sequence rather than concatenated hex.
-                parts = [elem] + parts + [elem]
+                parts = [elem, *parts, elem]
 
         return ",".join(parts) if parts else None
 
@@ -1354,11 +1473,21 @@ class MeshCoreClient:
             TimeoutError: no TRACE_DATA echo (→ 504).
             ConnectionError: radio link down (→ 503).
         """
+        # mc.contacts is keyed by lowercase hex (`bytes.hex()`); the API's
+        # Path pattern accepts uppercase, so normalize before lookup.
+        pubkey = pubkey.lower()
         mc = await self._require_mc()
 
-        contact = (mc.contacts or {}).get(pubkey)
-        if contact is None:
-            raise RuntimeError(f"trace_to: unknown contact {pubkey[:8]}…")
+        # _resolve_contact handles the empty-cache window right after a
+        # reconnect (re-runs ensure_contacts) and prefix lookups — a
+        # TraceMonitor tick landing in that window must not persist a
+        # spurious "unknown contact" failed sample.
+        try:
+            contact = await self._resolve_contact(pubkey)
+        except RuntimeError:
+            raise RuntimeError(
+                f"trace_to: unknown contact {pubkey[:8]}…"
+            ) from None
 
         async with self._lock:
             path_hash_mode = await mc.commands.get_path_hash_mode()

@@ -40,11 +40,14 @@ function nodeTypeFor(type: number | undefined): NodeType {
  */
 function useIsDark(): boolean {
   const { theme } = useTheme()
-  const [systemDark, setSystemDark] = useState(false)
+  const [systemDark, setSystemDark] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-color-scheme: dark)").matches,
+  )
   useEffect(() => {
     if (typeof window === "undefined") return
     const m = window.matchMedia("(prefers-color-scheme: dark)")
-    setSystemDark(m.matches)
     const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches)
     m.addEventListener("change", handler)
     return () => m.removeEventListener("change", handler)

@@ -2,6 +2,10 @@ import { z } from "zod"
 
 const ContactMessageSchema = z.object({
   text: z.string(),
+  // Full 64-hex lowercase pubkey, enriched server-side when the contact
+  // cache resolves the wire's short prefix. Optional — resolution is
+  // best-effort and older backends don't send it.
+  pubkey: z.string().optional(),
   pubkey_prefix: z.string().optional(),
   txt_type: z.number().optional(),
   sender_timestamp: z.number().optional(),
@@ -27,6 +31,17 @@ export const WSMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("acknowledgement"),
     payload: z.object({ code: z.string() }),
+    attributes: z.record(z.string(), z.unknown()),
+  }),
+  z.object({
+    // Emitted by the backend AckTimeoutSweeper when an outgoing DM's RF
+    // ACK never arrived within the configured timeout.
+    type: z.literal("ack_failed"),
+    payload: z.object({
+      message_id: z.number().optional(),
+      code: z.string().nullable().optional(),
+      contact_pub_key: z.string().nullable().optional(),
+    }),
     attributes: z.record(z.string(), z.unknown()),
   }),
   z.object({

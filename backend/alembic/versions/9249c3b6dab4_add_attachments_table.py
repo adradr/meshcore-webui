@@ -7,17 +7,17 @@ Revises: 325493494d90
 Create Date: 2026-05-23 02:32:13.220445
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '9249c3b6dab4'
-down_revision: Union[str, Sequence[str], None] = '325493494d90'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '325493494d90'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -40,7 +40,11 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('attachments', schema=None) as batch_op:
         batch_op.create_index(batch_op.f('ix_attachments_slug'), ['slug'], unique=True)
-        batch_op.create_index(batch_op.f('ix_attachments_uploaded_at'), ['uploaded_at'], unique=False)
+        batch_op.create_index(
+            batch_op.f('ix_attachments_uploaded_at'),
+            ['uploaded_at'],
+            unique=False,
+        )
 
     # ### end Alembic commands ###
 

@@ -27,7 +27,6 @@ function makeWrapper(wsStatus: WSStatus) {
         value={{
           status: wsStatus,
           send: vi.fn(),
-          lastMessage: null,
           subscribe: () => () => {},
         }}
       >

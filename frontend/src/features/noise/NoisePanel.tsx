@@ -59,7 +59,7 @@ function Stat({
 export function NoisePanel() {
   const [paused, setPaused] = useState(false)
   const { data, isLoading, isError } = useNoiseSamples({ paused })
-  const samples = data ?? []
+  const samples = useMemo(() => data ?? [], [data])
 
   const stats = useMemo(() => computeStats(samples), [samples])
 

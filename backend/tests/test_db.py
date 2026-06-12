@@ -1,6 +1,7 @@
 import pytest
 from sqlalchemy import text
-from app.db.session import engine, SessionLocal
+
+from app.db.session import SessionLocal, engine
 
 
 @pytest.mark.asyncio

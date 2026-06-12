@@ -51,3 +51,37 @@ describe("normalizeWsMessage", () => {
     expect(() => d.toISOString().slice(0, 10)).not.toThrow()
   })
 })
+
+import { dmConversationKey } from "../WebSocketProvider"
+
+describe("normalizeWsMessage — full pubkey enrichment", () => {
+  const FULL = "AB".repeat(32)
+
+  it("sets contact_pub_key from the enriched full pubkey (lowercased)", () => {
+    const out = normalizeWsMessage(
+      { text: "dm", pubkey: FULL, pubkey_prefix: "abab" },
+      "dm",
+    )
+    expect(out.contact_pub_key).toBe(FULL.toLowerCase())
+    expect(out.pubkey_prefix).toBe("abab")
+  })
+
+  it("leaves contact_pub_key null when only the prefix is on the wire", () => {
+    const out = normalizeWsMessage({ text: "dm", pubkey_prefix: "abab" }, "dm")
+    expect(out.contact_pub_key).toBeNull()
+  })
+})
+
+describe("dmConversationKey", () => {
+  const FULL = "AB".repeat(32)
+
+  it("prefers the enriched full pubkey, lowercased", () => {
+    expect(dmConversationKey({ text: "x", pubkey: FULL, pubkey_prefix: "abab" }))
+      .toBe(FULL.toLowerCase())
+  })
+
+  it("falls back to the prefix, then 'unknown'", () => {
+    expect(dmConversationKey({ text: "x", pubkey_prefix: "ABCD" })).toBe("abcd")
+    expect(dmConversationKey({ text: "x" })).toBe("unknown")
+  })
+})

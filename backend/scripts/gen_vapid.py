@@ -7,6 +7,7 @@ Writes:
   ./secrets/vapid_public.txt    (base64url — set as VITE_VAPID_PUBLIC_KEY)
 """
 from __future__ import annotations
+
 import base64
 import os
 import sys

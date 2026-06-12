@@ -11,7 +11,7 @@
  * topic carries samples from ANY active session, so the handler filters by
  * ``session_id`` before patching the per-session cache.
  */
-import { useCallback } from "react"
+import { useCallback, useContext, useEffect, useRef } from "react"
 import {
   useMutation,
   useQuery,
@@ -23,6 +23,7 @@ import { api } from "@/lib/api"
 import { notifyError } from "@/lib/notify"
 import { useHaptic } from "@/haptics/HapticProvider"
 import { useWsTopic } from "@/realtime/useWsTopic"
+import { WebSocketContext } from "@/realtime/WebSocketProvider"
 
 // ---------------------------------------------------------------------------
 // Zod schemas — keep field shape aligned with backend Pydantic models in
@@ -205,6 +206,23 @@ export function useTraceMonitorSamples(sessionId: string | null) {
     staleTime: Infinity,
     gcTime: Infinity,
   })
+
+  // Backfill on WS reconnect. Samples produced while the socket was down
+  // never reach `onWsSample`, so the seeded-once cache (staleTime: Infinity)
+  // would carry a permanent gap until a full remount. When the status
+  // transitions back to "open" (i.e. it was something else before — skip the
+  // initial mount), invalidate the samples query: the queryFn re-fetches the
+  // most-recent 500 rows, replacing the cache and closing the gap.
+  const wsStatus = useContext(WebSocketContext)?.status
+  const prevWsStatus = useRef(wsStatus)
+  useEffect(() => {
+    const prev = prevWsStatus.current
+    prevWsStatus.current = wsStatus
+    if (!sessionId) return
+    if (wsStatus === "open" && prev !== undefined && prev !== "open") {
+      qc.invalidateQueries({ queryKey: samplesKey(sessionId) })
+    }
+  }, [wsStatus, sessionId, qc])
 
   const onWsSample = useCallback(
     (incoming: TraceSample) => {

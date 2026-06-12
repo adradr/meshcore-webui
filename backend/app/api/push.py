@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 import base64
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -15,10 +16,14 @@ from app.core.vapid import load_vapid
 from app.db.models import PushSubscription
 from app.db.session import get_db
 from app.schemas.push import (
-    PushResubscribeIn, PushSubscriptionIn, PushSubscriptionOut, PushUnsubscribeIn,
+    PushResubscribeIn,
+    PushSubscriptionIn,
+    PushSubscriptionOut,
+    PushUnsubscribeIn,
 )
 from app.services.new_contact_notify import (
-    get_new_contact_notify, set_new_contact_notify,
+    get_new_contact_notify,
+    set_new_contact_notify,
 )
 from app.services.push_mode import get_mode, set_mode
 
@@ -52,7 +57,7 @@ async def _upsert_subscription(
     upsert semantics stay identical across the two entry points.
     """
     endpoint = str(payload.endpoint)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Cap the total number of distinct subscriptions so a runaway client
     # can't multiply every inbound radio message into a fan-out flood at
     # the upstream push providers. Re-subscribing an *existing* endpoint

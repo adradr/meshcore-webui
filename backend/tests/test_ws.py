@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -80,6 +81,75 @@ async def test_writer_is_cancelled_when_reader_returns_first():
         )
     finally:
         del app.state.meshcore_client
+
+
+def test_ws_ignores_non_json_frame():
+    """A non-JSON text frame must not kill the connection (and must never
+    leak an unhandled JSONDecodeError out of the reader task)."""
+    with TestClient(app).websocket_connect("/ws") as ws:
+        ws.send_text("not json")
+        ws.send_json({"type": "ping", "payload": {}})
+        msg = ws.receive_json()
+        assert msg["type"] == "pong"
+
+
+def test_ws_non_json_frame_does_not_leak_writer_task():
+    """Regression for the gather() footgun: a reader-side exception must
+    not leave the writer pending on an unsubscribed queue."""
+    fake = _FakeMeshCoreClient()
+    app.state.meshcore_client = fake
+    try:
+        with TestClient(app).websocket_connect("/ws") as ws:
+            ws.send_text("{broken")
+            ws.send_json({"type": "ping", "payload": {}})
+            assert ws.receive_json()["type"] == "pong"
+        assert fake.unsubscribe_calls == 1
+    finally:
+        del app.state.meshcore_client
+
+
+def test_ws_auth_failures_hit_the_rate_limiter(monkeypatch):
+    """Repeated bad-token WS handshakes must count against the same per-IP
+    sliding window as HTTP bearer failures, and get refused once over it."""
+    from starlette.websockets import WebSocketDisconnect
+
+    from app.middleware import auth_rate_limit
+
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    inst = auth_rate_limit.get_instance()
+    assert inst is not None, "middleware instance not wired"
+    inst.reset()
+    inst.limiter.per_min = 3
+    try:
+        for _ in range(3):
+            with pytest.raises(WebSocketDisconnect):
+                with TestClient(app).websocket_connect("/ws?token=wrong") as ws:
+                    ws.receive_json()
+        # Window is now full: even a CORRECT token must be refused (lockout),
+        # proving the limiter gates the handshake before auth.
+        with pytest.raises(WebSocketDisconnect):
+            with TestClient(app).websocket_connect("/ws?token=secret") as ws:
+                ws.receive_json()
+    finally:
+        inst.reset()
+
+
+def test_ws_successful_auth_not_counted(monkeypatch):
+    from app.middleware import auth_rate_limit
+
+    monkeypatch.setattr("app.core.config.settings.api_key", "secret")
+    inst = auth_rate_limit.get_instance()
+    assert inst is not None
+    inst.reset()
+    try:
+        with TestClient(app).websocket_connect("/ws?token=secret") as ws:
+            ws.send_json({"type": "ping", "payload": {}})
+            assert ws.receive_json()["type"] == "pong"
+        # The pre-auth `allow()` probe may create an empty bucket; what
+        # matters is that no FAILURE was recorded for a good token.
+        assert all(len(d) == 0 for d in inst.limiter._buckets.values())
+    finally:
+        inst.reset()
 
 
 def test_ws_auth_failure_is_logged(caplog, monkeypatch):

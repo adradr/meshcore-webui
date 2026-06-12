@@ -74,5 +74,7 @@ def is_mention(text: str, self_name: str | None) -> bool:
     # Escape regex metachars in self_name — it can contain emoji + unicode
     # that would otherwise be interpreted as regex syntax.
     escaped = re.escape(self_name)
-    pattern = rf"@\[?{escaped}\]?(?![\w-])"
+    # Left guard keeps email-like tokens (``bob@Alice.net``) from counting
+    # as a mention; right guard keeps ``@Mail03`` from matching ``Mail0``.
+    pattern = rf"(?<![\w.-])@\[?{escaped}\]?(?![\w-])"
     return bool(re.search(pattern, text, re.IGNORECASE))

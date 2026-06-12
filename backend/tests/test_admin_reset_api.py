@@ -130,7 +130,7 @@ async def test_reset_local_messages_and_mutes_clears_both(
 async def test_reset_local_trace_samples_clears_trace_samples_only(
     client, session_factory,
 ):
-    now = dt.datetime.now(dt.timezone.utc)
+    now = dt.datetime.now(dt.UTC)
     async with session_factory() as db:
         db.add(TraceSample(
             session_id="11111111-1111-1111-1111-111111111111",

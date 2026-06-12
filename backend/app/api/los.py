@@ -55,12 +55,17 @@ async def compute_los(
         raise HTTPException(status_code=400, detail="Endpoints are the same point")
 
     bearing_deg = initial_bearing_deg(a.lat, a.lon, b.lat, b.lon)
-    # Apply ``_MAX_SAMPLES`` to BOTH the auto-derived count and an explicit
-    # ``payload.samples`` — without this cap, a caller could request thousands
-    # of samples and amplify into many sequential elevation HTTP calls each
-    # serialized behind the provider's per-batch rate-limit lock. The schema
-    # also rejects values > 512 (defense in depth).
-    n = min(payload.samples or _auto_sample_count(distance_m), _MAX_SAMPLES)
+    # Clamp BOTH the auto-derived count and an explicit ``payload.samples``
+    # to [_MIN_SAMPLES, _MAX_SAMPLES]. The max guards against amplification
+    # into many sequential elevation HTTP calls (each serialized behind the
+    # provider's per-batch rate-limit lock; the schema also rejects values
+    # > 512 as defense in depth). The min guards against false-CLEAR
+    # verdicts: e.g. samples=8 on a 20 km link spaces samples ~2.9 km apart,
+    # rendering a ridge between samples invisible.
+    n = max(
+        _MIN_SAMPLES,
+        min(payload.samples or _auto_sample_count(distance_m), _MAX_SAMPLES),
+    )
     coords = sample_great_circle(a.lat, a.lon, b.lat, b.lon, n)
 
     try:

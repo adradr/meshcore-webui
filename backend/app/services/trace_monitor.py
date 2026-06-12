@@ -21,7 +21,7 @@ import asyncio
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -87,7 +87,19 @@ class TraceMonitor:
             pubkey = pubkey.lower()
             if self._session is not None:
                 if self._session.target_pubkey == pubkey:
-                    return self._session  # idempotent
+                    # Idempotent re-issue — but honour an interval change.
+                    # ``_run`` re-reads ``self._session.interval_s`` every
+                    # loop, so swapping the frozen SessionInfo takes effect
+                    # on the next tick without restarting the session.
+                    if self._session.interval_s != interval_s:
+                        self._session = replace(
+                            self._session, interval_s=interval_s,
+                        )
+                        log.info(
+                            "TraceMonitor session=%s interval updated to %ds",
+                            self._session.session_id, interval_s,
+                        )
+                    return self._session
                 if not force:
                     raise AlreadyRunningError(
                         f"monitor running on {self._session.target_pubkey[:8]}…"
@@ -128,7 +140,9 @@ class TraceMonitor:
         self._session = None
 
     async def _run(self) -> None:
+        loop = asyncio.get_running_loop()
         while not self._stop_event.is_set():
+            tick_started = loop.time()
             try:
                 await self._tick()
             except asyncio.CancelledError:
@@ -140,7 +154,12 @@ class TraceMonitor:
                 # Safe without _lock: asyncio is cooperative; _session is only
                 # mutated after this task is cancelled+awaited (inside _stop_locked).
                 interval = self._session.interval_s if self._session else 5
-                await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                # interval_s is a sampling PERIOD, not an idle gap — subtract
+                # the tick's own duration so a slow trace (timeouts can take
+                # tens of seconds) doesn't stretch the cadence to
+                # trace-duration + interval.
+                delay = max(0.0, interval - (loop.time() - tick_started))
+                await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                 return
             except TimeoutError:
                 continue

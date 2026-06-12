@@ -15,7 +15,9 @@ ENV VITE_VAPID_PUBLIC_KEY=$VITE_VAPID_PUBLIC_KEY
 RUN pnpm build
 
 # ---------- Stage 2: python runtime ----------
-FROM python:3.14-slim@sha256:c845af9399020c7e562969a13689e929074a10fd057acd1b1fad06a2fb068e97 AS runtime
+# Python 3.12 matches CI (`uv python install 3.12`) and pyproject — the
+# test suite must exercise the same interpreter that ships to production.
+FROM python:3.12-slim@sha256:a39549e211a16149edf74e5fdc9ef03a6767e46cd987c5048b6659b6c9904c94 AS runtime
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,11 +30,11 @@ RUN pip install --no-cache-dir uv
 # Install runtime deps into a project-local venv (/app/.venv).
 # --no-install-project keeps this layer cacheable (deps only); --no-editable
 # avoids pulling source into the lock-driven install path.
-# NOT --frozen: re-resolve so the `aiohttp>=3.14.0` security constraint in
-# pyproject.toml is applied (CVE-2026-34993 / CVE-2026-47265) rather than
-# shipping the version pinned in the committed (stale) uv.lock.
+# --frozen: install exactly the committed uv.lock (which satisfies the
+# `aiohttp>=3.14.0` security floor) so the image is reproducible and ships
+# only dependency resolutions the test suite has exercised.
 COPY backend/pyproject.toml backend/uv.lock /app/
-RUN uv sync --no-dev --no-install-project --no-editable
+RUN uv sync --frozen --no-dev --no-install-project --no-editable
 
 # Strip system pip so a runtime process that gains a shell can't pip-install
 # a backdoor. uv itself stays for ops use (e.g. one-off `uv pip list`).

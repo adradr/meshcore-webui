@@ -223,3 +223,23 @@ async def test_los_rejects_samples_above_512_at_schema_layer(
         },
     )
     assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_los_explicit_low_samples_clamped_to_min_floor(
+    client, flat_sea_override
+):
+    """samples=8 on a ~10 km link would space samples kilometres apart and
+    make ridges invisible (false CLEAR); the endpoint must enforce the same
+    64-sample density floor the auto path uses."""
+    r = await client.post(
+        "/api/los/compute",
+        json={
+            "a": {"lat": 0.0, "lon": 0.0, "height_m": 30},
+            "b": {"lat": 0.0, "lon": 0.0898, "height_m": 30},
+            "freq_hz": 868e6,
+            "samples": 8,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert len(r.json()["samples"]) == 64

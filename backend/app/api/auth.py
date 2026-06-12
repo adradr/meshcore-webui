@@ -15,17 +15,23 @@ show the login gate. Returns:
   "share links unavailable". Surfaced here so the boot probe is a single
   round-trip — the SPA doesn't need a second request to learn it.
 
-The endpoint never raises — even an unauth'd caller gets 200 with the
-state info, which is exactly what the login screen needs to decide its
-next action.
+The endpoint never raises for legitimate boot probes — a header-less
+caller always gets 200 with the state info, which is exactly what the
+login screen needs to decide its next action. However, because the
+``valid`` boolean is a key-validity oracle, attempts that PRESENT a
+wrong bearer are counted against the same per-IP failure limiter that
+guards every gated path (see ``AuthRateLimitMiddleware``), and return
+429 once over the cap. Without this, the middleware-exempt status of
+this path would let an attacker brute-force the API key at line speed.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from app.core.bearer import constant_time_bearer_equal
 from app.core.config import settings
+from app.middleware import auth_rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -64,6 +70,28 @@ def _tile_payload() -> dict[str, str]:
     }
 
 
+async def _throttle_failed_attempt(request: Request) -> None:
+    """Count a presented-but-invalid bearer against the auth-failure limiter.
+
+    Reuses the ``AuthRateLimitMiddleware`` instance (same per-IP key
+    resolution, so ``trust_x_forwarded_for`` semantics stay consistent).
+    Raises 429 when the caller is already over the cap; otherwise records
+    the failure and lets the normal 200/{valid: false} response proceed.
+    No-op when the middleware isn't wired (e.g. bare-router unit tests).
+    """
+    inst = auth_rate_limit.get_instance()
+    if inst is None:
+        return
+    key = inst.client_key(request)
+    if not await inst.limiter.allow(key):
+        raise HTTPException(
+            status_code=429,
+            detail="too many authentication failures",
+            headers={"Retry-After": "60"},
+        )
+    await inst.limiter.record_failure(key)
+
+
 @router.get("/info", response_model=AuthInfoResponse)
 async def auth_info(request: Request) -> AuthInfoResponse:
     expected = settings.api_key
@@ -76,6 +104,12 @@ async def auth_info(request: Request) -> AuthInfoResponse:
         )
     header = request.headers.get("authorization", "")
     valid = constant_time_bearer_equal(header, expected)
+    if not valid and header:
+        # A wrong bearer was PRESENTED (not a header-less boot probe):
+        # this is a brute-force attempt against the validity oracle.
+        # Route it through the shared per-IP auth-failure limiter so this
+        # middleware-exempt path can't be used to guess the key unthrottled.
+        await _throttle_failed_attempt(request)
     return AuthInfoResponse(
         required=True,
         valid=valid,

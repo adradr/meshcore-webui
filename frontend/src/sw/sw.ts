@@ -3,6 +3,12 @@ import { precacheAndRoute, cleanupOutdatedCaches } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
 import { resolveTargetUrl } from "./resolveTargetUrl"
 import { stashPendingResubscribe } from "./pendingResubscribe"
+import {
+  buildResubscribePayload,
+  type PushResubscribePayload,
+} from "./resubscribePayload"
+
+export type { PushResubscribePayload }
 
 declare const self: ServiceWorkerGlobalScope
 
@@ -52,6 +58,13 @@ self.addEventListener("push", (event: PushEvent) => {
     tag: payload.tag,
     data: { url: payload.url ?? "/" },
   }
+  // With a per-sender/per-channel `tag`, a second message would silently
+  // *replace* the first notification on platforms that honor tags
+  // (Chrome/Android) — `renotify` keeps the sound/vibration on each update.
+  // TS lib.dom omits `renotify`, hence the cast. iOS ignores it.
+  if (payload.tag) {
+    ;(options as NotificationOptions & { renotify?: boolean }).renotify = true
+  }
 
   event.waitUntil(self.registration.showNotification(title, options))
 })
@@ -70,15 +83,24 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
         type: "window",
         includeUncontrolled: true,
       })
-      for (const client of allClients) {
-        const clientUrl = new URL(client.url)
-        if (clientUrl.origin === self.location.origin) {
-          await client.focus()
-          if ("navigate" in client) {
-            await client.navigate(targetUrl)
-          }
-          return
-        }
+      // Prefer a focused/visible client so a click lands in the window the
+      // user is actually looking at when several are open.
+      const sameOrigin = allClients.filter(
+        (c) => new URL(c.url).origin === self.location.origin,
+      )
+      const client =
+        sameOrigin.find((c) => c.focused) ??
+        sameOrigin.find((c) => c.visibilityState === "visible") ??
+        sameOrigin[0]
+      if (client) {
+        await client.focus()
+        // Ask the page to route client-side instead of `client.navigate()`:
+        // a hard navigation reloads the SPA (WS reconnect, query cache and
+        // draft input lost), and iOS standalone has rejected
+        // WindowClient.navigate in some versions. The page-side handler
+        // lives in `installResubscribeBridge` (src/pwa/push.ts).
+        client.postMessage({ type: PUSH_NAVIGATE_MSG, url: targetUrl })
+        return
       }
       await self.clients.openWindow(targetUrl)
     })(),
@@ -102,37 +124,8 @@ interface PushSubscriptionChangeEvent extends ExtendableEvent {
   readonly newSubscription: PushSubscription | null
 }
 
-export interface PushResubscribePayload {
-  old_endpoint: string
-  new: {
-    endpoint: string
-    keys: { p256dh: string; auth: string }
-    expirationTime: number | null
-  }
-}
-
 export const PUSH_RESUBSCRIBE_MSG = "PUSH_RESUBSCRIBE" as const
-
-function subscriptionToPayload(
-  sub: PushSubscription,
-): PushResubscribePayload["new"] {
-  // `PushSubscription.toJSON()` returns the canonical wire shape but its
-  // typing is `unknown`-ish across browsers. Reproduce it explicitly so
-  // the bridge boundary stays type-safe.
-  const json = sub.toJSON() as {
-    endpoint?: string
-    expirationTime?: number | null
-    keys?: { p256dh?: string; auth?: string }
-  }
-  return {
-    endpoint: json.endpoint ?? sub.endpoint,
-    keys: {
-      p256dh: json.keys?.p256dh ?? "",
-      auth: json.keys?.auth ?? "",
-    },
-    expirationTime: json.expirationTime ?? null,
-  }
-}
+export const PUSH_NAVIGATE_MSG = "PUSH_NAVIGATE" as const
 
 self.addEventListener("pushsubscriptionchange", ((
   event: PushSubscriptionChangeEvent,
@@ -149,10 +142,7 @@ self.addEventListener("pushsubscriptionchange", ((
             userVisibleOnly: true,
             applicationServerKey: applicationServerKey ?? undefined,
           }))
-        const payload: PushResubscribePayload = {
-          old_endpoint: oldSub?.endpoint ?? "",
-          new: subscriptionToPayload(newSub),
-        }
+        const payload = buildResubscribePayload(oldSub, newSub)
         const clients = await self.clients.matchAll({
           includeUncontrolled: true,
           type: "window",

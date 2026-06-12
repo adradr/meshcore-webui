@@ -85,11 +85,34 @@ class Settings(BaseSettings):
     )
     rx_log_buffer_size: int = Field(
         default=1000,
+        ge=1,
         alias="MESHCORE_WEBUI_RX_LOG_BUFFER_SIZE",
+    )
+    # Retention cap for the persisted rx_log_entries table — without it the
+    # SQLite file grows without bound on a busy mesh. The persist consumer
+    # prunes the oldest rows past this cap periodically. <= 0 disables pruning.
+    rx_log_persist_max_rows: int = Field(
+        default=100_000,
+        alias="MESHCORE_WEBUI_RX_LOG_PERSIST_MAX_ROWS",
     )
     noise_poll_interval_s: float = Field(
         default=2.0,
+        gt=0,
         alias="MESHCORE_WEBUI_NOISE_POLL_INTERVAL_S",
+    )
+
+    # Outgoing-DM ACK timeout sweep. A pending outgoing DM older than
+    # `dm_ack_timeout_s` is marked ack_state='failed' by the background
+    # AckTimeoutSweeper (a late RF ACK still upgrades it to 'acked').
+    dm_ack_timeout_s: float = Field(
+        default=120.0,
+        gt=0,
+        alias="MESHCORE_WEBUI_DM_ACK_TIMEOUT_S",
+    )
+    dm_ack_sweep_interval_s: float = Field(
+        default=15.0,
+        gt=0,
+        alias="MESHCORE_WEBUI_DM_ACK_SWEEP_INTERVAL_S",
     )
 
     # Continuous Trace Monitor — clamps the user-requested sample period to a
@@ -98,12 +121,27 @@ class Settings(BaseSettings):
     # would mask radio issues by giving them too little exposure on the chart.
     trace_monitor_min_interval_s: int = Field(
         default=5,
+        ge=1,
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MIN_INTERVAL_S",
     )
     trace_monitor_max_interval_s: int = Field(
         default=300,
+        ge=1,
         alias="MESHCORE_WEBUI_TRACE_MONITOR_MAX_INTERVAL_S",
     )
+
+    @model_validator(mode="after")
+    def _validate_trace_monitor_interval_bounds(self) -> Settings:
+        """An inverted window (MIN > MAX) would make TraceMonitor reject every
+        start request with a nonsensical "must be in [300, 5]" error — fail
+        loud at startup instead."""
+        if self.trace_monitor_min_interval_s > self.trace_monitor_max_interval_s:
+            raise ValueError(
+                "trace_monitor_min_interval_s "
+                f"({self.trace_monitor_min_interval_s}) must not exceed "
+                f"trace_monitor_max_interval_s ({self.trace_monitor_max_interval_s})",
+            )
+        return self
 
     # Map tile-server configuration. By default the SPA fetches tiles
     # directly from the public OpenStreetMap / CARTO CDNs — fast and

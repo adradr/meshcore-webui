@@ -1,9 +1,12 @@
 import json
+
 from app.services.meshcore_client import WireEvent
 
 
 def test_wire_event_to_dict_is_json_serializable():
-    e = WireEvent(type="contact_message", payload={"text": "hi"}, attributes={"pubkey_prefix": "abc"})
+    e = WireEvent(
+        type="contact_message", payload={"text": "hi"}, attributes={"pubkey_prefix": "abc"}
+    )
     d = e.to_dict()
     json.dumps(d)
     assert d == {
@@ -38,8 +41,9 @@ def test_topic_for_event_type_unknown_falls_back_to_system():
 
 def test_topic_map_keys_match_real_event_type_values():
     """Catches drift between hardcoded wire-type strings and meshcore.events.EventType.value."""
-    from app.services.meshcore_client import TOPIC_MAP
     from meshcore.events import EventType
+
+    from app.services.meshcore_client import TOPIC_MAP
     valid_values = {e.value for e in EventType}
     for key in TOPIC_MAP:
         assert key in valid_values, f"TOPIC_MAP key '{key}' is not a valid EventType.value"
@@ -52,7 +56,7 @@ def test_topic_map_covers_all_forwarded_events():
     (wire_type = event.type.value) so additions to _FORWARDED_EVENTS
     can't silently fall back to "system".
     """
-    from app.services.meshcore_client import MeshCoreClient, TOPIC_MAP
+    from app.services.meshcore_client import TOPIC_MAP, MeshCoreClient
     for ev_type in MeshCoreClient._FORWARDED_EVENTS:
         wire_type = ev_type.value
         assert wire_type in TOPIC_MAP, (

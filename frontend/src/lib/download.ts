@@ -3,6 +3,7 @@
 // scrub `a.download`, but strip path separators and control bytes ourselves
 // and cap the length so we never hand a hostile string to the OS save dialog.
 function sanitiseDownloadName(name: string): string {
+  // eslint-disable-next-line no-control-regex
   return name.replace(/[/\\?%*:|"<>\x00-\x1f]/g, "_").slice(0, 200)
 }
 

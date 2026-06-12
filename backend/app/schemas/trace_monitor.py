@@ -51,7 +51,11 @@ class TraceMonitorStartRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pubkey: str = Field(..., pattern=_PUBKEY_RE)
-    interval_s: int = Field(..., ge=5, le=300)
+    # Bounds are NOT hardcoded here — the settings-driven [min, max] window
+    # (``trace_monitor_min_interval_s`` / ``..._max_interval_s``) is enforced
+    # by ``TraceMonitor.start`` and surfaced as 422 by the endpoint. A schema
+    # bound would silently override an operator-widened window.
+    interval_s: int = Field(..., gt=0)
     force: bool = False  # take over an in-flight session on a different pubkey
 
 

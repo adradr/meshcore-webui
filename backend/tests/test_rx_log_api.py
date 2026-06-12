@@ -187,3 +187,57 @@ async def test_export_invalid_format_rejected(fake_snapshot):
             assert r.status_code == 422
     finally:
         app.dependency_overrides.pop(get_meshcore_client, None)
+
+
+@pytest.mark.asyncio
+async def test_export_csv_neutralizes_formula_injection():
+    # path / typename fields are radio-derived: a nearby node could plant
+    # a spreadsheet formula. Cells starting with =,+,-,@,tab must be
+    # prefixed with a single quote in the CSV export.
+    snapshot = [
+        {
+            "recv_time": 1, "snr": 1.0, "rssi": -90, "payload_length": 5,
+            "route_typename": "=CMD('/c calc')!A0", "payload_typename": "@SUM(1,1)",
+            "pkt_hash": "+1+2", "path": "-2-3", "raw_hex": "00",
+        },
+    ]
+    fake = _make_client_with_snapshot(snapshot)
+    app.dependency_overrides[get_meshcore_client] = lambda: fake
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r = await ac.get("/api/rx-log/export?format=csv")
+            assert r.status_code == 200
+            body = r.text
+            assert "'=CMD" in body
+            assert "'@SUM" in body
+            assert "'+1+2" in body
+            assert "'-2-3" in body
+            # No cell may START with a raw formula trigger.
+            for line in body.split("\n")[1:]:
+                for cell in line.split(","):
+                    assert not cell.startswith(("=", "+", "@"))
+    finally:
+        app.dependency_overrides.pop(get_meshcore_client, None)
+
+
+@pytest.mark.asyncio
+async def test_export_csv_keeps_negative_numbers_numeric():
+    snapshot = [
+        {
+            "recv_time": 1, "snr": -3.5, "rssi": -90, "payload_length": 5,
+            "route_typename": "F", "payload_typename": "ACK",
+            "pkt_hash": "aa", "path": "", "raw_hex": "00",
+        },
+    ]
+    fake = _make_client_with_snapshot(snapshot)
+    app.dependency_overrides[get_meshcore_client] = lambda: fake
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            r = await ac.get("/api/rx-log/export?format=csv")
+            row = r.text.split("\n")[1].split(",")
+            assert row[1] == "-3.5"
+            assert row[2] == "-90"
+    finally:
+        app.dependency_overrides.pop(get_meshcore_client, None)

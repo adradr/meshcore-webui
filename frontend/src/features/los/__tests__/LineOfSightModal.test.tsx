@@ -15,7 +15,7 @@ vi.mock("sonner", () => ({
 }))
 
 import { api } from "@/lib/api"
-import { LineOfSightModal } from "../LineOfSightModal"
+import { LineOfSightModal, buildChartData } from "../LineOfSightModal"
 
 function wrap(ui: ReactNode) {
   const qc = new QueryClient({
@@ -59,6 +59,23 @@ const fakeLosOut = {
   verdict: "CLEAR" as const,
   min_clearance_ratio: 0.97,
 }
+
+describe("buildChartData", () => {
+  it("includes the earth bulge in the terrain series (matches backend clearance math)", () => {
+    const rows = buildChartData(fakeLosOut, 2, 2)
+    expect(rows).toHaveLength(3)
+    // Midpoint sample: ground_m=0, bulge_m=1.47 → terrain must be raised
+    // by the bulge, exactly like fresnel.py's `ground_m + bulge` clearance.
+    expect(rows[1].ground_m).toBeCloseTo(1.47)
+    // Endpoints have zero bulge — unchanged.
+    expect(rows[0].ground_m).toBe(0)
+    expect(rows[2].ground_m).toBe(0)
+    // The LoS chord stays a straight line between antenna heights.
+    expect(rows[0].los_h_m).toBeCloseTo(2)
+    expect(rows[1].los_h_m).toBeCloseTo(2)
+    expect(rows[2].los_h_m).toBeCloseTo(2)
+  })
+})
 
 describe("LineOfSightModal", () => {
   it("renders header with both endpoint names", () => {

@@ -17,6 +17,7 @@ vi.mock("react-leaflet", () => ({
 
 import { TraceMonitorMapLayer } from "../TraceMonitorMapLayer"
 import type { TraceSample } from "@/features/trace/monitor/api"
+import type { Contact } from "@/features/contacts/queries"
 
 const baseContacts = {
   ["aa" + "0".repeat(62)]: {
@@ -25,14 +26,14 @@ const baseContacts = {
     adv_lat: 47.5,
     adv_lon: 19.0,
     type: 2, // REPEATER
-  } as any,
+  } as Contact,
   ["bb" + "0".repeat(62)]: {
     public_key: "bb" + "0".repeat(62),
     adv_name: "REP-B",
     adv_lat: 47.6,
     adv_lon: 19.1,
     type: 2, // REPEATER
-  } as any,
+  } as Contact,
 }
 
 function ok(hops: { hash: string; snr: number }[]): TraceSample {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -9,7 +9,7 @@ from app.schemas.diagnostics import DiagnosticReport, StepResult, StepStatus
 
 
 def _ts(seconds: int = 0) -> datetime:
-    return datetime(2026, 5, 20, 12, 0, seconds, tzinfo=timezone.utc)
+    return datetime(2026, 5, 20, 12, 0, seconds, tzinfo=UTC)
 
 
 def test_step_status_values_are_string_enum():

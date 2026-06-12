@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import datetime as dt
 from unittest.mock import AsyncMock
 
@@ -17,7 +18,7 @@ PK_B = "b" * 64
 
 
 async def _insert_messages(db, count: int, *, contact_pub_key: str = PK_A) -> list[Message]:
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     rows: list[Message] = []
     for i in range(count):
         m = Message(
@@ -69,7 +70,7 @@ async def test_get_messages_filters_by_contact(client, db):
 
 @pytest.mark.asyncio
 async def test_get_messages_filters_by_channel(client, db):
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     for i in range(3):
         db.add(Message(
             msg_type="chan",
@@ -203,7 +204,7 @@ async def test_post_message_requires_target(client):
 
 @pytest.mark.asyncio
 async def test_list_threads_returns_one_per_conversation(client, db):
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     # Three DMs to abc123 (last at +5min), two DMs to def456 (last at +30min),
     # two channel msgs on channel 2 (last at +10min).
     rows = [
@@ -284,7 +285,7 @@ async def test_threads_includes_unread_count_when_unread(client, db):
 async def test_threads_unread_count_zero_when_all_read(client, db):
     await _insert_messages(db, 3, contact_pub_key="abc123")
     # Mark read at a time AFTER the last message (which is base+2min)
-    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=when)
 
     r = await client.get("/api/messages/threads")
@@ -298,7 +299,7 @@ async def test_threads_unread_count_partial(client, db):
     # 5 messages at base, base+1m, base+2m, base+3m, base+4m
     await _insert_messages(db, 5, contact_pub_key="abc123")
     # Mark read at base+2m30s → 2 messages strictly after are unread (3m, 4m)
-    when = dt.datetime(2026, 5, 18, 12, 2, 30, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2026, 5, 18, 12, 2, 30, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key="abc123", channel_idx=None, when=when)
 
     r = await client.get("/api/messages/threads")
@@ -308,7 +309,7 @@ async def test_threads_unread_count_partial(client, db):
 
 @pytest.mark.asyncio
 async def test_threads_outgoing_messages_dont_count_unread(client, db):
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     for i in range(3):
         db.add(Message(
             msg_type="dm", contact_pub_key="abc123", direction="out",
@@ -324,7 +325,7 @@ async def test_threads_outgoing_messages_dont_count_unread(client, db):
 
 @pytest.mark.asyncio
 async def test_threads_channel_unread_count(client, db):
-    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.timezone.utc)
+    base = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
     for i in range(4):
         db.add(Message(
             msg_type="chan", channel_idx=2, direction="in",
@@ -340,7 +341,7 @@ async def test_threads_channel_unread_count(client, db):
     assert body[0]["unread_count"] == 4
 
     # Mark channel 2 as read
-    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.timezone.utc)
+    when = dt.datetime(2026, 5, 18, 13, 0, 0, tzinfo=dt.UTC)
     await mark_read(db, contact_pub_key=None, channel_idx=2, when=when)
     r2 = await client.get("/api/messages/threads")
     assert r2.json()[0]["unread_count"] == 0
@@ -414,3 +415,146 @@ async def test_post_message_502_on_runtime_error(client):
         assert r.status_code == 502
     finally:
         del app.state.meshcore_client
+
+
+# ---------- audit fixes: validation, status mapping, tie-breaks ----------
+
+
+@pytest.mark.asyncio
+async def test_post_message_rejects_odd_length_pubkey(client):
+    # Odd-length hex would raise ValueError in the meshcore lib's
+    # bytes.fromhex destination parsing — must be a 422 at the schema.
+    r = await client.post(
+        "/api/messages", json={"contact_pub_key": "abc12", "text": "hi"}
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_message_rejects_non_hex_pubkey(client):
+    r = await client.post(
+        "/api/messages", json={"contact_pub_key": "not-hex!", "text": "hi"}
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_message_rejects_out_of_range_channel(client):
+    r = await client.post(
+        "/api/messages", json={"channel_idx": 256, "text": "hi"}
+    )
+    assert r.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_post_message_504_on_timeout_runtime_error(client):
+    # The meshcore lib surfaces command timeouts as RuntimeError with a
+    # 'timeout' reason — convention maps that to 504, not 502.
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.send_dm = AsyncMock(
+        side_effect=RuntimeError("{'reason': 'timeout'}")
+    )
+    try:
+        r = await client.post(
+            "/api/messages", json={"contact_pub_key": "abc123", "text": "hi"}
+        )
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_post_message_504_on_timeout_error(client):
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.send_dm = AsyncMock(side_effect=TimeoutError("slow"))
+    try:
+        r = await client.post(
+            "/api/messages", json={"contact_pub_key": "abc123", "text": "hi"}
+        )
+        assert r.status_code == 504
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_post_message_failed_row_persisted_on_radio_error(client, db):
+    # The row is committed before transmit (closes the ACK race) and
+    # flipped to ack_state='failed' when the radio rejects the send.
+    app.state.meshcore_client = AsyncMock()
+    app.state.meshcore_client.send_dm = AsyncMock(side_effect=RuntimeError("boom"))
+    try:
+        r = await client.post(
+            "/api/messages", json={"contact_pub_key": "abc123", "text": "hi"}
+        )
+        assert r.status_code == 502
+        rows = (await db.execute(select(Message))).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].ack_state == "failed"
+    finally:
+        del app.state.meshcore_client
+
+
+@pytest.mark.asyncio
+async def test_get_messages_limit_bounds_are_422(client):
+    assert (await client.get("/api/messages?limit=0")).status_code == 422
+    assert (await client.get("/api/messages?limit=501")).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_messages_rejects_out_of_range_channel_idx(client):
+    assert (await client.get("/api/messages?channel_idx=256")).status_code == 422
+    assert (await client.get("/api/messages?channel_idx=-1")).status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_threads_no_duplicate_on_timestamp_tie(client, db):
+    # Two messages in the SAME conversation sharing the same 1-second
+    # timestamp must produce exactly one thread row (id tie-break).
+    ts = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
+    for i in range(2):
+        db.add(
+            Message(
+                msg_type="dm",
+                contact_pub_key=PK_A,
+                direction="in",
+                text=f"tie {i}",
+                timestamp=ts,
+            )
+        )
+    await db.commit()
+
+    r = await client.get("/api/messages/threads")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["last_text"] == "tie 1"  # the later (higher-id) row wins
+
+
+@pytest.mark.asyncio
+async def test_pagination_does_not_skip_timestamp_ties(client, db):
+    # Four messages all in the same second: a timestamp-only cursor would
+    # skip the remaining two on page 2; the composite (ts, id) cursor
+    # must return every row exactly once.
+    ts = dt.datetime(2026, 5, 18, 12, 0, 0, tzinfo=dt.UTC)
+    for i in range(4):
+        db.add(
+            Message(
+                msg_type="dm",
+                contact_pub_key=PK_A,
+                direction="in",
+                text=f"m{i}",
+                timestamp=ts,
+            )
+        )
+    await db.commit()
+
+    r1 = await client.get(f"/api/messages?contact_pub_key={PK_A}&limit=2")
+    body1 = r1.json()
+    assert [m["text"] for m in body1["items"]] == ["m3", "m2"]
+    assert body1["next_cursor"] is not None
+
+    r2 = await client.get(
+        f"/api/messages?contact_pub_key={PK_A}&limit=2&before={body1['next_cursor']}"
+    )
+    body2 = r2.json()
+    assert [m["text"] for m in body2["items"]] == ["m1", "m0"]

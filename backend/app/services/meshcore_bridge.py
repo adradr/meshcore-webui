@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import datetime as dt
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy import select, update
 
@@ -97,11 +98,25 @@ class MeshCoreBridge:
                 name=f"new-contact-handler-{pubkey}",
             )
 
+    @staticmethod
+    def _dm_conversation_key(payload: dict) -> str | None:
+        """Canonical DM conversation key: the full 64-hex lowercase pubkey.
+
+        CONTACT_MSG_RECV events only carry a short `pubkey_prefix`;
+        `MeshCoreClient._on_event` enriches the wire payload with the
+        resolved full `pubkey` when the contact cache knows it. Falling
+        back to the lowercase prefix keeps the message visible (just
+        prefix-keyed, the legacy shape) when resolution fails.
+        """
+        key = payload.get("pubkey") or payload.get("pubkey_prefix")
+        return key.lower() if key else None
+
     async def _handle_dm(self, payload: dict, sender_prefix: str) -> None:
+        conversation_key = self._dm_conversation_key(payload)
         async with SessionLocal() as db:
             msg = Message(
                 msg_type="dm",
-                contact_pub_key=payload.get("pubkey_prefix"),
+                contact_pub_key=conversation_key,
                 direction="in",
                 text=payload.get("text") or "",
                 pubkey_prefix=payload.get("pubkey_prefix"),
@@ -132,7 +147,10 @@ class MeshCoreBridge:
             title=f"MeshCore: {sender_prefix}",
             body=text,
             tag=f"meshcore:{sender_prefix}",
-            url=f"/chat/{sender_prefix}",
+            # Navigate to the canonical conversation (full pubkey when
+            # resolved) so the chat the notification opens is the same
+            # thread the message was persisted under.
+            url=f"/chat/{conversation_key or sender_prefix}",
         ))
 
     async def _handle_chan(self, payload: dict, chan) -> None:
@@ -197,7 +215,7 @@ class MeshCoreBridge:
             await db.execute(
                 update(Message)
                 .where(Message.id == row.id)
-                .values(ack_state="acked", ack_received_at=dt.datetime.now(dt.timezone.utc))
+                .values(ack_state="acked", ack_received_at=dt.datetime.now(dt.UTC))
             )
             await db.commit()
             log.info("ACK %s → message id=%d marked acked", code, row.id)

@@ -68,6 +68,57 @@ async def test_start_twice_same_pubkey_is_idempotent():
 
 
 @pytest.mark.asyncio
+async def test_start_same_pubkey_with_new_interval_updates_session():
+    """Re-issuing start on the same pubkey with a different interval must
+    keep the session id but adopt the new interval (the run loop re-reads
+    ``session.interval_s`` every tick)."""
+    client = AsyncMock()
+    client.trace_to.return_value = _make_result([-3])
+    mon = TraceMonitor(client=client, on_sample=lambda _s: None,
+                       on_persist=AsyncMock(),
+                       interval_min_s=1, interval_max_s=60)
+    pk = "ab" * 32
+    sess1 = await mon.start(pk, interval_s=2)
+    sess2 = await mon.start(pk, interval_s=10)
+    assert sess2.session_id == sess1.session_id
+    assert sess2.interval_s == 10
+    assert mon.session is not None and mon.session.interval_s == 10
+    await mon.stop()
+
+
+@pytest.mark.asyncio
+async def test_interval_is_a_sampling_period_not_an_idle_gap():
+    """A slow trace must eat into the inter-tick sleep: with interval=1s
+    and a 0.8s trace, the second sample should land ~1.8s in (period-
+    aligned), not ~2.6s (trace + full interval)."""
+    async def slow_trace(_pubkey):
+        await asyncio.sleep(0.8)
+        return _make_result([-3])
+
+    client = AsyncMock()
+    client.trace_to.side_effect = slow_trace
+    done = asyncio.Event()
+    collected = []
+
+    def _collect(s):
+        collected.append(s)
+        if len(collected) >= 2:
+            done.set()
+
+    mon = TraceMonitor(client=client, on_sample=_collect,
+                       on_persist=AsyncMock(),
+                       interval_min_s=1, interval_max_s=60)
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    await mon.start("ab" * 32, interval_s=1)
+    await asyncio.wait_for(done.wait(), timeout=5.0)
+    elapsed = loop.time() - t0
+    await mon.stop()
+    # Unfixed behaviour (sleep AFTER the tick) would need >= 2.6s.
+    assert elapsed < 2.3, f"second sample took {elapsed:.2f}s — cadence drifts"
+
+
+@pytest.mark.asyncio
 async def test_start_different_pubkey_without_force_raises():
     client = AsyncMock()
     client.trace_to.return_value = _make_result([-3])

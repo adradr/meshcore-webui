@@ -29,7 +29,7 @@ def build_flat_with_spike(
 ) -> list[ProfileSample]:
     """Flat sea with one spike of `spike_m` at the sample nearest at_frac of the path."""
     samples = build_flat(d_total, h_tx, h_rx, n)
-    idx = int(round(at_frac * (n - 1)))
+    idx = round(at_frac * (n - 1))
     samples[idx] = ProfileSample(distance_m=samples[idx].distance_m, ground_m=spike_m)
     return samples
 

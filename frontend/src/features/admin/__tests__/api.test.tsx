@@ -165,6 +165,44 @@ describe("useReset", () => {
     expect(removeSpy).toHaveBeenCalled()
     expect(invalidateSpy).toHaveBeenCalled()
   })
+
+  it("awaits cancelQueries before evicting caches (no stale re-seed race)", async () => {
+    const response: ResetResult = {
+      local: {
+        messages: 0, diagnostic_runs: null, rx_log: null,
+        mutes: null, settings: null, push_subscribers: null,
+        trace_samples: null,
+      },
+      device: {
+        cleared_channels: null, coords_reset: false,
+        removed_contacts: null, rebooted: false, reconnected: false,
+      },
+    }
+    ;(api.post as ReturnType<typeof vi.fn>).mockResolvedValueOnce(response)
+
+    const qc = makeClient()
+    let resolveCancel: () => void = () => {}
+    const cancelSpy = vi
+      .spyOn(qc, "cancelQueries")
+      .mockImplementation(
+        () => new Promise<void>((resolve) => { resolveCancel = resolve }),
+      )
+    const removeSpy = vi.spyOn(qc, "removeQueries")
+
+    const { result } = renderHook(() => useReset(), {
+      wrapper: makeWrapper(qc),
+    })
+    result.current.mutate({ local: { messages: true }, confirm: "RESET" })
+
+    // cancelQueries fires, but evictions must NOT happen until it settles —
+    // otherwise an in-flight pre-reset fetch can re-seed the cache after
+    // removeQueries ran.
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalled())
+    expect(removeSpy).not.toHaveBeenCalled()
+
+    resolveCancel()
+    await waitFor(() => expect(removeSpy).toHaveBeenCalled())
+  })
 })
 
 describe("useReset — haptic wiring", () => {

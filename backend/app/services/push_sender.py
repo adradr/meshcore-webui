@@ -1,9 +1,10 @@
 from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from py_vapid import Vapid01
 from pywebpush import WebPushException, webpush_async
@@ -34,7 +35,8 @@ class Notification:
         if size <= MAX_PAYLOAD_BYTES:
             return raw
         overflow = size - MAX_PAYLOAD_BYTES + 16  # safety margin
-        new_body_bytes = self.body.encode("utf-8")[: max(0, len(self.body.encode("utf-8")) - overflow)]
+        encoded_body = self.body.encode("utf-8")
+        new_body_bytes = encoded_body[: max(0, len(encoded_body) - overflow)]
         new_body = new_body_bytes.decode("utf-8", "ignore") + "…"
         return json.dumps(
             {"title": self.title, "body": new_body, "tag": self.tag, "url": self.url},
@@ -71,12 +73,18 @@ class PushSender:
                 async with self._db_lock:
                     await db.execute(
                         update(PushSubscription).where(PushSubscription.id == sub.id)
-                        .values(last_used_at=datetime.now(timezone.utc))
+                        .values(last_used_at=datetime.now(UTC))
                     )
                     await db.commit()
                 return True
             except WebPushException as ex:
-                code = ex.response.status_code if ex.response is not None else None
+                # pywebpush's async path attaches an aiohttp.ClientResponse,
+                # which exposes `.status` (NOT `.status_code`). Tolerate both
+                # shapes plus response=None (non-HTTP failures).
+                code = (
+                    getattr(ex.response, "status", None)
+                    or getattr(ex.response, "status_code", None)
+                ) if ex.response is not None else None
                 if code in (404, 410):
                     async with self._db_lock:
                         await db.execute(
@@ -89,6 +97,14 @@ class PushSender:
                 if code == 429 and attempt < len(RETRY_BACKOFFS):
                     continue
                 log.exception("Push failed (code=%s) for %s", code, sub.endpoint)
+                return False
+            except Exception:
+                # Network-level failures (aiohttp.ClientError, TimeoutError,
+                # OSError, ...) from the raw ClientSession pywebpush opens.
+                # Must not propagate: fan_out gathers without
+                # return_exceptions, so one flaky subscriber would otherwise
+                # abort delivery to everyone else.
+                log.exception("Push transport error for %s", sub.endpoint)
                 return False
         return False
 

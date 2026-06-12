@@ -2,7 +2,19 @@ import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { ArrowUpRight, CheckCheck, Loader2, MessagesSquare, Star, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { QueryErrorState } from "@/components/query-error-state"
 import { Card, CardContent } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { notifyError } from "@/lib/notify"
@@ -49,10 +61,7 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
   const showDirIcon = thread.last_direction === "out"
   const del = useDeleteConversation()
 
-  const onDelete = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (!window.confirm(`Delete all messages in "${title}"?`)) return
+  const onDelete = () => {
     del.mutate(
       isChannel
         ? { channelIdx: thread.channel_idx ?? undefined }
@@ -65,10 +74,14 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
     )
   }
 
+  // The delete button is a SIBLING of the Link (absolutely positioned over
+  // the card), not a descendant — nested interactive controls are an a11y
+  // violation and made iOS taps ambiguous between navigate and delete.
   return (
-    <Link to={href} className="block focus:outline-none">
-      <Card size="sm" className="transition-colors hover:bg-muted/50">
-        <CardContent className="flex items-center gap-3">
+    <div className="relative">
+      <Link to={href} className="block focus:outline-none">
+        <Card size="sm" className="transition-colors hover:bg-muted/50">
+          <CardContent className="flex items-center gap-3 pr-12">
           {isChannel ? (
             <ChannelAvatar
               idx={thread.channel_idx ?? -1}
@@ -130,19 +143,38 @@ function ThreadRow({ thread, title, href, pubkey, isStarred, isFailed }: ThreadR
               )}
             </div>
           </div>
+        </CardContent>
+        </Card>
+      </Link>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-            onClick={onDelete}
+            className="absolute right-1.5 top-1/2 h-9 w-9 -translate-y-1/2 text-muted-foreground hover:text-destructive"
             disabled={del.isPending}
             aria-label="Delete conversation"
           >
-            <Trash2 className="h-3.5 w-3.5" />
+            <Trash2 className="h-4 w-4" />
           </Button>
-        </CardContent>
-      </Card>
-    </Link>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all messages in “{title}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the conversation history stored in this web app. It
+              cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={onDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   )
 }
 
@@ -288,10 +320,11 @@ export function ThreadsList() {
     return (
       <div>
         <ThreadsHeader />
-        <div className="p-4 text-sm text-destructive">
-          Failed to load threads:{" "}
-          {threads.error instanceof Error ? threads.error.message : "unknown error"}
-        </div>
+        <QueryErrorState
+          title="Failed to load threads"
+          error={threads.error}
+          onRetry={() => void threads.refetch?.()}
+        />
       </div>
     )
   }

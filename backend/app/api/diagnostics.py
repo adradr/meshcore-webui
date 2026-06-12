@@ -25,7 +25,7 @@ honest signal: "healthy" only when every local probe responded,
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
@@ -115,7 +115,7 @@ async def diagnose_link(
     log.info("Diagnostic requested by UI for target pubkey=%s", pubkey_norm)
 
     orch = DiagnosticOrchestrator(client)
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     steps: list[StepResult] = []
 
     async for step in orch.run_local_only():
@@ -131,7 +131,7 @@ async def diagnose_link(
         )
         await client.broadcast_wire_event(wire_event)
 
-    finished = datetime.now(timezone.utc)
+    finished = datetime.now(UTC)
     verdict, verdict_detail = _placeholder_verdict(steps)
 
     report = DiagnosticReport(

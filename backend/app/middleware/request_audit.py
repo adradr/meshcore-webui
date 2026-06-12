@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import hashlib
 import logging
 import re
@@ -11,7 +12,6 @@ from starlette.responses import Response
 
 from app.core.client_ip import resolve_client_ip
 from app.core.config import settings
-
 
 audit = logging.getLogger("app.audit")
 

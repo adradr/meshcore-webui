@@ -1,5 +1,6 @@
 import pytest
 from sqlalchemy import select
+
 from app.db.models import Base, PushSubscription, RxLogEntry
 
 
@@ -79,8 +80,9 @@ async def test_rx_log_entry_nullable_fields(engine, db):
 
 @pytest.mark.asyncio
 async def test_attachment_model_roundtrip(session_factory):
-    from app.db.models import Attachment
     import datetime as dt
+
+    from app.db.models import Attachment
     Session = session_factory
     async with Session() as s:
         a = Attachment(

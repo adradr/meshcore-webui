@@ -88,6 +88,7 @@ export function RadioConfigCard() {
   // ONLY when the user hasn't already explicitly chosen a region.
   useEffect(() => {
     if (matchedPreset && region === null) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRegion(matchedPreset.region)
     }
   }, [matchedPreset, region])

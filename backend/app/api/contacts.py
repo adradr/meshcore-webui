@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
@@ -57,15 +58,15 @@ async def _call(coro):
     try:
         return await coro
     except ConnectionError as e:
-        raise HTTPException(503, str(e))
+        raise HTTPException(503, str(e)) from e
     except TimeoutError as e:
-        raise HTTPException(504, str(e))
+        raise HTTPException(504, str(e)) from e
     except RuntimeError as e:
         msg = str(e)
         lower = msg.lower()
         if "no reply" in lower or "timed out" in lower:
-            raise HTTPException(504, msg)
-        raise HTTPException(502, msg)
+            raise HTTPException(504, msg) from e
+        raise HTTPException(502, msg) from e
 
 
 @router.get("")
