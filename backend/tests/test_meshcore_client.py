@@ -1225,29 +1225,23 @@ class TestDevicePartialReset:
         fake_mc.commands.send_appstart.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_clear_contacts_only(self):
+    async def test_clear_contacts_all_succeed(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
         fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
+        # Real lib: OK does NOT pop from mc.contacts — production code pops.
         fake_mc.commands.remove_contact = AsyncMock(
             return_value=MagicMock(type=EventType.OK),
         )
         fake_mc.commands.set_channel = AsyncMock()
         fake_mc.commands.set_coords = AsyncMock()
         fake_mc.commands.send_appstart = AsyncMock()
-        # Simulate the lib's CONTACT_DELETED handler — after the sweep,
-        # ensure_contacts re-syncs and the dict is empty.
-        async def _resync(**_kw) -> None:
-            fake_mc.contacts = {}
-        fake_mc.ensure_contacts = AsyncMock(side_effect=_resync)
         client._mc = fake_mc
 
         result = await client.device_partial_reset(
             clear_channels=False, reset_coords=False, clear_contacts=True,
         )
 
-        # removed is computed from before/after delta — 3 starting, 0 after
-        # the post-sweep ensure_contacts re-sync.
         assert result == {
             "cleared_channels": None,
             "coords_reset": False,
@@ -1259,11 +1253,82 @@ class TestDevicePartialReset:
             c.args[0] for c in fake_mc.commands.remove_contact.await_args_list
         )
         assert called_keys == ["k1", "k2", "k3"]
+        assert fake_mc.contacts == {}
         fake_mc.commands.set_channel.assert_not_awaited()
         fake_mc.commands.set_coords.assert_not_awaited()
-        # appstart should NOT fire — contacts-only doesn't change self_info.
         fake_mc.commands.send_appstart.assert_not_awaited()
-        fake_mc.ensure_contacts.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_retries_transient_failure(self):
+        """A None/ERROR on round 1 is retried; the straggler clears on a
+        later round and still counts as removed."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
+        ok = MagicMock(type=EventType.OK)
+        # round 1: k1 OK, k2 timeout(None), k3 OK; round 2: k2 OK.
+        fake_mc.commands.remove_contact = AsyncMock(
+            side_effect=[ok, None, ok, ok],
+        )
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result["removed_contacts"] == 3
+        assert fake_mc.commands.remove_contact.await_count == 4
+        assert fake_mc.contacts == {}
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_not_found_counts_as_removed(self):
+        """ERR_CODE_NOT_FOUND (2) means the contact is already gone on the
+        device (a prior round's OK was lost) — treat it as removed."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {"k1": {}, "k2": {}}
+        ok = MagicMock(type=EventType.OK)
+        not_found = MagicMock(type=EventType.ERROR)
+        not_found.payload = {"error_code": 2, "code_string": "ERR_CODE_NOT_FOUND"}
+        fake_mc.commands.remove_contact = AsyncMock(side_effect=[ok, not_found])
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result["removed_contacts"] == 2
+        assert fake_mc.contacts == {}
+
+    @pytest.mark.asyncio
+    async def test_clear_contacts_persistent_failure_counts_survivors(self):
+        """A contact that keeps returning a hard error (not NOT_FOUND)
+        survives every round; the count reflects only what was removed."""
+        client = MeshCoreClient(host="x", port=0)
+        fake_mc = MagicMock(is_connected=True)
+        fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
+        ok = MagicMock(type=EventType.OK)
+
+        def _remove(key):
+            if key == "k2":
+                err = MagicMock(type=EventType.ERROR)
+                err.payload = {"error_code": 4, "code_string": "ERR_CODE_BAD_STATE"}
+                return err
+            return ok
+        fake_mc.commands.remove_contact = AsyncMock(side_effect=lambda k: _remove(k))
+        client._mc = fake_mc
+
+        result = await client.device_partial_reset(
+            clear_channels=False, reset_coords=False, clear_contacts=True,
+        )
+
+        assert result["removed_contacts"] == 2
+        assert fake_mc.contacts == {"k2": {}}
+        # k1,k3 each removed once (round 1); k2 retried every round.
+        assert (
+            fake_mc.commands.remove_contact.await_count
+            == 2 + client._CLEAR_CONTACTS_ROUNDS
+        )
 
     @pytest.mark.asyncio
     async def test_all_three_flags(self):
@@ -1287,9 +1352,6 @@ class TestDevicePartialReset:
             return_value=MagicMock(type=EventType.OK),
         )
         fake_mc.commands.send_appstart = AsyncMock()
-        async def _resync(**_kw) -> None:
-            fake_mc.contacts = {}
-        fake_mc.ensure_contacts = AsyncMock(side_effect=_resync)
         client._mc = fake_mc
 
         result = await client.device_partial_reset(
@@ -1369,38 +1431,11 @@ class TestDevicePartialReset:
             )
 
     @pytest.mark.asyncio
-    async def test_clear_contacts_tolerates_partial_failure(self):
-        """A single remove_contact failure must not abort the whole sweep —
-        we log + continue, and the size diff still reflects what the
-        device actually removed."""
-        client = MeshCoreClient(host="x", port=0)
-        fake_mc = MagicMock(is_connected=True)
-        fake_mc.contacts = {"k1": {}, "k2": {}, "k3": {}}
-        fake_mc.commands.remove_contact = AsyncMock(side_effect=[
-            MagicMock(type=EventType.OK),
-            MagicMock(type=EventType.ERROR),
-            MagicMock(type=EventType.OK),
-        ])
-        # Simulate: 2 of 3 were actually removed (the failure leaves k2).
-        async def _resync(**_kw) -> None:
-            fake_mc.contacts = {"k2": {}}
-        fake_mc.ensure_contacts = AsyncMock(side_effect=_resync)
-        client._mc = fake_mc
-
-        result = await client.device_partial_reset(
-            clear_channels=False, reset_coords=False, clear_contacts=True,
-        )
-
-        assert result["removed_contacts"] == 2
-        assert fake_mc.commands.remove_contact.await_count == 3
-
-    @pytest.mark.asyncio
     async def test_clear_contacts_empty_when_no_contacts(self):
         client = MeshCoreClient(host="x", port=0)
         fake_mc = MagicMock(is_connected=True)
         fake_mc.contacts = {}
         fake_mc.commands.remove_contact = AsyncMock()
-        fake_mc.ensure_contacts = AsyncMock()
         client._mc = fake_mc
 
         result = await client.device_partial_reset(

@@ -19,6 +19,7 @@ import { canUsePush, subscribeToPush, unsubscribeFromPush } from "@/pwa/push"
 import { useHaptic } from "@/haptics/HapticProvider"
 import { MutedList } from "@/features/mutes/MutedList"
 import { PushModeRadio } from "@/features/push/PushModeRadio"
+import { NewContactNotifyToggle } from "@/features/push/NewContactNotifyToggle"
 import { AttachmentsManager } from "@/features/admin/AttachmentsManager"
 import { DangerZone } from "@/features/admin/DangerZone"
 
@@ -199,6 +200,13 @@ export function SettingsPage() {
               Push filter
             </h4>
             <PushModeRadio />
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              New contacts
+            </h4>
+            <NewContactNotifyToggle />
           </div>
 
           <div className="space-y-2">

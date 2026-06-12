@@ -10,6 +10,7 @@ from app.db.models import Message
 from app.db.session import SessionLocal
 from app.services.meshcore_client import WireEvent
 from app.services.mute import is_muted
+from app.services.new_contact_notify import get_new_contact_notify
 from app.services.push_mode import get_mode, is_mention
 from app.services.push_sender import Notification, PushSender
 from app.services.task_pool import TaskPool
@@ -89,6 +90,12 @@ class MeshCoreBridge:
             self._pool.spawn(
                 self._handle_ack(event.payload or {}),
                 name=f"ack-handler-{code}",
+            )
+        elif event.type == "new_contact":
+            pubkey = ((event.payload or {}).get("public_key") or "unknown")[:8]
+            self._pool.spawn(
+                self._handle_new_contact(event.payload or {}),
+                name=f"new-contact-handler-{pubkey}",
             )
 
     @staticmethod
@@ -212,6 +219,27 @@ class MeshCoreBridge:
             )
             await db.commit()
             log.info("ACK %s → message id=%d marked acked", code, row.id)
+
+    async def _handle_new_contact(self, payload: dict) -> None:
+        # Opt-in, default-off: a device with manual_add_contacts off fires a
+        # NEW_CONTACT per auto-discovered node (a full mesh relearn can emit
+        # hundreds), so this stays silent unless the operator turned it on.
+        async with SessionLocal() as db:
+            if not await get_new_contact_notify(db):
+                return
+            mode = await get_mode(db)
+        # Global "mute" silences new-contact pushes too.
+        if mode == "mute":
+            return
+        name = (payload.get("adv_name") or "").strip()
+        pubkey = payload.get("public_key") or ""
+        label = name or (pubkey[:8] if pubkey else "unknown")
+        await self._notify(Notification(
+            title="New contact discovered",
+            body=label,
+            tag=f"meshcore:newcontact:{pubkey[:12]}",
+            url="/contacts",
+        ))
 
     async def _notify(self, notification: Notification) -> None:
         async with SessionLocal() as db:
