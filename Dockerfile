@@ -17,7 +17,7 @@ RUN pnpm build
 # ---------- Stage 2: python runtime ----------
 # Python 3.12 matches CI (`uv python install 3.12`) and pyproject — the
 # test suite must exercise the same interpreter that ships to production.
-FROM python:3.12-slim@sha256:a39549e211a16149edf74e5fdc9ef03a6767e46cd987c5048b6659b6c9904c94 AS runtime
+FROM python:3.14-slim@sha256:44dd04494ee8f3b538294360e7c4b3acb87c8268e4d0a4828a6500b1eff50061 AS runtime
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
